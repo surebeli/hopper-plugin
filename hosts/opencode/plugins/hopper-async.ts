@@ -72,7 +72,9 @@ function writeFrontmatter(path: string, fm: Record<string, any>): void {
     lines.push(`${k}: ${emitted}`);
   }
   const out = `---\n${lines.join('\n')}\n---\n${_body}`;
-  const tmp = path + '.tmp';
+  // Per codex Phase 5 audit P1 #4: unique tmp filename per writer to prevent
+  // concurrent clobber. Mirrors cli/src/background.js semantics.
+  const tmp = `${path}.tmp.${process.pid}.${Date.now()}`;
   writeFileSync(tmp, out, 'utf-8');
   renameSync(tmp, path);
 }
@@ -111,14 +113,15 @@ export default async function hopperAsync(ctx: PluginContext) {
         throw new Error(`hopper_dispatch: task-id "${taskId}" contains '..' (path traversal)`);
       }
 
-      // Per codex Phase 5 audit P1 #3: validate hopperDir override too.
-      // Disallow paths containing '..' or that resolve outside the project root.
+      // Per codex Phase 5 audit P1 #3: validate hopperDir override.
+      // Defensive whitelist: reject '..' and require path to end with '.hopper'
+      // (no full realpath-containment check since the plugin may run in a
+      // different working dir than the project root — code-inspection only).
       let taskHopperDir = args.hopperDir || hopperDir;
       if (args.hopperDir) {
         if (args.hopperDir.includes('..')) {
           throw new Error(`hopper_dispatch: hopperDir argument "${args.hopperDir}" contains '..'`);
         }
-        // Must be absolute OR end with '.hopper' to prevent arbitrary writes
         if (!args.hopperDir.endsWith('.hopper') && !args.hopperDir.endsWith('.hopper/')) {
           throw new Error(`hopper_dispatch: hopperDir argument must end with '.hopper'`);
         }
