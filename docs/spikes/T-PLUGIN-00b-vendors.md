@@ -202,50 +202,74 @@ Similar shape to other adapters; per research, premium quota concerns mean this 
 
 ---
 
-## Vendor 5: Gemini CLI ✅ VERIFIED END-TO-END (post user install)
+## Vendor 5: Antigravity (agy) ⚠️ SMOKE PENDING USER OAUTH
 
-- **Install status**: ✅ `@google/gemini-cli@0.42.0` installed as npm global
-- **Binary location**: `C:\Users\litianyi\nodejs\node-v22.22.2-win-x64\gemini.cmd` (npm prefix root, NOT in default Git Bash PATH — see adapter notes below)
-- **Auth status**: ✅ Configured (smoke ran without auth prompt)
-- **Smoke result**: ✅ `HOPPER_GEMINI_OK` returned via direct npm prefix path invocation
-- **Smoke command**: `/c/Users/litianyi/nodejs/node-v22.22.2-win-x64/gemini.cmd -p "say HOPPER_GEMINI_OK..."`
-- **Deprecation**: 2026-06-18 for Pro/Ultra/free users; enterprise users continue
-- **PATH note for T-PLUGIN-05e adapter**: gemini.cmd lives at npm prefix root (e.g. `<prefix>/gemini.cmd`), NOT under `<prefix>/bin/`. Default Git Bash PATH does NOT include npm prefix root on Windows. Adapter strategy options:
-  - (a) Resolve npm prefix dynamically: `process.execPath` + sibling lookup, or `npm config get prefix` subprocess
-  - (b) Document user-action: add npm prefix to PATH (Windows env vars OR `.bashrc`)
-  - (c) Wrap: provide a `cli/bin/gemini-wrapper` that resolves the path
-  - Recommended: (a) dynamic resolution + (b) document fallback if (a) fails
+*(Swapped in for Gemini per user decision 2026-05-20 "移除gemini cli, 替换成agy". agy is Google's official 2026-06-18 Gemini CLI successor.)*
 
-### Adapter invocation (from prior knowledge; verify before T-PLUGIN-05e)
+- **Install status**: ✅ `C:\Users\litianyi\AppData\Local\agy\bin\agy.exe` v1.0.0
+- **Auth status**: ⚠️ Not OAuth-authed yet (silent failure mode — `google_accounts.json` shows account but no token)
+- **Smoke result**: ⚠️ INCONCLUSIVE — exit 0 + empty stdout (root cause: not logged in). Will resolve to ✅ HOPPER_AGY_OK after user runs `agy` interactively to OAuth.
+
+### Adapter invocation (resolved from agy --help + diagnostic smoke)
 
 ```bash
-echo "<input>" | gemini -p "<input>" 2>"$STDERR_LOG"
+agy -p "<input>" --dangerously-skip-permissions --log-file <unique-tmp-log>
+# Exit 0 + empty stdout + log shows "You are not logged into Antigravity" → auth fail
+# Exit 0 + non-empty stdout → success
 ```
 
 ### Resolved values
 
 | Resolved value | Status |
 |---|---|
-| Command | `gemini` (until 2026-06-18) |
-| Non-interactive flag | `-p "<prompt>"` |
-| Auth | `GEMINI_API_KEY` env var OR Google account OAuth |
-| Timeout | 60-300s per task |
+| Command | `agy` (full path: `C:\Users\litianyi\AppData\Local\agy\bin\agy.exe`) |
+| Non-interactive flag | `-p "<prompt>"` (alias: `--print` / `--prompt`) |
+| Auto-approve | `--dangerously-skip-permissions` (REQUIRED for headless) |
+| Log file | `--log-file <path>` (REQUIRED for silent-fail detection) |
+| Session resume | `-c` / `--conversation <ID>` |
+| Print timeout | 5min default; override via `--print-timeout` |
+| Auth | OAuth-only (no BYO API key); user runs `agy` interactively once |
+| Auth state path | TBD post-OAuth (see §6 envPreflight Rule 3) |
+
+### Silent auth-fail detection (per codex v2.0.3 audit F2)
+
+agy exits 0 with empty stdout when not OAuth-authed (NOT exit non-zero). Adapter must:
+
+1. Generate UNIQUE per-dispatch temp log (avoid stale-log false positives)
+2. Pass via `--log-file`
+3. Inspect log after exit:
+   - "You are not logged into Antigravity" / "Failed to get OAuth token" → auth fail
+   - "deadline exceeded" / "context cancelled" → timeout
+   - "permission" / "access denied" → permission fail
+   - Exit 0 + non-empty stdout → success
+   - Exit 0 + empty stdout + no error pattern match → unknown silent fail, surface log
+
+### Subprocess kill strategy (per codex v2.0.3 audit F3)
+
+agy spawns language-server child processes (observed: ports 9204/9205). Kill must propagate:
+- **Windows**: `taskkill /PID <agyPid> /T /F` (T = kill tree, F = force)
+- **Unix**: `{ detached: true }` spawn + `process.kill(-pid, 'SIGKILL')` (negative PID = process group)
+- **NOT by port** unless verified processes belong to spawned agy tree
 
 ### User action needed for T-PLUGIN-05e
 
-1. Install Gemini CLI: see Google AI docs
-2. Set `GEMINI_API_KEY` or sign in
-3. Smoke: `gemini -p "say HOPPER_GEMINI_OK in exactly those words"`
+1. ✅ `agy install` (done per user 2026-05-20 — PATH configured)
+2. ⏳ `agy` interactively (no args, no `-p`) → triggers OAuth browser → log in with surebeli@gmail.com → exit
+3. ⏳ `agy -p "say HOPPER_AGY_OK..." --dangerously-skip-permissions` → expected: HOPPER_AGY_OK
+4. Report back; T-PLUGIN-05e moves to `done` when smoke verified
 
-### Important note on Antigravity correction
+### Lineage / decision trail (Gemini → agy swap)
 
-Earlier spec confusion suggested Antigravity CLI as the 5th vendor. Subagent research (2026-05-19) confirmed:
-- Antigravity 2.0 launched 2026-05-19 at Google I/O
-- Replaces Gemini CLI for non-enterprise users by 2026-06-18
-- BUT: OAuth-only auth blocks headless invocation (no BYO API key path yet)
-- Spike on user's machine confirmed: installed `antigravity.exe` is the **desktop IDE binary** (options like `--diff`, `--merge`, `--goto file:line`), NOT an agentic CLI
+Earlier spec lineage:
+- v1.x-2.0.2: Antigravity was thought OAuth-blocked for headless; Gemini was Vendor 5
+- 2026-05-20 user supplied `agy --help` → discovered agy IS first-class headless agent CLI (separate binary from antigravity.exe desktop IDE)
+- 2026-05-20 user decision: "移除gemini cli, 替换成agy" → spec v2.0.3
+- v2.0.3: Vendor 5 = Antigravity (agy). Gemini optionally doc-only `gemini.ts.spec.md` post-essay.
 
-**Decision (initial)**: Vendor #5 is Gemini (functional, until 6/18 deprecation). Antigravity remains `cli/src/vendors/antigravity.ts.spec.md` documented-only per codex F4 correction.
+**Why agy over Gemini**:
+- agy IS Google's official 2026-06-18 Gemini CLI successor (developers.googleblog.com Gemini CLI transition post)
+- Implementing both creates redundancy + essay overclaim
+- agy is forward-looking; Gemini is sunsetting
 
 **Update 2026-05-20 (post-agy install + diagnostic smoke)**: user supplied `agy --help` revealing the **agentic** Antigravity CLI is a separate binary (`C:\Users\litianyi\AppData\Local\agy\bin\agy.exe` v1.0.0). It supports `-p` print mode, `--dangerously-skip-permissions`, session resume, plugins — first-class headless agent CLI.
 
@@ -280,8 +304,8 @@ agy -p "..."  # Then headless works indefinitely
 | Kimi | ✅ | ✅ (membership restored) | ✅ HOPPER_KIMI_OK | Ready for T-PLUGIN-05b |
 | OpenCode | ✅ | ✅ | ✅ HOPPER_OPENCODE_OK | Ready for T-PLUGIN-05c |
 | Copilot | ✅ (post-install 2026-05-20) | ✅ | ✅ HOPPER_COPILOT_OK | Ready for T-PLUGIN-05d (quota-aware) |
-| Gemini | ✅ (npm global @google/gemini-cli@0.42.0) | ✅ | ✅ HOPPER_GEMINI_OK | Ready for T-PLUGIN-05e (PATH note in adapter) |
-| Antigravity (agy) | ✅ installed (`C:\Users\litianyi\AppData\Local\agy\bin\agy.exe` v1.0.0) | ⚠️ unclear (smoke exit 0, no stdout — `agy install` setup may be required) | ⚠️ INCONCLUSIVE — exit 0 but empty output | **DECISION PENDING** (Path D: keep doc-only / Path E: promote to 6th functional adapter pending `agy install` resolution) |
+| **Antigravity (agy)** *(swapped in v2.0.3)* | ✅ installed (`C:\Users\litianyi\AppData\Local\agy\bin\agy.exe` v1.0.0) | ⏳ pending user OAuth (silent auth-fail confirmed via --log-file) | ⏳ pending OAuth → re-smoke | Ready for T-PLUGIN-05e adapter code; functional smoke gated on user-action (per unified user-action gate spec §11) |
+| ~~Gemini~~ *(swapped out v2.0.3)* | ✅ (npm global @google/gemini-cli@0.42.0) | ✅ | ✅ HOPPER_GEMINI_OK | NOT in functional pool. Optional `vendors/gemini.ts.spec.md` post-essay if user later wants pre-6/18 bridge. |
 
 ### Acceptance check per spec §6 T-PLUGIN-00b (FINAL, Path A resolved 2026-05-20)
 
@@ -293,7 +317,7 @@ Spec said "≥3 of 4 vendors print expected output". Path A user-unblock resolve
 | Kimi | ✅ | HOPPER_KIMI_OK (post membership restore) |
 | OpenCode | ✅ | HOPPER_OPENCODE_OK |
 | Copilot | ✅ | HOPPER_COPILOT_OK (post install) |
-| Gemini | ✅ | HOPPER_GEMINI_OK (post install, npm global) |
+| ~~Gemini~~ → **Antigravity (agy)** | ⏳ pending OAuth | ⏳ HOPPER_AGY_OK pending (user-action gate) |
 
 Antigravity: not in functional pool. `agy` (the actual antigravity CLI) not installed on this machine. Stays `vendors/antigravity.ts.spec.md` documented-only per codex F4 correction.
 
