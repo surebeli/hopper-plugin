@@ -8,7 +8,7 @@
 - **Async dispatch (spec v2.1.0 §14, added 2026-05-21)**: `--background` opt-in keeps caller session responsive for long-running tasks. Native-preferred paths: Claude Code via Bash run_in_background + Monitor; OpenCode via bundled plugin + `prompt_async`. Codex CLI / Kimi / Copilot / Agy use the `hopper-runner` detached fallback. State in `output.md` frontmatter.
 - **Vendors (5 registered)**: codex, kimi, opencode, copilot, agy. **4 live-smoke-verified**; agy code-complete with live OAuth-gated smoke pending (T-PLUGIN-05e). Spec required ≥3 live-smoked; demo exceeds with 4.
 - **PASS materials**: see `docs/release/PASS-RATIONALE.md` (5 hard criteria self-assessment) + `docs/release/INSTALL-MATRIX.md` (install patterns) + `scripts/cross-host-verify.sh` (structural equivalence proof — all PASS).
-- **Test suite**: 207/216 passing (9 Windows skips by design). **10 codex audit cycles** cleared (8 phase audits + T-10 Critic + 1 final strict).
+- **Test suite**: 270/285 passing (15 Windows skips by design). **12 codex audit cycles** cleared (8 phase + T-10 Critic + final strict + flags audit + Phase 5 audit).
 - **Open user-action gates (do not block code/test-based verdict; required for live release)**: T-PLUGIN-00 Prong 1 (Claude Code plugin install + `/hopper:smoke`), T-PLUGIN-05e (agy interactive OAuth + post-OAuth smoke).
 - **Deferred**: T-PLUGIN-09 screencast — defer per user directive 2026-05-20.
 
@@ -46,7 +46,7 @@ hopper-plugin/                  ← repo root = plugin install root
 │   ├── claude-code/README.md   ← Tier B documentation
 │   ├── codex-cli/bin/hopper-codex   ← Tier C #1 wrapper
 │   └── opencode/bin/hopper-opencode ← Tier C #2 wrapper
-├── tests/                      ← unit + integration tests (207/216 passing)
+├── tests/                      ← unit + integration tests (270/285 passing)
 ├── docs/                       ← spec, spikes, audit trail
 └── .hopper/                    ← THIS repo's own dogfood protocol state
 ```

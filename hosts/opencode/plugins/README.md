@@ -13,7 +13,7 @@ Result lands in `.hopper/handoffs/<task-id>-output.md` per spec §14 frontmatter
 ## When to use
 
 - **Use this plugin** when invoking hopper-dispatch from inside an OpenCode session (`opencode` TUI / `opencode run`) and you want the OpenCode session to NOT block while the dispatched task runs.
-- **Use `hopper-opencode --background`** (the wrapper CLI) when running from outside any OpenCode session — the wrapper handles the dispatcher fallback path.
+- **Use `hopper-opencode --background <task-id>`** (the wrapper CLI) when running from outside any OpenCode session — the wrapper forwards `--background` to the inner `hopper-dispatch`, which uses the `hopper-runner` detached fallback path.
 
 The plugin path is **spec §14.4 constraint #4 native-preferred**; the wrapper path is the fallback. Per the design, both write to the same output.md frontmatter schema, so consumers can ignore which path produced the result.
 

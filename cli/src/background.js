@@ -15,9 +15,9 @@
 import { spawn } from 'node:child_process';
 import {
   openSync, closeSync, existsSync, renameSync,
-  readFileSync, writeFileSync, statSync, readdirSync,
+  readFileSync, writeFileSync, statSync, readdirSync, lstatSync, realpathSync,
 } from 'node:fs';
-import { resolve, dirname, basename, join } from 'node:path';
+import { resolve, dirname, basename, join, sep } from 'node:path';
 import { validateTaskId } from './validation.js';
 
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/;
@@ -81,8 +81,12 @@ function emitScalar(v) {
 }
 
 /**
- * Write frontmatter back atomically via tmp-file + rename. Preserves _body
- * verbatim. Drops keys whose values are undefined.
+ * Write frontmatter back atomically via unique tmp-file + rename. Preserves
+ * _body verbatim. Drops keys whose values are undefined.
+ *
+ * Per codex Phase 5 audit P1 #4: previously used `path + '.tmp'` which
+ * allowed concurrent writers to clobber each other's tmp file. Now uses
+ * `path + '.tmp.<pid>.<ts>'` for per-writer isolation.
  *
  * @param {string} path
  * @param {object} fm
@@ -95,9 +99,48 @@ export function writeFrontmatter(path, fm) {
     lines.push(`${k}: ${emitScalar(v)}`);
   }
   const out = `---\n${lines.join('\n')}\n---\n${_body}`;
-  const tmp = path + '.tmp';
+  const tmp = `${path}.tmp.${process.pid}.${Date.now()}`;
   writeFileSync(tmp, out, 'utf-8');
   renameSync(tmp, path);
+}
+
+/**
+ * Per codex Phase 5 audit P1 #3: enforce that a path lives under .hopper/handoffs/
+ * AND is not a symlink escape. Mirrors output.js logic.
+ *
+ * @param {string} path           target file path (e.g. handoffs/T-X-output.md)
+ * @param {string} hopperDir
+ */
+function assertPathSafe(path, hopperDir) {
+  const handoffDir = join(hopperDir, 'handoffs');
+  const resolvedPath = resolve(path);
+  const resolvedHandoffs = resolve(handoffDir);
+  if (!resolvedPath.startsWith(resolvedHandoffs + sep) && resolvedPath !== resolvedHandoffs) {
+    throw new Error(`Path "${resolvedPath}" escapes handoffs/ — refusing.`);
+  }
+  // If file exists already, check it's not a symlink
+  if (existsSync(path)) {
+    try {
+      const st = lstatSync(path);
+      if (st.isSymbolicLink()) {
+        throw new Error(`Path "${path}" is a symlink — refusing to follow.`);
+      }
+    } catch (err) {
+      if (err.code !== 'ENOENT') throw err;
+    }
+  }
+  // realpath of parent handoffs/ should stay inside hopperDir
+  if (existsSync(handoffDir)) {
+    try {
+      const realHandoffs = realpathSync(handoffDir);
+      const realHopper = realpathSync(hopperDir);
+      if (!realHandoffs.startsWith(realHopper + sep) && realHandoffs !== realHopper) {
+        throw new Error(`handoffs/ real path "${realHandoffs}" escapes hopperDir.`);
+      }
+    } catch (err) {
+      if (err.code !== 'ENOENT') throw err;
+    }
+  }
 }
 
 /**
@@ -201,6 +244,10 @@ export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, run
   const handoffDir = join(hopperDir, 'handoffs');
   const outputMdPath = join(handoffDir, `${taskId}-output.md`);
   const logPath = outputMdPath.replace(/\.md$/, '.log');
+
+  // Per codex Phase 5 audit P1 #3: enforce path safety BEFORE preflight write.
+  assertPathSafe(outputMdPath, hopperDir);
+  assertPathSafe(logPath, hopperDir);
 
   const pf = preflightDispatch(outputMdPath);
   if (!pf.ok) {

@@ -478,6 +478,13 @@ function runReap(hopperDir) {
 }
 
 async function runWatch(hopperDir, taskId) {
+  // Per codex Phase 5 audit P1 #3: validate task-id BEFORE constructing path
+  try {
+    validateTaskId(taskId);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(2);
+  }
   const outputMdPath = join(hopperDir, 'handoffs', `${taskId}-output.md`);
   if (!existsSync(outputMdPath)) {
     console.error(`Error: no output file at ${outputMdPath}. Has this task been dispatched?`);

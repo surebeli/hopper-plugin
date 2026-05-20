@@ -111,7 +111,18 @@ export default async function hopperAsync(ctx: PluginContext) {
         throw new Error(`hopper_dispatch: task-id "${taskId}" contains '..' (path traversal)`);
       }
 
-      const taskHopperDir = args.hopperDir || hopperDir;
+      // Per codex Phase 5 audit P1 #3: validate hopperDir override too.
+      // Disallow paths containing '..' or that resolve outside the project root.
+      let taskHopperDir = args.hopperDir || hopperDir;
+      if (args.hopperDir) {
+        if (args.hopperDir.includes('..')) {
+          throw new Error(`hopper_dispatch: hopperDir argument "${args.hopperDir}" contains '..'`);
+        }
+        // Must be absolute OR end with '.hopper' to prevent arbitrary writes
+        if (!args.hopperDir.endsWith('.hopper') && !args.hopperDir.endsWith('.hopper/')) {
+          throw new Error(`hopper_dispatch: hopperDir argument must end with '.hopper'`);
+        }
+      }
       mkdirSync(join(taskHopperDir, 'handoffs'), { recursive: true });
       const outputMdPath = join(taskHopperDir, 'handoffs', `${taskId}-output.md`);
       const logPath = outputMdPath.replace(/\.md$/, '.log');

@@ -11,7 +11,7 @@
 // Counter-tested in tests/integration/runner-single-spawn.test.js.
 
 import { spawn } from 'node:child_process';
-import { openSync, closeSync } from 'node:fs';
+import { openSync, closeSync, readFileSync, existsSync } from 'node:fs';
 import { readFrontmatter, writeFrontmatter } from '../src/background.js';
 import { getAdapter } from '../src/vendors/index.js';
 
@@ -125,16 +125,48 @@ async function main() {
     clearTimeout(killTimer);
     const duration_ms = Date.now() - t0;
 
-    // Classify status: success | failed (timeout / non-zero / signal)
-    let status = 'failed';
-    if (code === 0 && !timedOut && !signal) {
-      status = 'done';
+    // Per codex Phase 5 audit P1 #2: read log + invoke adapter.parseResult
+    // so exit-0 failure modes (kimi HTTP 402, agy silent auth-fail) are
+    // classified correctly. Without this, false-success status leaks through.
+    let stdoutTail = '';
+    let stderrTail = '';
+    let logFileContent;
+    try {
+      if (existsSync(logPath)) {
+        const full = readFileSync(logPath, 'utf-8');
+        // log holds BOTH stdout and stderr interleaved; pass it as both for
+        // adapters that pattern-match (kimi looks at stdout; agy at stderr/log)
+        stdoutTail = full;
+        stderrTail = full;
+        logFileContent = full;
+      }
+    } catch (_) {
+      // log unreadable; fall back to exit-code-only classification
     }
 
-    // Re-read frontmatter; we don't have the adapter.parseResult chain here
-    // because the vendor's stdout went to a file we are NOT reading back (large).
-    // The .log sidecar IS the result for background mode; parseResult-style
-    // classification only runs in sync mode. The user runs --watch to consume.
+    let adapterStatus;
+    let adapterError;
+    try {
+      const parsed = adapter.parseResult({
+        exitCode: code === null ? -1 : code,
+        stdout: stdoutTail,
+        stderr: stderrTail,
+        timedOut,
+        durationMs: duration_ms,
+        logFileContent,
+      });
+      adapterStatus = parsed.status;       // success | auth-fail | timeout | permission-fail | unknown-fail
+      adapterError = parsed.error || null;
+    } catch (err) {
+      adapterStatus = 'unknown-fail';
+      adapterError = `parseResult threw: ${err.message}`;
+    }
+
+    // Map adapter classification → queue-legal status (per spec §14.4)
+    let status;
+    if (adapterStatus === 'success') status = 'done';
+    else status = 'failed';                // auth-fail / timeout / permission-fail / unknown-fail → failed
+
     try {
       const fm = readFrontmatter(outputMdPath);
       writeFrontmatter(outputMdPath, {
@@ -145,13 +177,17 @@ async function main() {
         signal: signal || null,
         timed_out: timedOut || null,
         duration_ms,
+        adapter_status: adapterStatus,     // preserve the granular classification
         _body: (fm._body || '') +
           `\n## Status (background completion)\n` +
+          `- queue_status: ${status}\n` +
+          `- adapter_status: ${adapterStatus}\n` +
           `- exit_code: ${code === null ? -1 : code}\n` +
           (signal ? `- signal: ${signal}\n` : '') +
           (timedOut ? `- timed_out: true\n` : '') +
           `- duration_ms: ${duration_ms}\n` +
           `- end_time: ${new Date().toISOString()}\n` +
+          (adapterError ? `\n### Adapter error\n\`\`\`\n${adapterError.slice(0, 2000)}\n\`\`\`\n` : '') +
           `- log: see \`${logPath.split(/[\\/]/).pop()}\` for raw output\n`,
       });
     } catch (err) {
@@ -159,7 +195,8 @@ async function main() {
       process.exit(2);
     }
 
-    process.exit(code === null ? 1 : code);
+    // Exit code reflects queue_status semantics: 0 only if adapter parseResult said success
+    process.exit(status === 'done' ? 0 : (code === null ? 1 : (code === 0 ? 1 : code)));
   });
 
   vendor.on('error', (err) => {

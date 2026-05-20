@@ -63,12 +63,12 @@ case "$TASK_ID" in
 esac
 
 # Validate flags against explicit whitelist + parse value-taking flags.
-# Bare flags: --write, --force. Value flags: --model, --reasoning.
+# Bare flags: --write, --force, --background. Value flags: --model, --reasoning.
 # Same validation rules as Claude Code dispatch.md + Tier A hopper-dispatch.
 FLAGS=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --write|--force)
+    --write|--force|--background)
       FLAGS="$FLAGS $1"
       shift
       ;;
@@ -99,11 +99,14 @@ while [ $# -gt 0 ]; do
       esac
       ;;
     *)
-      echo "Error: invalid flag '$1'. Allowed: --write, --force, --model <name>, --reasoning <level>." >&2
+      echo "Error: invalid flag '$1'. Allowed: --write, --force, --background, --model <name>, --reasoning <level>." >&2
       exit 2
       ;;
   esac
 done
+
+# Per spec §14.7: signal heterogeneous-only constraint via env var
+export HOPPER_HOST_VENDOR=codex
 
 # Locate plugin root (where .claude-plugin/ and cli/bin/hopper-dispatch live).
 # Per T-08a audit P1 F2: when the wrapper is installed via symlink onto PATH,
