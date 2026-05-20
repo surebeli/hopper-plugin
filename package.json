@@ -1,0 +1,23 @@
+{
+  "name": "hopper-plugin",
+  "version": "0.1.0-demo",
+  "description": "Reference implementation of llm-hopper protocol as a thin plugin layer. No harness reaction core; vendor CLIs bring their own runtime.",
+  "type": "module",
+  "bin": {
+    "hopper-dispatch": "./cli/bin/hopper-dispatch"
+  },
+  "scripts": {
+    "smoke": "node cli/bin/hopper-dispatch --smoke",
+    "test": "echo 'Tests land in T-PLUGIN-02+ (queue parser tests, adapter integration tests)'; exit 0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "author": "surebeli (litianyi)",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/surebeli/hopper-plugin",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/surebeli/hopper-plugin.git"
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "name": "hopper-plugin",
+  "version": "0.1.0-demo",
+  "description": "Thin plugin layer over the llm-hopper file-based protocol. Dispatches task-typed work to vendor CLI subprocesses. No harness reaction core; vendor CLIs bring their own runtime. State lives in plain markdown under .hopper/. See https://github.com/surebeli/hopper-plugin.",
+  "author": "surebeli (litianyi)",
+  "homepage": "https://github.com/surebeli/hopper-plugin",
+  "license": "Apache-2.0",
+  "commands": [
+    {
+      "name": "hopper:dispatch",
+      "description": "Dispatch a task from .hopper/queue.md to its preferred vendor CLI. Usage: /hopper:dispatch <task-id>",
+      "entry": "../../cli/bin/hopper-dispatch"
+    },
+    {
+      "name": "hopper:status",
+      "description": "Show .hopper/queue.md summary (pending / in-progress / done counts). Read-only.",
+      "entry": "../../cli/bin/hopper-dispatch",
+      "args": ["--status"]
+    },
+    {
+      "name": "hopper:smoke",
+      "description": "Spike smoke test — prints 'hopper smoke' if plugin is registered. T-PLUGIN-00 Prong 1 verifier.",
+      "entry": "../../cli/bin/hopper-dispatch",
+      "args": ["--smoke"]
+    }
+  ],
+  "permissions": [
+    "filesystem:read:.hopper/**",
+    "filesystem:write:.hopper/queue.md",
+    "filesystem:write:.hopper/handoffs/**",
+    "filesystem:write:.hopper/COST-LOG.md",
+    "filesystem:read:docs/spikes/**",
+    "filesystem:read:docs/plans/**",
+    "subprocess:spawn"
+  ],
+  "schema_version": "1.0-tentative",
+  "_notes": {
+    "schema_version_warning": "This schema_version is tentative as of 2026-05-20. T-PLUGIN-00 Prong 1 must verify the actual Claude Code plugin manifest schema by reading current Claude Code plugin docs. If the real schema differs, replace this manifest accordingly. Do not assume this manifest is correct without verification.",
+    "entry_path_warning": "Entry paths are relative from this manifest file. They reference cli/bin/hopper-dispatch in the repo root. T-PLUGIN-00 Prong 1 verification must confirm Claude Code resolves relative paths correctly OR adjust to absolute paths / package-style references.",
+    "permissions_warning": "Permissions list is a best-guess based on Claude Code plugin conventions. Actual permission strings may differ. T-PLUGIN-00 Prong 1 must verify."
+  }
+}

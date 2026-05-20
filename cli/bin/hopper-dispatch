@@ -1,0 +1,81 @@
+#!/usr/bin/env node
+// hopper-dispatch — standalone CLI (T-PLUGIN-00 Prong 3 stub)
+// Anchor: cli/bin/hopper-dispatch
+//
+// Phase 0 stub: proves the executable can run from any terminal.
+// Real dispatch logic lands in T-PLUGIN-01 through T-PLUGIN-07.
+// This stub ONLY handles --smoke / --status / <task-id> with stub output.
+//
+// Per spec §3 #4 (no harness reaction core): this script does NOT retry,
+// fall back, route through state, or maintain caches. One invocation =
+// one action = one exit.
+
+const args = process.argv.slice(2);
+const VERSION = '0.1.0-demo';
+
+function printSmoke() {
+  console.log(`hopper standalone (CLI v${VERSION})`);
+  console.log('Phase 0 Prong 3 OK — standalone CLI is callable from this terminal.');
+  console.log('Real dispatch logic lands in T-PLUGIN-01+.');
+  process.exit(0);
+}
+
+function printStatus() {
+  console.log(`hopper-dispatch v${VERSION} — status stub`);
+  console.log('Phase 0: queue.md parsing not yet implemented (T-PLUGIN-02).');
+  console.log('When T-PLUGIN-02 lands, this will read .hopper/queue.md and print:');
+  console.log('  pending: N / in-progress: M / done: K / failed: F');
+  process.exit(0);
+}
+
+function printDispatchStub(taskId) {
+  console.log(`hopper-dispatch v${VERSION} — dispatch stub`);
+  console.log(`Would dispatch: ${taskId}`);
+  console.log('Phase 0 stub: actual dispatch (queue → tasks → vendor → output.md)');
+  console.log('not yet implemented. Lands in T-PLUGIN-01 through T-PLUGIN-07.');
+  console.log('');
+  console.log('Per spec §3 #4 (no harness reaction core), the real dispatch will:');
+  console.log('  1. Read .hopper/queue.md row for the task-id (parsed by T-PLUGIN-02)');
+  console.log('  2. Load .hopper/tasks/<task-type>.md frame (T-PLUGIN-03)');
+  console.log('  3. Resolve vendor from .hopper/AGENTS.md (T-PLUGIN-04)');
+  console.log('  4. Spawn ONE subprocess with the vendor adapter (T-PLUGIN-05a-e)');
+  console.log('  5. Capture output to .hopper/handoffs/<task-id>-output.md (T-PLUGIN-06)');
+  console.log('  6. NO retry, NO fallback, NO state across dispatches.');
+  process.exit(0);
+}
+
+function printUsage() {
+  console.log(`hopper-dispatch v${VERSION}`);
+  console.log('');
+  console.log('Usage:');
+  console.log('  hopper-dispatch <task-id>       Dispatch a task (stub in Phase 0)');
+  console.log('  hopper-dispatch --status         Show queue summary (stub in Phase 0)');
+  console.log('  hopper-dispatch --smoke          Phase 0 smoke test');
+  console.log('  hopper-dispatch --help           Show this message');
+  console.log('  hopper-dispatch --version        Print version');
+  console.log('');
+  console.log('Demo repo: https://github.com/surebeli/hopper-plugin');
+  console.log('Protocol:  https://github.com/surebeli/llm-hopper');
+  process.exit(0);
+}
+
+// Single-pass arg handling. No retry, no state. One arg = one action.
+if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
+  printUsage();
+} else if (args.includes('--version') || args.includes('-v')) {
+  console.log(VERSION);
+  process.exit(0);
+} else if (args.includes('--smoke')) {
+  printSmoke();
+} else if (args.includes('--status')) {
+  printStatus();
+} else {
+  // Treat first non-flag arg as task-id
+  const taskId = args.find(a => !a.startsWith('-'));
+  if (taskId) {
+    printDispatchStub(taskId);
+  } else {
+    console.error('Error: no task-id provided. Use --help for usage.');
+    process.exit(1);
+  }
+}

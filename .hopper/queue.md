@@ -16,9 +16,9 @@ Anchor: `.hopper/queue.md::root`
 
 | ID | Task-type | Status | Depends | Priority | Brief |
 |----|-----------|--------|---------|----------|-------|
-| T-PLUGIN-00 | spec-blindspot-hunt | pending | | high | Phase 0 host-lifecycle spike: 3 prongs (Claude Code plugin / Codex CLI noninteractive / standalone CLI). 4h hard cap. Outputs `docs/spikes/T-PLUGIN-00-resolved.md`. |
-| T-PLUGIN-00b | spec-blindspot-hunt | pending | | high | Vendor invocation spike: kimi-cli + opencode + copilot + gemini headless calls. 2h hard cap. Outputs `docs/spikes/T-PLUGIN-00b-vendors.md`. Parallel-eligible with T-PLUGIN-00. |
-| T-PLUGIN-00.5 | spec-write | pending | T-PLUGIN-00, T-PLUGIN-00b | high | Tasks library bootstrap: write 6 `.hopper/tasks/<type>.md` frames (spec-write, code-impl, code-review-adversarial, code-review-acceptance, sidecar-polish, spec-blindspot-hunt). |
+| T-PLUGIN-00 | spec-blindspot-hunt | done | | high | Phase 0 host-lifecycle spike: 3 prongs (Claude Code plugin / Codex CLI noninteractive / standalone CLI). 4h hard cap. Outputs `docs/spikes/T-PLUGIN-00-resolved.md`. |
+| T-PLUGIN-00b | spec-blindspot-hunt | done | | high | Vendor invocation spike: kimi-cli + opencode + copilot + gemini headless calls. 2h hard cap. Outputs `docs/spikes/T-PLUGIN-00b-vendors.md`. Parallel-eligible with T-PLUGIN-00. |
+| T-PLUGIN-00.5 | spec-write | done | T-PLUGIN-00, T-PLUGIN-00b | high | Tasks library bootstrap: write 6 `.hopper/tasks/<type>.md` frames (spec-write, code-impl, code-review-adversarial, code-review-acceptance, sidecar-polish, spec-blindspot-hunt). |
 | T-PLUGIN-01 | code-impl | pending | T-PLUGIN-00, T-PLUGIN-00.5 | normal | Repo init + Claude Code plugin manifest (uses T-00-resolved values verbatim). |
 | T-PLUGIN-02 | code-impl | pending | T-PLUGIN-01 | normal | Core queue.md parser (v2 schema, Task-type column). |
 | T-PLUGIN-03 | code-impl | pending | T-PLUGIN-01 | normal | Tasks library loader: `loadTaskFrame(taskType): string`. |
@@ -45,3 +45,9 @@ Anchor: `.hopper/queue.md::root`
 - queue initialized at 2026-05-20T02:42:00+08:00 by strategy-primary (claude-opus-4-7) — 11 tasks v1.1.1 schema
 - queue migrated to v2 schema at 2026-05-20T03:30:00+08:00 by strategy-primary — Task-type column primary; added T-PLUGIN-00b (vendor spike), T-PLUGIN-00.5 (tasks library), T-PLUGIN-05a-e (5 vendor adapters), T-PLUGIN-08a/b (2 host adapters); total 18 tasks; per spec v2.0 amendments A (task-based) + B (no-harness-core) + C (5-vendor scope per user decision C+)
 - queue patched at 2026-05-20T<later> by strategy-primary — T-PLUGIN-04.5 vendor adapter contract task added (codex F5 fix); T-PLUGIN-05e brief updated to Gemini (not Antigravity; codex F4 fix); adapter line counts revised; total 19 tasks; per spec v2.0.1 codex audit response
+- T-PLUGIN-00 started at 2026-05-20T22:30:00+08:00 by strategy-as-developer (claude-opus-4-7) — per user directive demo阶段由Strategy直接开发
+- T-PLUGIN-00b started at 2026-05-20T22:30:00+08:00 by strategy-as-developer (parallel with T-00)
+- T-PLUGIN-00.5 started at 2026-05-20T22:30:00+08:00 by strategy-as-developer (parallel)
+- T-PLUGIN-00 done at 2026-05-20T23:15:00+08:00 — Verdict PASS_WITH_NOTE; resolved values locked in docs/spikes/T-PLUGIN-00-resolved.md; Prong 1 install user-blocked but not blocker for Phase 1
+- T-PLUGIN-00b done at 2026-05-20T23:15:00+08:00 — Verdict PASS_WITH_NOTE; 2 of 5 vendors fully smoke-verified (Codex + OpenCode); Kimi auth blocked; Copilot/Gemini not installed; documented for user-action
+- T-PLUGIN-00.5 done at 2026-05-20T23:15:00+08:00 — Verdict PASS; 6 .hopper/tasks/*.md frames written; anti-persona test passes
