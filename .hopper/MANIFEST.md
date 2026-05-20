@@ -8,26 +8,25 @@ This project IS hopper-plugin development. Its `.hopper/` directory is dogfooded
 
 ## Current Phase
 
-**Phase**: Phase 1 complete (2026-05-20). Ready for Phase 2 (vendor adapter implementations T-PLUGIN-05a-e).
+**Phase**: Phase 3 complete pending REWORK fixes (2026-05-20). Cursor advances to Phase 4 only after final codex audit clears.
 
-**Status**: Spec v2.0.3 final after Gemini→agy swap + 6 codex audit cycles. Phase 0: 3 tasks (T-00 in-progress per user-action gate; T-00b done with 4/5 vendors verified + agy pending OAuth; T-00.5 done). Phase 1: 5 tasks all done (T-01/02/03/04/04.5). 52 tests passing (42 unit + 7 integration + 3 spawn-count).
+**Status**: Spec v2.0.3 final. Phase 0 (3 tasks: T-00 in-progress per user-action gate; T-00b done 4/5 vendors verified + agy pending OAuth; T-00.5 done). Phase 1 (5 tasks done: T-01/02/03/04/04.5). Phase 2 (5 tasks done: T-05a/b/c/d/e). Phase 3 (2 tasks done: T-06 output writer + T-07 Tier B slash wiring). 158 tests passing (rises after Phase 3 final audit fix). Plugin root hoisted to repo root per codex Phase 3 P0 F1.
 
-**Current cursor**: All Phase 1 plumbing wired:
-- VendorAdapter contract + runSubprocessOnce shared wrapper (T-04.5)
-- queue.md v2 parser (T-02)
-- tasks library loader + anti-persona verifier (T-03)
-- AGENTS parser + deterministic vendor router (T-04)
-- bin/hopper-dispatch orchestrator (T-01)
+**Current cursor**: Phase 3 deliverables landed:
+- T-06 output.md writer (cli/src/output.js, ~250L) — codex mini-audit FIX_AND_RECHECK → PROCEED_TO_T07 (4 P1 findings fixed: format fidelity, lossy long outputs, task.id path safety, markdown injection)
+- T-07 Tier B slash commands (4 commands/*.md files + .claude-plugin/plugin.json at repo root)
+- Plugin install topology: symlink repo root → ~/.claude/plugins/hopper
 
-Phase 2 (T-PLUGIN-05a-e) ready to start. Adapter implementations: codex, kimi, opencode, copilot, agy. Agy smoke gated on user OAuth per unified user-action gate (spec §11). T-PLUGIN-00 Prong 1 user-install also gated separately.
+Phase 4 (T-PLUGIN-08a Codex CLI host + T-PLUGIN-08b OpenCode host + T-PLUGIN-09 README/screencast + T-PLUGIN-10 Critic) gated on Phase 3 final audit clearing REWORK findings.
 
 **Next action**:
 
 1. ✅ Phase 0 done (T-00/T-00b/T-00.5 outputs at .hopper/handoffs/)
 2. ✅ Phase 1 done (T-01/02/03/04/04.5 outputs at .hopper/handoffs/)
-3. ✅ Codex Phase 1 audit PASS_WITH_CHANGES → 4 findings fixed (F1 spawn-count test, F2 vendor name normalization, F3 MANIFEST cursor, F4 integration tests)
-4. ⏭️ Phase 2 ready: T-PLUGIN-05a (Codex adapter), T-05b (Kimi), T-05c (OpenCode), T-05d (Copilot), T-05e (agy with silent-auth-fail handling)
-5. ⏳ Pending user-action: T-PLUGIN-00 Prong 1 (Claude Code plugin install + /hopper:smoke verify); T-PLUGIN-05e (agy interactive OAuth login)
+3. ✅ Phase 2 done (T-05a/b/c/d/e outputs at .hopper/handoffs/); codex Phase 2 audit PASS_WITH_CHANGES → 3 P1 findings fixed (envPreflight false-negatives, agy stderr handling, E2E spawn-count test)
+4. ✅ Phase 3 done (T-06 + T-07 outputs); codex T-06 mini-audit FIX_AND_RECHECK → PROCEED_TO_T07; codex Phase 3 final audit REWORK → 1 P0 + 3 P1 + 2 P2 findings being addressed in current commit cycle
+5. ⏭️ Phase 4 ready after Phase 3 audit clears: T-PLUGIN-08a (Codex CLI host), T-08b (OpenCode host), T-09 (README + screencast), T-10 (Critic acceptance)
+6. ⏳ Pending user-action gates: T-PLUGIN-00 Prong 1 (Claude Code plugin install + /hopper:smoke); T-PLUGIN-05e (agy interactive OAuth)
 
 **Escalation contract**: 8 carry-over from myWriteAssistant + 3 P1 + 6 spike-specific (Phase 0 v2.0):
 - #9 T-PLUGIN-00 prong fail → ping
@@ -73,3 +72,5 @@ Phase 2 (T-PLUGIN-05a-e) ready to start. Adapter implementations: codex, kimi, o
 |------|------------|---|
 | 2026-05-20 | Repo initialized; .hopper/ skeleton populated; T-PLUGIN-00 spike queued per strategy-2026-05-20 dispatch v1.1.1; cross-audit protocol active per goal directive | Strategy Advisor (claude-opus-4-7) |
 | 2026-05-20 | v2.0 migration: queue → v2 schema (Task-type col, 18 tasks); AGENTS.md → vendor binding; dispatch v2.0 supersedes v1.1.1 same-day; Phase 0 expanded to 3 tasks (T-00 + T-00b + T-00.5); per user goal directive (task-based, no-harness-core, 5-vendor) | Strategy Advisor (claude-opus-4-7) |
+| 2026-05-20 | Phase 2 complete (T-05a/b/c/d/e); codex audit PASS_WITH_CHANGES; 3 P1 fixes (F1 envPreflight broadening across 4 adapters, F2 agy stderr+missing-log handling, F3 E2E spawn-count test). 117 tests passing. | Strategy Advisor (claude-opus-4-7) |
+| 2026-05-20 | Phase 3 complete (T-06 output writer + T-07 Tier B slash wiring); codex mini-audit checkpoint after T-06 (FIX_AND_RECHECK → PROCEED_TO_T07, 4 P1 fixes); final Phase 3 audit REWORK → 1 P0 + 3 P1 + 2 P2 fixes in progress (plugin root hoisted to repo root, arg validation in slash commands, symlink-safe writes, MANIFEST cursor refresh, anti-persona phrasing, version drift). | Strategy Advisor (claude-opus-4-7) |

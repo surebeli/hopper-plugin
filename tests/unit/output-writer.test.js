@@ -11,8 +11,8 @@ import {
   mapDispatchStatusToQueueStatus,
   validateTaskId,
 } from '../../cli/src/output.js';
-import { mkdtempSync, readFileSync, existsSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdtempSync, readFileSync, existsSync, writeFileSync, mkdirSync, rmSync, symlinkSync, statSync } from 'node:fs';
+import { tmpdir, platform } from 'node:os';
 import { join } from 'node:path';
 
 function makeDispatchResult(overrides = {}) {
@@ -326,6 +326,55 @@ test('validateTaskId: rejects non-string types', () => {
   assert.throws(() => validateTaskId(null), /must be string/);
   assert.throws(() => validateTaskId(123), /must be string/);
   assert.throws(() => validateTaskId(undefined), /must be string/);
+});
+
+// ─── codex Phase 3 P1 F3: symlink-safe writes ─────────────────────────
+
+test('writeOutput: refuses to follow symlink at output path (codex P3 F3)', { skip: platform() === 'win32' ? 'symlink creation requires admin on Windows' : false }, async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-out-symlink-'));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    const handoffs = join(hopperDir, 'handoffs');
+    mkdirSync(handoffs, { recursive: true });
+    // Plant an attack: symlink at the would-be output path pointing outside .hopper/
+    const attackTarget = join(tmp, 'attack-target.txt');
+    writeFileSync(attackTarget, 'do not overwrite me', 'utf-8');
+    symlinkSync(attackTarget, join(handoffs, 'T-PLUGIN-XX-output.md'));
+
+    const result = makeDispatchResult();
+    await assert.rejects(
+      writeOutput({ hopperDir, dispatchResult: result, force: true }),
+      /symlink/i,
+      'writer must refuse to follow symlinks even with force=true'
+    );
+
+    // Verify attack target untouched
+    assert.equal(readFileSync(attackTarget, 'utf-8'), 'do not overwrite me',
+      'attack target file must not be overwritten');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('writeOutput: refuses when handoffs/ itself is a symlink escaping .hopper/', { skip: platform() === 'win32' ? 'symlink creation requires admin on Windows' : false }, async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-out-dir-symlink-'));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    mkdirSync(hopperDir, { recursive: true });
+    // handoffs/ is a symlink to a directory outside .hopper/
+    const evilTarget = join(tmp, 'evil-handoffs');
+    mkdirSync(evilTarget, { recursive: true });
+    symlinkSync(evilTarget, join(hopperDir, 'handoffs'));
+
+    const result = makeDispatchResult();
+    await assert.rejects(
+      writeOutput({ hopperDir, dispatchResult: result }),
+      /escapes/i,
+      'writer must refuse when handoffs/ real path escapes hopperDir'
+    );
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('writeOutput: rejects task with path-traversal ID', async () => {

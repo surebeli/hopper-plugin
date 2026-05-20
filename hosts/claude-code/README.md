@@ -24,11 +24,32 @@ This is **Tier B** of the cross-host architecture:
 | `/hopper:smoke`         | Plugin host-lifecycle smoke test (Prong 1 verifier)                              |
 | `/hopper:vendors`       | List registered vendor adapters (codex, kimi, opencode, copilot, agy)            |
 
-Slash command source files: `hosts/claude-code/commands/*.md` (one prompt template per command).
+Slash command source files: `commands/*.md` at the **repo root** (one prompt template per command).
+
+## Plugin layout
+
+Per codex Phase 3 audit P0 fix (2026-05-20), the plugin manifest lives at the **repo root**, not under `hosts/claude-code/`. Layout:
+
+```
+hopper-plugin/                  ← THIS IS THE PLUGIN ROOT
+├── .claude-plugin/
+│   └── plugin.json             ← discovered by Claude Code
+├── commands/
+│   ├── dispatch.md
+│   ├── status.md
+│   ├── smoke.md
+│   └── vendors.md
+├── cli/
+│   └── bin/
+│       └── hopper-dispatch     ← invoked by every slash command
+└── hosts/claude-code/README.md ← this file (documentation only)
+```
+
+`$CLAUDE_PLUGIN_ROOT` (set by Claude Code at runtime) resolves to the **repo root**. Therefore `$CLAUDE_PLUGIN_ROOT/cli/bin/hopper-dispatch` is the correct path inside all slash command prompts.
 
 ## Install
 
-### Option A — manual symlink (recommended for dogfood / development)
+### Option A — manual symlink the **repo root** (recommended for dogfood / development)
 
 Linux / macOS:
 
@@ -44,6 +65,8 @@ New-Item -ItemType SymbolicLink `
   -Path "$HOME\.claude\plugins\hopper" `
   -Target "F:\absolute\path\to\hopper-plugin"
 ```
+
+**Important**: symlink the repo root (e.g. `hopper-plugin/`), not `hosts/claude-code/`. The plugin manifest and `cli/` binary must coexist at the same level — symlinking `hosts/claude-code/` will leave the binary unreachable.
 
 After symlinking, **restart Claude Code** for the plugin to register.
 
@@ -66,7 +89,7 @@ Expected: a `hopper standalone (CLI v0.4.0-phase-3)` banner. If you see it, **Pr
 
 If the slash command is not recognized:
 - The plugin manifest may not match current Claude Code schema. Run `claude --debug` to inspect plugin discovery
-- `$CLAUDE_PLUGIN_ROOT` may not be set. Set it manually: `export CLAUDE_PLUGIN_ROOT=~/.claude/plugins/hopper`
+- `$CLAUDE_PLUGIN_ROOT` may not be set. Check via `echo $CLAUDE_PLUGIN_ROOT` inside a Claude Code Bash invocation
 - File a finding in `.hopper/HOPPER-FEEDBACK.md` so this README can be corrected
 
 ## Authentication prerequisites per vendor
@@ -100,7 +123,7 @@ These are intentional. The plugin is a router, not a runtime.
 
 | Symptom                                | Likely cause                                                              | Fix                                                          |
 |----------------------------------------|---------------------------------------------------------------------------|--------------------------------------------------------------|
-| `/hopper:dispatch` not recognized      | Plugin not registered                                                      | Symlink + restart Claude Code; verify with `/hopper:smoke`   |
+| `/hopper:dispatch` not recognized      | Plugin not registered                                                      | Symlink repo root + restart Claude Code; verify with `/hopper:smoke` |
 | `node: command not found`              | Node 18+ not on PATH                                                       | Install Node 18+ and ensure it's on PATH                     |
 | `Error: no .hopper/ directory found`   | Running outside a hopper project                                           | `cd` into the project root OR set `HOPPER_DIR` env var       |
 | `Adapter <vendor> preflight failed`    | Vendor auth not configured                                                 | See auth table above; rerun after fixing                     |

@@ -18,7 +18,7 @@
 //   F4 — Markdown fence length adapts to embedded backticks; control bytes
 //        normalized; metadata fields quoted/sanitized.
 
-import { mkdir, writeFile, access } from 'node:fs/promises';
+import { mkdir, writeFile, access, lstat, realpath } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 
 const TASK_ID_PATTERN = /^[A-Za-z][A-Za-z0-9._-]*$/;
@@ -52,19 +52,31 @@ export async function writeOutput({ hopperDir, dispatchResult, force = false }) 
   const handoffDir = join(hopperDir, 'handoffs');
   const path = join(handoffDir, `${task.id}-output.md`);
 
-  // Per codex F3: also enforce containment under handoffs/ after path resolution
-  // (belt-and-braces: even if the regex allows something pathological, the
-  // resolved path must still live inside handoffs/).
+  // Per codex F3: enforce lexical containment under handoffs/ first
+  // (cheap check before any fs work).
   const resolvedPath = resolve(path);
   const resolvedHandoffs = resolve(handoffDir);
   if (!resolvedPath.startsWith(resolvedHandoffs + sep) && resolvedPath !== resolvedHandoffs) {
     throw new Error(`writeOutput: resolved path "${resolvedPath}" escapes handoffs/ — refusing.`);
   }
 
+  await mkdir(handoffDir, { recursive: true });
+
+  // Per codex Phase 3 audit F3: symlink safety. Before any write, verify the
+  // target is either absent OR a real file (not a symlink). Also verify the
+  // parent handoffs/ dir is not itself a symlink that points outside .hopper/.
+  // This prevents an attacker who can plant a symlink at handoffs/T-foo-output.md
+  // from making writeFile follow it to e.g. /etc/passwd.
   let exists = false;
   try {
-    await access(path);
+    const st = await lstat(path);
     exists = true;
+    if (st.isSymbolicLink()) {
+      throw new Error(`writeOutput: output path "${path}" is a symlink — refusing to follow (potential escape).`);
+    }
+    if (!st.isFile()) {
+      throw new Error(`writeOutput: output path "${path}" exists but is not a regular file (type: ${st.isDirectory() ? 'directory' : 'other'}).`);
+    }
   } catch (err) {
     if (err.code !== 'ENOENT') throw err;
   }
@@ -72,13 +84,32 @@ export async function writeOutput({ hopperDir, dispatchResult, force = false }) 
     throw new Error(`Output file already exists: ${path}. Use --force to overwrite.`);
   }
 
-  await mkdir(handoffDir, { recursive: true });
+  // Verify the parent handoffs/ dir's real path is still inside .hopper/.
+  // Catches the case where handoffs/ itself was replaced with a symlink to /tmp.
+  try {
+    const handoffsReal = await realpath(handoffDir);
+    const hopperReal = await realpath(hopperDir);
+    if (!handoffsReal.startsWith(hopperReal + sep) && handoffsReal !== hopperReal) {
+      throw new Error(`writeOutput: handoffs/ real path "${handoffsReal}" escapes hopperDir "${hopperReal}" — refusing.`);
+    }
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+  }
 
   // Per codex F2: persist full output to sidecar raw file when truncation would happen.
+  // Per codex Phase 3 F3: same symlink check as the main output file.
   const fullText = output.text || '';
   let rawPath = null;
   if (fullText.length > PREVIEW_CHAR_LIMIT) {
     rawPath = join(handoffDir, `${task.id}-output-raw.txt`);
+    try {
+      const st = await lstat(rawPath);
+      if (st.isSymbolicLink()) {
+        throw new Error(`writeOutput: sidecar raw path "${rawPath}" is a symlink — refusing.`);
+      }
+    } catch (err) {
+      if (err.code !== 'ENOENT') throw err;
+    }
     await writeFile(rawPath, fullText, 'utf-8');
   }
 
