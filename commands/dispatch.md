@@ -1,7 +1,7 @@
 ---
 description: Dispatch a task from .hopper/queue.md to its preferred vendor CLI via hopper-dispatch.
 allowed-tools: Bash, Read
-argument-hint: <task-id> [--write] [--force]
+argument-hint: <task-id> [--write] [--force] [--model <name>] [--reasoning <low|medium|high|xhigh>]
 ---
 
 This command runs inside a Claude Code session and invokes the host-agnostic `hopper-dispatch` CLI to dispatch one task.
@@ -21,15 +21,27 @@ This command runs inside a Claude Code session and invokes the host-agnostic `ho
 
 1. Split `$ARGUMENTS` on whitespace into tokens.
 2. The **first** token MUST be a task ID matching this exact regex: `^[A-Za-z][A-Za-z0-9._-]{0,99}$`. Reject anything containing `/`, `\`, `..`, shell metacharacters (`;`, `|`, `&`, `` ` ``, `$`, `(`, `)`, `<`, `>`, quotes), or newlines.
-3. The **remaining** tokens MUST each be exactly one of: `--write`, `--force`. Reject anything else.
+3. The **remaining** tokens are one of these forms:
+   - Bare flag: `--write` or `--force` (no value follows)
+   - Value flag: `--model <name>` (consumes next token) — `<name>` must match `^[A-Za-z][A-Za-z0-9._/:-]{0,99}$`
+   - Value flag: `--reasoning <level>` (consumes next token) — `<level>` must be exactly one of `low`, `medium`, `high`, `xhigh`
+   - Reject anything else.
 4. If validation fails: STOP. Print the offending input verbatim and ask the user to correct it. Do **not** invoke Bash with rejected input.
+
+**What `--model` and `--reasoning` do**: they forward to the vendor adapter via `executeDispatch`'s `adapterOpts`. Adapters honor them differently:
+- `--model` honored by: kimi, opencode, copilot (becomes `-m / --model <name>` to the vendor CLI)
+- `--reasoning` honored by: codex (becomes `model_reasoning_effort=<level>`); other adapters ignore it harmlessly
 
 ## Invocation (only after validation passes)
 
-Build an explicit, properly-quoted command. Do not splat raw `$ARGUMENTS`. Example for task `T-PLUGIN-05a` with `--write`:
+Build an explicit, properly-quoted command. Do not splat raw `$ARGUMENTS`. Examples:
 
 ```bash
+# Plain dispatch + write
 node "$CLAUDE_PLUGIN_ROOT/cli/bin/hopper-dispatch" "T-PLUGIN-05a" --write
+
+# With adapter opts
+node "$CLAUDE_PLUGIN_ROOT/cli/bin/hopper-dispatch" "T-PLUGIN-05a" --write --model "kimi-thinking" --reasoning "high"
 ```
 
 If `$CLAUDE_PLUGIN_ROOT` is unset (older Claude Code or non-plugin invocation), fall back to a path search:

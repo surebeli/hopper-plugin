@@ -17,8 +17,26 @@
 /** Canonical task-id pattern. Matches what dispatch.md / hopper-codex / hopper-opencode enforce. */
 export const TASK_ID_PATTERN = /^[A-Za-z][A-Za-z0-9._-]{0,99}$/;
 
-/** Canonical flag whitelist for dispatch invocations. */
+/** Canonical bare flag whitelist for dispatch invocations. */
 export const ALLOWED_DISPATCH_FLAGS = Object.freeze(['--write', '--force']);
+
+/** Value-taking flag whitelist (each consumes the next argv as its value). */
+export const ALLOWED_DISPATCH_VALUE_FLAGS = Object.freeze(['--model', '--reasoning']);
+
+/**
+ * Model-name pattern: alphanumeric + . - _ / : (for namespaced model strings
+ * like `gpt-5.5`, `claude-opus-4-7`, `deepseek/v4-flash`, `org/model:tag`).
+ * Per cross-host validation discipline: same regex applies at every entry
+ * point (CLI / dispatch.md / Tier C wrappers).
+ */
+export const MODEL_PATTERN = /^[A-Za-z][A-Za-z0-9._/:-]{0,99}$/;
+
+/**
+ * Reasoning effort whitelist. Matches codex CLI's vocabulary; kimi/opencode/
+ * copilot adapters may or may not honor this opt — they ignore unrecognized
+ * opts harmlessly. agy currently ignores it.
+ */
+export const ALLOWED_REASONING = Object.freeze(['low', 'medium', 'high', 'xhigh']);
 
 /**
  * Legal queue status values per .hopper/queue.md schema convention.
@@ -61,7 +79,7 @@ export function validateTaskId(id) {
 }
 
 /**
- * Validate that all flags are in the allowed whitelist. Throws on rejection.
+ * Validate that all bare flags are in the allowed whitelist. Throws on rejection.
  * @param {string[]} flags
  */
 export function validateDispatchFlags(flags) {
@@ -69,6 +87,28 @@ export function validateDispatchFlags(flags) {
     if (!ALLOWED_DISPATCH_FLAGS.includes(f)) {
       throw new Error(`Invalid flag "${f}". Allowed: ${ALLOWED_DISPATCH_FLAGS.join(', ')}.`);
     }
+  }
+}
+
+/**
+ * Validate a model name. Throws on rejection.
+ */
+export function validateModelName(model) {
+  if (typeof model !== 'string') throw new Error(`--model value must be string, got ${typeof model}`);
+  if (model.length === 0) throw new Error('--model value must not be empty');
+  if (!MODEL_PATTERN.test(model)) {
+    throw new Error(`--model "${model}" contains unsafe characters. ` +
+      `Allowed: ^[A-Za-z][A-Za-z0-9._/:-]{0,99}$ (no shell metachars, no spaces).`);
+  }
+}
+
+/**
+ * Validate a reasoning effort level. Throws on rejection.
+ */
+export function validateReasoning(reasoning) {
+  if (typeof reasoning !== 'string') throw new Error(`--reasoning value must be string, got ${typeof reasoning}`);
+  if (!ALLOWED_REASONING.includes(reasoning)) {
+    throw new Error(`--reasoning "${reasoning}" invalid. Allowed: ${ALLOWED_REASONING.join(', ')}.`);
   }
 }
 

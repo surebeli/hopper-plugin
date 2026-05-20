@@ -9,7 +9,14 @@ import { resolveDispatch, getStatus, executeDispatch } from '../src/dispatch.js'
 import { listTaskTypes } from '../src/tasks.js';
 import { listAdapters } from '../src/vendors/index.js';
 import { writeOutput } from '../src/output.js';
-import { validateTaskId, validateDispatchFlags } from '../src/validation.js';
+import {
+  validateTaskId,
+  validateDispatchFlags,
+  validateModelName,
+  validateReasoning,
+  ALLOWED_DISPATCH_FLAGS,
+  ALLOWED_DISPATCH_VALUE_FLAGS,
+} from '../src/validation.js';
 import { resolve, join } from 'node:path';
 import { existsSync } from 'node:fs';
 
@@ -20,16 +27,23 @@ function printUsage() {
   console.log(`hopper-dispatch v${VERSION}`);
   console.log('');
   console.log('Usage:');
-  console.log('  hopper-dispatch <task-id>           Dispatch + spawn; print result (no output.md write)');
-  console.log('  hopper-dispatch <task-id> --write   Dispatch + spawn + write .hopper/handoffs/<id>-output.md');
-  console.log('  hopper-dispatch <task-id> --write --force   Overwrite existing output.md');
-  console.log('  hopper-dispatch --resolve <id>      Resolve dispatch without spawning (Phase 1 behavior)');
-  console.log('  hopper-dispatch --status            Show queue summary');
-  console.log('  hopper-dispatch --smoke             Standalone CLI smoke test');
-  console.log('  hopper-dispatch --task-types        List available task-type frames');
-  console.log('  hopper-dispatch --vendors           List registered vendor adapters');
-  console.log('  hopper-dispatch --help              Show this message');
-  console.log('  hopper-dispatch --version           Print version');
+  console.log('  hopper-dispatch <task-id>                       Dispatch + spawn; print result');
+  console.log('  hopper-dispatch <task-id> --write [--force]     Dispatch + write output.md');
+  console.log('  hopper-dispatch <task-id> --model <name>        Override vendor model (e.g. gpt-5.5, claude-opus-4-7)');
+  console.log('  hopper-dispatch <task-id> --reasoning <level>   Override reasoning effort (low|medium|high|xhigh)');
+  console.log('  hopper-dispatch --resolve <id>                  Resolve dispatch without spawning');
+  console.log('  hopper-dispatch --status                        Show queue summary');
+  console.log('  hopper-dispatch --smoke                         Standalone CLI smoke test');
+  console.log('  hopper-dispatch --task-types                    List available task-type frames');
+  console.log('  hopper-dispatch --vendors                       List registered vendor adapters');
+  console.log('  hopper-dispatch --help                          Show this message');
+  console.log('  hopper-dispatch --version                       Print version');
+  console.log('');
+  console.log('Adapter opts (forwarded to vendor adapter; ignored if adapter does not honor):');
+  console.log('  --model <name>       Examples: gpt-5.5, claude-opus-4-7, deepseek/v4-flash, kimi-thinking');
+  console.log('                       Honored by: kimi, opencode, copilot');
+  console.log('  --reasoning <level>  low | medium | high | xhigh');
+  console.log('                       Honored by: codex (others ignore harmlessly)');
   console.log('');
   console.log('Env: HOPPER_DIR overrides .hopper/ location');
   console.log('     HOPPER_DEBUG=1 prints composed prompt + raw subprocess result');
@@ -119,8 +133,18 @@ async function main() {
     return;
   }
 
-  // Treat first non-flag arg as task-id (Phase 2: real spawn)
-  const taskId = args.find((a) => !a.startsWith('-'));
+  // Parse argv into: task-id (first bare arg), bare flags, value flags.
+  // Value flags consume the next argv ("--model gpt-5.5") and must not be
+  // mistaken for task-id when present elsewhere in argv.
+  let parsed;
+  try {
+    parsed = parseDispatchArgs(args);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(2);
+  }
+
+  const { taskId, bareFlags, valueFlags } = parsed;
   if (!taskId) {
     console.error('Error: no task-id provided. Use --help for usage.');
     process.exit(1);
@@ -130,19 +154,74 @@ async function main() {
   // the canonical validator so all 4 hosts apply identical rules.
   try {
     validateTaskId(taskId);
-    const extraFlags = args.filter((a) => a.startsWith('-') && a !== '--write' && a !== '--force'
-      && a !== '--help' && a !== '-h' && a !== '--version' && a !== '-v');
-    if (extraFlags.length > 0) {
-      validateDispatchFlags(extraFlags);  // throws on unknown flag
-    }
+    if (bareFlags.length > 0) validateDispatchFlags(bareFlags);
+    if (valueFlags.model !== undefined) validateModelName(valueFlags.model);
+    if (valueFlags.reasoning !== undefined) validateReasoning(valueFlags.reasoning);
   } catch (err) {
     console.error(`Error: ${err.message}`);
     process.exit(2);
   }
 
-  const writeFlag = args.includes('--write');
-  const forceFlag = args.includes('--force');
-  await runDispatch(hopperDir, taskId, { write: writeFlag, force: forceFlag });
+  const writeFlag = bareFlags.includes('--write');
+  const forceFlag = bareFlags.includes('--force');
+  const adapterOpts = {};
+  if (valueFlags.model !== undefined) adapterOpts.model = valueFlags.model;
+  if (valueFlags.reasoning !== undefined) adapterOpts.reasoning = valueFlags.reasoning;
+
+  await runDispatch(hopperDir, taskId, { write: writeFlag, force: forceFlag, adapterOpts });
+}
+
+/**
+ * Parse argv into task-id + bare flags + value flags.
+ * Skips meta-flags (--help, --version, --resolve, etc.) that main() handles
+ * before reaching this point. Value flags consume the next argv element;
+ * bare flags don't.
+ */
+function parseDispatchArgs(args) {
+  const META_FLAGS = new Set(['--help', '-h', '--version', '-v', '--smoke', '--status',
+    '--task-types', '--vendors', '--resolve']);
+  const VALUE_FLAGS = new Set(ALLOWED_DISPATCH_VALUE_FLAGS);
+  const BARE_FLAGS = new Set(ALLOWED_DISPATCH_FLAGS);
+
+  const bareFlags = [];
+  const valueFlags = {};
+  let taskId = null;
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+
+    if (META_FLAGS.has(arg)) continue;  // handled by main() before parseDispatchArgs
+
+    if (VALUE_FLAGS.has(arg)) {
+      const v = args[i + 1];
+      if (v === undefined || v.startsWith('-')) {
+        throw new Error(`${arg} requires a value (got: ${v === undefined ? 'nothing' : v}).`);
+      }
+      // Strip leading "--" for the opt key: --model → model
+      const key = arg.replace(/^--/, '');
+      valueFlags[key] = v;
+      i++;  // consume the value
+      continue;
+    }
+
+    if (BARE_FLAGS.has(arg)) {
+      bareFlags.push(arg);
+      continue;
+    }
+
+    if (arg.startsWith('-')) {
+      throw new Error(`Unknown flag "${arg}". Bare flags allowed: ${[...BARE_FLAGS].join(', ')}. Value flags: ${[...VALUE_FLAGS].join(', ')}.`);
+    }
+
+    // First non-flag, non-value arg becomes task-id
+    if (taskId === null) {
+      taskId = arg;
+    } else {
+      throw new Error(`Unexpected extra positional argument "${arg}" (task-id already set to "${taskId}").`);
+    }
+  }
+
+  return { taskId, bareFlags, valueFlags };
 }
 
 async function runResolve(hopperDir, taskId) {
@@ -165,11 +244,14 @@ async function runResolve(hopperDir, taskId) {
   }
 }
 
-async function runDispatch(hopperDir, taskId, { write = false, force = false } = {}) {
+async function runDispatch(hopperDir, taskId, { write = false, force = false, adapterOpts = {} } = {}) {
   try {
-    console.error(`hopper-dispatch v${VERSION} — dispatching ${taskId}...`);
+    const optsSummary = Object.keys(adapterOpts).length > 0
+      ? ` [opts: ${Object.entries(adapterOpts).map(([k, v]) => `${k}=${v}`).join(', ')}]`
+      : '';
+    console.error(`hopper-dispatch v${VERSION} — dispatching ${taskId}${optsSummary}...`);
     const startedAt = Date.now();
-    const result = await executeDispatch({ hopperDir, taskId });
+    const result = await executeDispatch({ hopperDir, taskId, adapterOpts });
     const elapsedMs = Date.now() - startedAt;
 
     console.log('');

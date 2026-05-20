@@ -19,17 +19,19 @@ usage() {
   cat <<EOF >&2
 hopper-opencode — Tier C OpenCode host adapter for hopper-plugin
 
-Usage: hopper-opencode <task-id> [--write] [--force]
+Usage: hopper-opencode <task-id> [--write] [--force] [--model <name>] [--reasoning <level>]
 
 Arguments:
-  <task-id>   Task ID matching ^[A-Za-z][A-Za-z0-9._-]{0,99}$ (no '..')
-  --write     Write .hopper/handoffs/<task-id>-output.md after dispatch
-  --force     Overwrite existing output.md (only with --write)
+  <task-id>           Task ID matching ^[A-Za-z][A-Za-z0-9._-]{0,99}$ (no '..')
+  --write             Write .hopper/handoffs/<task-id>-output.md after dispatch
+  --force             Overwrite existing output.md (only with --write)
+  --model <name>      Forward to vendor adapter (honored by kimi/opencode/copilot)
+  --reasoning <lv>    Forward reasoning effort: low|medium|high|xhigh (honored by codex adapter)
 
 Environment:
   HOPPER_PLUGIN_ROOT   Override plugin root (defaults to wrapper-relative)
   HOPPER_DIR           Override .hopper/ location (passed through)
-  OPENCODE_MODEL       OpenCode model (default: opencode picks its configured default)
+  OPENCODE_MODEL       OUTER opencode model (the opencode driving the dispatch loop, not the vendor)
 EOF
 }
 
@@ -54,15 +56,44 @@ case "$TASK_ID" in
     ;;
 esac
 
-# Flag whitelist (identical to Claude Code + Codex CLI hosts)
+# Validate flags against explicit whitelist + parse value-taking flags.
+# Bare flags: --write, --force. Value flags: --model, --reasoning.
+# Same validation rules as Claude Code dispatch.md + Tier A + Tier C #1.
 FLAGS=""
-for flag in "$@"; do
-  case "$flag" in
+while [ $# -gt 0 ]; do
+  case "$1" in
     --write|--force)
-      FLAGS="$FLAGS $flag"
+      FLAGS="$FLAGS $1"
+      shift
+      ;;
+    --model)
+      shift
+      if [ $# -eq 0 ] || [ -z "${1:-}" ] || [ "${1#-}" != "$1" ]; then
+        echo "Error: --model requires a value." >&2
+        exit 2
+      fi
+      if ! printf '%s' "$1" | grep -Eq '^[A-Za-z][A-Za-z0-9._/:-]{0,99}$'; then
+        echo "Error: --model value '$1' contains unsafe characters." >&2
+        exit 2
+      fi
+      FLAGS="$FLAGS --model $1"
+      shift
+      ;;
+    --reasoning)
+      shift
+      case "${1:-}" in
+        low|medium|high|xhigh)
+          FLAGS="$FLAGS --reasoning $1"
+          shift
+          ;;
+        *)
+          echo "Error: --reasoning must be one of low|medium|high|xhigh (got: ${1:-empty})." >&2
+          exit 2
+          ;;
+      esac
       ;;
     *)
-      echo "Error: invalid flag '$flag'. Only --write and --force are allowed." >&2
+      echo "Error: invalid flag '$1'. Allowed: --write, --force, --model <name>, --reasoning <level>." >&2
       exit 2
       ;;
   esac
