@@ -258,7 +258,7 @@ Earlier spec confusion suggested Antigravity CLI as the 5th vendor. Subagent res
 | OpenCode | ✅ | ✅ | ✅ HOPPER_OPENCODE_OK | Ready for T-PLUGIN-05c |
 | Copilot | ✅ (post-install 2026-05-20) | ✅ | ✅ HOPPER_COPILOT_OK | Ready for T-PLUGIN-05d (quota-aware) |
 | Gemini | ✅ (npm global @google/gemini-cli@0.42.0) | ✅ | ✅ HOPPER_GEMINI_OK | Ready for T-PLUGIN-05e (PATH note in adapter) |
-| Antigravity | ❌ (`agy` not installed) | n/a | n/a | Doc-only `vendors/antigravity.ts.spec.md` per F4 correction; post-essay implementation when `agy` installed |
+| Antigravity (agy) | ✅ installed (`C:\Users\litianyi\AppData\Local\agy\bin\agy.exe` v1.0.0) | ⚠️ unclear (smoke exit 0, no stdout — `agy install` setup may be required) | ⚠️ INCONCLUSIVE — exit 0 but empty output | **DECISION PENDING** (Path D: keep doc-only / Path E: promote to 6th functional adapter pending `agy install` resolution) |
 
 ### Acceptance check per spec §6 T-PLUGIN-00b (FINAL, Path A resolved 2026-05-20)
 
