@@ -42,5 +42,11 @@ yarn-debug.log*
 
 
 # Obsidian translate plugin auto-generated translations (codex F5 follow-up)
-[zh] *.md
+[[]zh[]] *.md
 *.md.bak
+
+# agy CLI project metadata (auto-created when project opened in agy)
+.antigravitycli/
+
+# Catch-all for obsidian translate plugin variants
+[[]*[]]?*.md
