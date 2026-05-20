@@ -41,11 +41,12 @@ Full adapter shape in T-PLUGIN-00-resolved.md.
 
 ---
 
-## Vendor 2: Kimi (Moonshot AI) ⚠️ INVOCATION VERIFIED, AUTH BLOCKED
+## Vendor 2: Kimi (Moonshot AI) ✅ VERIFIED END-TO-END (post user membership restore)
 
 - **Install status**: ✅ `/c/Users/litianyi/.local/bin/kimi` v1.41.0
-- **Auth status**: ⚠️ Membership expired ("We're unable to verify your membership benefits at this time. Please ensure your membership is active.")
-- **Smoke result**: ⚠️ HTTP 402 — CLI invocation was correct, auth failed at API call
+- **Auth status**: ✅ Membership restored 2026-05-20 by user
+- **Smoke result**: ✅ `HOPPER_KIMI_OK` returned via `kimi -p "..." --print --afk --final-message-only`
+- **Session ID**: 754a6031-9ad9-46b4-9a2a-a8b29b1f38c7 (for resume if needed)
 
 ### Adapter invocation (verified syntactically)
 
@@ -164,10 +165,12 @@ const OPENCODE_ADAPTER: VendorAdapter = {
 
 ---
 
-## Vendor 4: Copilot CLI ❌ NOT INSTALLED — documented only
+## Vendor 4: Copilot CLI ✅ VERIFIED END-TO-END (post user install)
 
-- **Install status**: ❌ Not on user's machine
-- **Smoke result**: N/A
+- **Install status**: ✅ `/c/Users/litianyi/AppData/Local/Microsoft/WinGet/Links/copilot` (installed 2026-05-20)
+- **Auth status**: ✅ GH_TOKEN with Copilot Requests permission configured
+- **Smoke result**: ✅ `HOPPER_COPILOT_OK` returned in 8s, 0.33 premium request, 18.9k input + 30 output tokens
+- **Smoke command**: `copilot -p "say HOPPER_COPILOT_OK in exactly those words and nothing else"`
 
 ### Adapter invocation (from subagent research 2026-05-19)
 
@@ -199,11 +202,19 @@ Similar shape to other adapters; per research, premium quota concerns mean this 
 
 ---
 
-## Vendor 5: Gemini CLI ❌ NOT INSTALLED — documented only (with 2026-06-18 deprecation note)
+## Vendor 5: Gemini CLI ✅ VERIFIED END-TO-END (post user install)
 
-- **Install status**: ❌ Not on user's machine
-- **Smoke result**: N/A
+- **Install status**: ✅ `@google/gemini-cli@0.42.0` installed as npm global
+- **Binary location**: `C:\Users\litianyi\nodejs\node-v22.22.2-win-x64\gemini.cmd` (npm prefix root, NOT in default Git Bash PATH — see adapter notes below)
+- **Auth status**: ✅ Configured (smoke ran without auth prompt)
+- **Smoke result**: ✅ `HOPPER_GEMINI_OK` returned via direct npm prefix path invocation
+- **Smoke command**: `/c/Users/litianyi/nodejs/node-v22.22.2-win-x64/gemini.cmd -p "say HOPPER_GEMINI_OK..."`
 - **Deprecation**: 2026-06-18 for Pro/Ultra/free users; enterprise users continue
+- **PATH note for T-PLUGIN-05e adapter**: gemini.cmd lives at npm prefix root (e.g. `<prefix>/gemini.cmd`), NOT under `<prefix>/bin/`. Default Git Bash PATH does NOT include npm prefix root on Windows. Adapter strategy options:
+  - (a) Resolve npm prefix dynamically: `process.execPath` + sibling lookup, or `npm config get prefix` subprocess
+  - (b) Document user-action: add npm prefix to PATH (Windows env vars OR `.bashrc`)
+  - (c) Wrap: provide a `cli/bin/gemini-wrapper` that resolves the path
+  - Recommended: (a) dynamic resolution + (b) document fallback if (a) fails
 
 ### Adapter invocation (from prior knowledge; verify before T-PLUGIN-05e)
 
@@ -238,36 +249,32 @@ Earlier spec confusion suggested Antigravity CLI as the 5th vendor. Subagent res
 
 ---
 
-## Summary table
+## Summary table (final 2026-05-20T<later>, Path A resolved)
 
 | Vendor | Installed? | Auth OK? | Smoke verified? | Status |
 |---|---|---|---|---|
-| Codex | ✅ | ✅ | ✅ | Ready for T-PLUGIN-05a |
-| Kimi | ✅ | ⚠️ (membership 402) | ⚠️ invocation right, API blocked | Ready for T-PLUGIN-05b code; user-verify auth before smoke |
-| OpenCode | ✅ | ✅ | ✅ | Ready for T-PLUGIN-05c |
-| Copilot | ❌ | n/a | n/a | Documented-only; user-install before T-PLUGIN-05d |
-| Gemini | ❌ | n/a | n/a | Documented-only; user-install before T-PLUGIN-05e |
+| Codex | ✅ | ✅ | ✅ HOPPER_PRONG2_OK | Ready for T-PLUGIN-05a |
+| Kimi | ✅ | ✅ (membership restored) | ✅ HOPPER_KIMI_OK | Ready for T-PLUGIN-05b |
+| OpenCode | ✅ | ✅ | ✅ HOPPER_OPENCODE_OK | Ready for T-PLUGIN-05c |
+| Copilot | ✅ (post-install 2026-05-20) | ✅ | ✅ HOPPER_COPILOT_OK | Ready for T-PLUGIN-05d (quota-aware) |
+| Gemini | ✅ (npm global @google/gemini-cli@0.42.0) | ✅ | ✅ HOPPER_GEMINI_OK | Ready for T-PLUGIN-05e (PATH note in adapter) |
+| Antigravity | ❌ (`agy` not installed) | n/a | n/a | Doc-only `vendors/antigravity.ts.spec.md` per F4 correction; post-essay implementation when `agy` installed |
 
-### Acceptance check per spec §6 T-PLUGIN-00b
+### Acceptance check per spec §6 T-PLUGIN-00b (FINAL, Path A resolved 2026-05-20)
 
-Spec said "≥3 of 4 vendors print expected output". Strict reading:
-- 4 vendors targeted: Kimi, OpenCode, Copilot, Gemini (Codex was separate Prong 2)
-- 1 fully verified (OpenCode)
-- 1 invocation-verified-auth-blocked (Kimi)
-- 2 not-installed (Copilot, Gemini)
+Spec said "≥3 of 4 vendors print expected output". Path A user-unblock resolved earlier blockers; final score is **5 of 5 functional vendors smoke-verified**:
 
-**Strict score**: 1 of 4 fully verified.
-**Inclusive score**: 2 of 4 invocation-verified.
-**Counting Codex separately**: 2-3 of 5 total vendors verified.
+| Vendor | Verified | Smoke output |
+|---|---|---|
+| Codex | ✅ | HOPPER_PRONG2_OK (from Prong 2) |
+| Kimi | ✅ | HOPPER_KIMI_OK (post membership restore) |
+| OpenCode | ✅ | HOPPER_OPENCODE_OK |
+| Copilot | ✅ | HOPPER_COPILOT_OK (post install) |
+| Gemini | ✅ | HOPPER_GEMINI_OK (post install, npm global) |
 
-Per spec §4 escalation trigger #12 ("≥2 of 4 vendors blocked"), this technically triggers escalation. But since I AM Strategy (per user directive), I make the call:
+Antigravity: not in functional pool. `agy` (the actual antigravity CLI) not installed on this machine. Stays `vendors/antigravity.ts.spec.md` documented-only per codex F4 correction.
 
-**Decision**: PROCEED — adapter code for all 5 vendors can be written based on documented invocations. End-to-end smoke verification for Kimi/Copilot/Gemini is `blocked-on-user-action`. Demo readiness will be measured at G-adapter-smoke (Day 5 gate) — at that point user needs to have:
-- Renewed Kimi membership OR set API key
-- Installed Copilot CLI + set GH_TOKEN
-- Installed Gemini CLI + set GEMINI_API_KEY
-
-If user can't unblock 2+ of these by Day 5, scope downgrades to 3 functional vendors (Codex + OpenCode + 1 other). Essay v3 §8 honestly reports verified-count.
+**5 functional vendor pool LOCKED. T-PLUGIN-04.5 + T-PLUGIN-05a-e can proceed for all 5.**
 
 ### Next recommendation (cursor-aware)
 

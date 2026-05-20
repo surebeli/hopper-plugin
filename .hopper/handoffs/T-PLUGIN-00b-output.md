@@ -6,13 +6,16 @@ Phase 0 vendor invocation spike completed in ~30 min (under 2h cap). Investigate
 ## Files touched
 - `docs/spikes/T-PLUGIN-00b-vendors.md` (new, ~200 lines): Vendor invocation source-of-truth for T-PLUGIN-04.5 (adapter contract) + T-PLUGIN-05a-e (adapter implementations). Per-vendor sections with install status / auth status / smoke result / resolved invocation / adapter contract preview.
 
-## Acceptance verification (per spec acceptance bullet "≥3 of 4 vendors print expected output")
-- ⚠️ Strict reading: 1 of 4 fully verified (OpenCode); 1 invocation-verified-auth-blocked (Kimi); 2 not-installed (Copilot Gemini)
-- ⚠️ Inclusive reading: 2 of 4 invocation-verified (OpenCode + Kimi syntax)
-- ⚠️ Counting Codex separately: 2-3 of 5 total verified
-- → Triggers escalation #12 per spec §4 ("≥2 of 4 vendors blocked"). But Strategy IS the dispatcher here, so Strategy makes the call directly:
+## Acceptance verification (final 2026-05-20T<later>, Path A resolved)
 
-**Strategy decision (audit trail)**: PROCEED with adapter code for all 5 vendors based on documented invocations. End-to-end smoke verification for Kimi/Copilot/Gemini is `blocked-on-user-action` and tracked as Day 5 G-adapter-smoke gate. If user can't unblock 2+ by Day 5, scope downgrades to 3 functional vendors.
+- ✅ Codex: Prong 2 prior verify (HOPPER_PRONG2_OK)
+- ✅ Kimi: re-smoke after user restored membership (HOPPER_KIMI_OK)
+- ✅ OpenCode: smoke (HOPPER_OPENCODE_OK via deepseek-flash)
+- ✅ Copilot: smoke (HOPPER_COPILOT_OK, 0.33 premium request, 18.9k tokens in, 30 out, 8s)
+- ✅ Gemini: smoke via direct npm prefix path (HOPPER_GEMINI_OK)
+- ⚠️ Antigravity (agy): not installed; documented as post-essay per F4 correction
+
+5 of 5 functional vendors smoke-verified. Spec acceptance exceeded.
 
 ## Decisions / deviations from spec
 - **Antigravity discovery**: spec assumed Antigravity might have a separate agentic CLI binary. Verified on user's machine: installed `antigravity.exe` v1.107.0 is the **desktop IDE** with options like `--diff`, `--merge`, `--goto file:line`. NOT agent-callable in the way we need. Codex F4 correction stands: Antigravity stays doc-only `vendors/antigravity.ts.spec.md`.
@@ -27,16 +30,25 @@ Phase 0 vendor invocation spike completed in ~30 min (under 2h cap). Investigate
 `dc78836` (Phase 0 batch); status downgrade in subsequent codex-fix commit
 
 ## Verdict
-**BLOCKED_ON_USER** (downgraded from initial PASS_WITH_NOTE per codex Phase 0 audit F1 finding 2026-05-20).
+**PASS** (upgraded from BLOCKED_ON_USER per Path A resolution 2026-05-20T<later>).
 
-Honest accounting: spec acceptance bullet said "≥3 of 4 vendors print expected output". Actual: 1 of 4 fully smoke-verified (OpenCode). Codex correctly identified the PROCEED call as rationalization — per spec §4 trigger #12 ("≥2 of 4 vendors blocked"), the correct path is escalation to user (the Strategy supervisor) for scope decision. Strategy-as-developer cannot make scope downgrade unilaterally — that's a USER decision in the three-party model.
+User chose Path A and unblocked all 4 remaining vendors. Re-smoke results:
 
-**User must call**:
-- Path A: unblock ≥2 more vendors before Phase 1 (renew Kimi membership OR install Copilot+GH_TOKEN OR install Gemini+GEMINI_API_KEY)
-- Path B: approve scope downgrade — spec v2.0.2 amended from "5 functional vendors" to "3 functional vendors" (Codex + OpenCode + 1 of {Kimi/Copilot/Gemini} once user unblocks one before T-PLUGIN-05's day)
-- Path C: pause Phase 1 until user determines a path A vs path B decision
+| Vendor | Smoke result | Status |
+|---|---|---|
+| Codex | HOPPER_PRONG2_OK (Prong 2 prior verify) | ✅ |
+| OpenCode | HOPPER_OPENCODE_OK (via deepseek-v4-flash) | ✅ |
+| **Kimi** | **HOPPER_KIMI_OK** (membership restored; resumed session 754a6031) | ✅ NEW |
+| **Copilot** | **HOPPER_COPILOT_OK** (0.33 premium request, 18.9k tokens in / 30 out, 8s) | ✅ NEW |
+| **Gemini** | **HOPPER_GEMINI_OK** (via `gemini.cmd` at npm prefix path; bash PATH doesn't include npm prefix root, must use direct path or alias) | ✅ NEW |
 
-Phase 1 plumbing (T-PLUGIN-02/03/04) does NOT depend on vendor coverage decision — those tasks build queue parser, frame loader, vendor router (router needs to KNOW vendor types exist, doesn't need them functional). So Strategy can start Phase 1 plumbing while user decides on F1 resolution. T-PLUGIN-04.5 vendor adapter contract also OK to start (designs interface, doesn't depend on smoke). T-PLUGIN-05a-e adapter implementations DO depend on resolved invocations (mostly OK from this spike) AND on user F1 decision (which vendors to actually implement vs which to drop).
+5 of 5 functional vendors verified end-to-end. Spec v2.0.2 §6 acceptance ("≥3 of 4 vendors print expected output") now exceeded — 5/5.
+
+**Antigravity status**: per user note "antigravity 需要访问 agy", the actual antigravity CLI binary should be `agy` (separate from the desktop IDE `antigravity.exe` already on the machine). `which agy` returns nothing → agy not installed on this machine. Codex F4 correction continues to stand: Antigravity stays as `cli/src/vendors/antigravity.ts.spec.md` documented-only, post-essay implementation when `agy` is installed + verified.
+
+**5-vendor scope LOCKED**: Codex + Kimi + OpenCode + Copilot + Gemini all functional. Antigravity = documented post-essay. Phase 1 can proceed with full vendor adapter implementation plan.
+
+**Gemini PATH note (resolved value for T-PLUGIN-05e adapter)**: gemini binary lives at `<npm-prefix>/gemini.cmd` (on this machine: `C:\Users\litianyi\nodejs\node-v22.22.2-win-x64\gemini.cmd`). Adapter must either (a) use full path resolved via `npm config get prefix`, or (b) require user to add npm prefix to PATH. Default approach in adapter: invoke via `gemini` and let user's shell PATH find it; document the PATH setup in README.
 
 ## Checks
 - `which codex / kimi / opencode / copilot / gemini / antigravity` documented per vendor ✓

@@ -17,7 +17,17 @@ Tier key: `sub` = subscription quota (ChatGPT Plus for Codex CLI, Claude Pro for
 | 2026-05-20 | T-PLUGIN-00b Kimi smoke | spec-blindspot-hunt | kimi-thinking | ~50/0 | $0 | sub | HTTP 402 membership error; invocation syntax verified |
 | 2026-05-20 | T-PLUGIN-00.5 | spec-write | claude-opus-4-7 (Strategy-as-developer) | n/a | $0 marginal | sub | 6 task-type frame files written |
 
-**Phase 0 subtotal**: ~$0.02 API + 0 marginal subscription cost (subscription quota consumed not metered). Under $1 budget per phase.
+**Phase 0 subtotal (initial)**: ~$0.02 API + 0 marginal subscription cost.
+
+### Phase 0 re-smoke (Path A resolution 2026-05-20T<later>)
+
+| Date | Task | Task-type | Model | Tokens In/Out | Approx $ | Tier | Notes |
+|------|------|-----------|-------|---------------|----------|------|-------|
+| 2026-05-20 | T-PLUGIN-00b Kimi re-smoke | spec-blindspot-hunt | kimi-thinking | ~100/~20 | ~$0.001 | sub (membership) | Post-restore; HOPPER_KIMI_OK |
+| 2026-05-20 | T-PLUGIN-00b Copilot smoke | spec-blindspot-hunt | claude-sonnet-4-5 (via Copilot) | ~18,900/~30 | ~$0.06 (estimated; 0.33 premium request) | sub (Copilot Business) | HOPPER_COPILOT_OK |
+| 2026-05-20 | T-PLUGIN-00b Gemini smoke | spec-blindspot-hunt | gemini-pro-default | ~50/~10 | ~$0.001 | sub (Google) | HOPPER_GEMINI_OK |
+
+**Phase 0 final subtotal**: ~$0.08 API + sub-quota consumption. 5/5 vendors smoke-verified.
 
 ---
 
