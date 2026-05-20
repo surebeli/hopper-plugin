@@ -245,7 +245,30 @@ Earlier spec confusion suggested Antigravity CLI as the 5th vendor. Subagent res
 - BUT: OAuth-only auth blocks headless invocation (no BYO API key path yet)
 - Spike on user's machine confirmed: installed `antigravity.exe` is the **desktop IDE binary** (options like `--diff`, `--merge`, `--goto file:line`), NOT an agentic CLI
 
-**Decision**: Vendor #5 is Gemini (functional, until 6/18 deprecation). Antigravity remains `cli/src/vendors/antigravity.ts.spec.md` documented-only per codex F4 correction.
+**Decision (initial)**: Vendor #5 is Gemini (functional, until 6/18 deprecation). Antigravity remains `cli/src/vendors/antigravity.ts.spec.md` documented-only per codex F4 correction.
+
+**Update 2026-05-20 (post-agy install + diagnostic smoke)**: user supplied `agy --help` revealing the **agentic** Antigravity CLI is a separate binary (`C:\Users\litianyi\AppData\Local\agy\bin\agy.exe` v1.0.0). It supports `-p` print mode, `--dangerously-skip-permissions`, session resume, plugins — first-class headless agent CLI.
+
+`agy install` ran (PATH config only, no auth). Smoke with `--log-file` diagnostic revealed root cause of empty output:
+
+```
+E log.go:398] Failed to poll FetchAvailableModels: failed to get load code assist response: error getting token source: You are not logged into Antigravity.
+E server.go:604] Failed to get OAuth token: error getting token source from auth provider: You are not logged into Antigravity.
+```
+
+**Confirmed**: agy silent-fails (exit 0, empty stdout) when not OAuth-authed. Same one-time setup pattern as codex/kimi/copilot/gemini auth:
+
+```powershell
+agy           # Interactive — OAuth browser flow; complete login; exit
+agy -p "..."  # Then headless works indefinitely
+```
+
+**Adapter quirks for T-PLUGIN-05f (if Path E chosen — promote to 6th functional vendor)**:
+1. envPreflight must check OAuth state (`~/.gemini/oauth_creds.json` or similar — verify exact path post-login)
+2. Adapter must DETECT silent auth-fail: if exit 0 + empty stdout, inspect `--log-file` output for "not logged into Antigravity" — surface clear error to user
+3. Adapter recommends `agy` interactive flow on first preflight failure
+
+**Status**: PENDING USER OAUTH. After `agy` interactive login, smoke `agy -p "say HOPPER_AGY_OK..." --dangerously-skip-permissions` should return HOPPER_AGY_OK and unlock Path E.
 
 ---
 

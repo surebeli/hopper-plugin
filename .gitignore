@@ -40,3 +40,7 @@ yarn-debug.log*
 .idea/
 .vscode/
 
+
+# Obsidian translate plugin auto-generated translations (codex F5 follow-up)
+[zh] *.md
+*.md.bak
