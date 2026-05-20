@@ -48,6 +48,28 @@ test('wrapper validates task-id with explicit regex (codex Phase 3 F2 echo)', ()
     'wrapper must validate task-id with documented regex');
 });
 
+test('wrapper explicitly rejects ".." in task-id (T-08a audit F1 parity)', () => {
+  const content = readFileSync(WRAPPER, 'utf-8');
+  // Per T-08a audit P1 F1: regex alone allows 'T..x' (`.` is in the character class).
+  // Must have explicit '..' rejection matching Claude Code dispatch.md parity.
+  assert.match(content, /\*\.\.\*|contain.*\.\./i,
+    'wrapper must explicitly reject task-id containing ".." per cross-host parity');
+});
+
+test('wrapper resolves symlinks before computing PLUGIN_ROOT (T-08a audit F2)', () => {
+  const content = readFileSync(WRAPPER, 'utf-8');
+  // Per T-08a audit P1 F2: install via PATH symlink would break wrapper-relative
+  // plugin-root resolution unless symlinks are followed first.
+  assert.match(content, /resolve_script_dir|readlink/,
+    'wrapper must follow symlinks before resolving PLUGIN_ROOT (audit P1 F2)');
+});
+
+test('wrapper prompt forbids codex from proposing fixes / diagnoses (T-08a audit P2)', () => {
+  const content = readFileSync(WRAPPER, 'utf-8');
+  assert.match(content, /do not diagnose|Do NOT diagnose|do not.*propose fixes|Do NOT.*propose|not.*suggest next steps/i,
+    'prompt must explicitly forbid codex from soft-orchestration (diagnosis/fixes)');
+});
+
 test('wrapper validates flags against explicit whitelist', () => {
   const content = readFileSync(WRAPPER, 'utf-8');
   assert.match(content, /--write\|--force/,
@@ -128,6 +150,23 @@ test('host README warns of single-spawn + no-harness-core', () => {
 });
 
 // ─── argument validation dry-run (only on Unix where bash is available) ───
+
+test('wrapper rejects task-id containing "..": dot-dot dry-run (T-08a audit F1)', { skip: platform() === 'win32' ? 'bash not standardly available on Windows CI' : false }, () => {
+  let stderr = '';
+  let exitCode = 0;
+  try {
+    execFileSync('bash', [WRAPPER, 'T..evil'], {
+      env: { ...process.env, HOPPER_PLUGIN_ROOT: REPO_ROOT, PATH: process.env.PATH },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    stderr = err.stderr ? err.stderr.toString() : '';
+    exitCode = err.status;
+  }
+  assert.equal(exitCode, 2, "'T..evil' must be rejected with code 2");
+  assert.match(stderr, /\.\./,
+    'stderr must mention the dot-dot rejection');
+});
 
 test('wrapper rejects bad task-id without invoking codex', { skip: platform() === 'win32' ? 'bash not standardly available on Windows CI' : false }, () => {
   // Path traversal attempt

@@ -43,11 +43,21 @@ fi
 TASK_ID="$1"
 shift
 
-# Per Phase 3 audit F2 echo: validate before passing to a subprocess.
+# Per Phase 3 audit F2 echo + T-08a audit F1 (cross-host parity):
+# validate against the SAME rules as Claude Code dispatch.md.
 if ! printf '%s' "$TASK_ID" | grep -Eq '^[A-Za-z][A-Za-z0-9._-]{0,99}$'; then
   echo "Error: task-id '$TASK_ID' must match ^[A-Za-z][A-Za-z0-9._-]{0,99}$" >&2
   exit 2
 fi
+# Per T-08a audit P1 F1: ALSO reject '..' (path traversal) — matches
+# Claude Code dispatch.md cross-host parity. Regex alone allows '.' which
+# means 'T..x' passes the pattern; explicit '..' check closes that gap.
+case "$TASK_ID" in
+  *..*)
+    echo "Error: task-id '$TASK_ID' must not contain '..' (path traversal)" >&2
+    exit 2
+    ;;
+esac
 
 # Validate each remaining flag against an explicit whitelist
 FLAGS=""
@@ -63,12 +73,32 @@ for flag in "$@"; do
   esac
 done
 
-# Locate plugin root (where .claude-plugin/ and cli/bin/hopper-dispatch live)
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Locate plugin root (where .claude-plugin/ and cli/bin/hopper-dispatch live).
+# Per T-08a audit P1 F2: when the wrapper is installed via symlink onto PATH,
+# $0 / dirname $0 returns the SYMLINK location, not the actual script. The
+# wrapper-relative '../../..' resolution then points at the symlink-tree
+# parent, breaking the install. Resolve the real script path first.
+resolve_script_dir() {
+  local src="$1"
+  # Walk symlinks until we hit the real file. Portable across Linux/macOS
+  # (BSD readlink lacks -f).
+  while [ -L "$src" ]; do
+    local link
+    link="$(readlink "$src")"
+    case "$link" in
+      /*) src="$link" ;;
+      *)  src="$(dirname "$src")/$link" ;;
+    esac
+  done
+  cd "$(dirname "$src")" && pwd
+}
+
+SCRIPT_DIR="$(resolve_script_dir "$0")"
 if [ -n "${HOPPER_PLUGIN_ROOT:-}" ]; then
   PLUGIN_ROOT="$HOPPER_PLUGIN_ROOT"
 else
   # wrapper is at hosts/codex-cli/bin/hopper-codex; plugin root is 3 levels up
+  # from the REAL script location (post symlink resolution above).
   PLUGIN_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 fi
 
@@ -103,7 +133,9 @@ After the command returns, do this:
 
 2. If exit code is non-zero, surface the error block verbatim. Do NOT retry the command — per spec §3 #4, the dispatcher's single-spawn invariant means retries belong to the user, not the host adapter.
 
-3. Do NOT call any other shell commands except the one specified above. Do NOT modify .hopper/queue.md, .hopper/AGENTS.md, or .hopper/COST-LOG.md."
+3. Do NOT call any other shell commands except the one specified above. Do NOT modify .hopper/queue.md, .hopper/AGENTS.md, or .hopper/COST-LOG.md.
+
+4. Do NOT diagnose the failure, propose fixes, or suggest next steps. Your role is dispatch + surface, not orchestrate. If the user wants diagnosis they will ask explicitly. Per spec §3 #4, advice that nudges the user toward retries or vendor-switches is soft-orchestration and is forbidden in this host adapter."
 
 # Invoke codex once; sandbox is read-only by default — user must opt into
 # workspace-write only if their codex install requires it for the shell tool.
