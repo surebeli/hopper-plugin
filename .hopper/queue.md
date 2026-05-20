@@ -28,7 +28,7 @@ Anchor: `.hopper/queue.md::root`
 | T-PLUGIN-05b | code-impl | pending | T-PLUGIN-04, T-PLUGIN-00b | normal | Kimi vendor adapter (kimi -p --print --afk, ~40 lines). |
 | T-PLUGIN-05c | code-impl | pending | T-PLUGIN-04, T-PLUGIN-00b | normal | OpenCode vendor adapter (opencode run, pin 0.14.7 per #3213, ~50 lines). |
 | T-PLUGIN-05d | code-impl | pending | T-PLUGIN-04, T-PLUGIN-00b | normal | Copilot vendor adapter (copilot -p, GH_TOKEN auth, quota-aware, ~40 lines). |
-| T-PLUGIN-05e | code-impl | pending | T-PLUGIN-04, T-PLUGIN-04.5, T-PLUGIN-00b | normal | Gemini vendor adapter (cli/src/vendors/gemini.ts, ~50-80 lines on shared wrapper). 5th functional vendor per codex F4 correction. Antigravity is doc-only `vendors/antigravity.ts.spec.md`, post-essay. |
+| T-PLUGIN-05e | code-impl | pending | T-PLUGIN-04, T-PLUGIN-04.5, T-PLUGIN-00b | normal | **Antigravity (agy) adapter** (swapped per user 2026-05-20; cli/src/vendors/agy.ts, ~60-80 lines). 5th functional vendor; agy is Google's 6/18 Gemini successor. Adapter must handle silent auth-fail (exit 0 + empty stdout = not OAuth-authed). Gemini optionally doc-only post-essay. |
 | T-PLUGIN-06 | code-impl | pending | T-PLUGIN-05a | normal | Output.md writer + queue/cost-row suggested-edit prompts. |
 | T-PLUGIN-07 | code-impl | pending | T-PLUGIN-06 | normal | Claude Code slash command wiring (Tier B full). |
 | T-PLUGIN-08a | code-impl | pending | T-PLUGIN-07 | normal | Codex CLI host adapter (Tier C #1, custom prompt wrapper). |
