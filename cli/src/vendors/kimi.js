@@ -1,0 +1,71 @@
+// Kimi vendor adapter (T-PLUGIN-05b)
+// Anchor: cli/src/vendors/kimi.js
+//
+// Per T-PLUGIN-00b resolved: `kimi -p "<input>" --print --afk --final-message-only -m <model>`
+// Per spec §3 #4: thin wrapper, no retry.
+
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
+/** @type {import('../types.js').VendorAdapter} */
+export const kimiAdapter = {
+  name: 'kimi',
+  command: 'kimi',
+  stdinMode: 'none',
+
+  args(input, opts) {
+    return [
+      '-p', input,
+      '--print',
+      '--afk',
+      '--final-message-only',
+      ...(opts.model ? ['-m', opts.model] : []),
+    ];
+  },
+
+  envPreflight() {
+    const cfgPath = join(homedir(), '.kimi', 'config.toml');
+    if (!existsSync(cfgPath)) {
+      return {
+        ok: false,
+        missing: ['Configure kimi auth: run `kimi /connect` interactively OR set API key in ~/.kimi/config.toml'],
+      };
+    }
+    return { ok: true, missing: [] };
+  },
+
+  timeoutMs(_opts) {
+    // Kimi-thinking can take longer; default 180s per T-00b
+    return 180_000;
+  },
+
+  parseResult(raw) {
+    if (raw.timedOut) {
+      return { text: raw.stdout, status: 'timeout', error: `kimi -p timed out after ${raw.durationMs}ms` };
+    }
+    if (raw.exitCode === 127) {
+      return { text: '', status: 'permission-fail', error: 'kimi binary not found. Install: pip install kimi-cli' };
+    }
+    // Kimi-specific quirk: HTTP 402 membership errors print to stdout, exit 0
+    // Per T-00b smoke observation: "Error code: 402 - {'error': {'message': "We're unable to verify your membership..."}}"
+    if (raw.stdout.includes('Error code: 4') && raw.stdout.includes("'error'")) {
+      const msg = raw.stdout.match(/'message':\s*"([^"]+)"/);
+      return {
+        text: raw.stdout,
+        status: 'auth-fail',
+        error: msg ? `Kimi auth/membership: ${msg[1]}` : 'Kimi auth/membership error (check ~/.kimi/config.toml)',
+      };
+    }
+    if (raw.exitCode === 0 && raw.stdout) {
+      // Strip "To resume this session: kimi -r <id>" footer if present
+      const text = raw.stdout.replace(/\n*To resume this session:[^\n]*\n*$/m, '').trim();
+      return { text, status: 'success' };
+    }
+    return {
+      text: raw.stdout,
+      status: 'unknown-fail',
+      error: `kimi exited ${raw.exitCode}: ${(raw.stderr || '').slice(0, 500)}`,
+    };
+  },
+};

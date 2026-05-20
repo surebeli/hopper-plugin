@@ -12,6 +12,8 @@
 import { parseQueue, findEligibleTask, summarizeQueue } from './queue.js';
 import { loadTaskFrame, composePrompt } from './tasks.js';
 import { parseAgentsFile, resolveVendor } from './agents.js';
+import { getAdapter } from './vendors/index.js';
+import { runSubprocessOnce } from './subprocess.js';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -91,4 +93,78 @@ export async function getStatus(hopperDir) {
   const queuePath = join(hopperDir, 'queue.md');
   const tasks = await parseQueue(queuePath);
   return summarizeQueue(tasks);
+}
+
+/**
+ * Execute dispatch end-to-end: resolve + adapter preflight + subprocess spawn + parse.
+ *
+ * Per spec §3 #4 (no harness reaction core): ONE adapter call = ONE subprocess
+ * spawn attempt. No retry on failure. If adapter.envPreflight() returns ok=false,
+ * we abort BEFORE spawning (no point invoking known-broken environment).
+ *
+ * @param {object} args
+ * @param {string} args.hopperDir
+ * @param {string} args.taskId
+ * @param {import('./types.js').AdapterOpts} [args.adapterOpts]
+ * @returns {Promise<{
+ *   task: import('./types.js').TaskRow,
+ *   vendor: string,
+ *   output: import('./types.js').TaskOutput,
+ *   raw: import('./types.js').SubprocessResult,
+ * }>}
+ */
+export async function executeDispatch({ hopperDir, taskId, adapterOpts = {} }) {
+  // 1. Resolve (Phase 1)
+  const resolved = await resolveDispatch({ hopperDir, taskId });
+  const { task, vendor, composedPrompt } = resolved;
+
+  // 2. Load adapter (Phase 2)
+  const adapter = getAdapter(vendor);
+
+  // 3. envPreflight — if not ok, fail FAST without spawning subprocess
+  const preflight = adapter.envPreflight();
+  if (!preflight.ok) {
+    return {
+      task,
+      vendor,
+      output: {
+        text: '',
+        status: 'auth-fail',
+        error: `Adapter ${vendor} preflight failed: ${preflight.missing.join(' | ')}`,
+      },
+      raw: {
+        exitCode: -1,
+        stdout: '',
+        stderr: '',
+        timedOut: false,
+        durationMs: 0,
+      },
+    };
+  }
+
+  // 4. Prepare log file if adapter wants one (codex F2 silent-fail detection)
+  let logPath = null;
+  if (typeof adapter.prepareLog === 'function') {
+    const hint = adapter.prepareLog(taskId, adapter.name);
+    logPath = hint.logPath || null;
+  }
+
+  // 5. Build args (adapter may want logFile threaded through opts)
+  const effectiveOpts = { ...adapterOpts, logFile: logPath };
+  const args = adapter.args(composedPrompt, effectiveOpts);
+
+  // 6. Spawn subprocess ONCE (per spec §3 #4)
+  const stdinInput = adapter.stdinMode === 'pipe' ? composedPrompt : null;
+  const raw = await runSubprocessOnce({
+    command: adapter.command,
+    args,
+    stdinInput,
+    timeoutMs: adapter.timeoutMs(effectiveOpts),
+    logFilePath: logPath,
+  });
+
+  // 7. Parse result (adapter-specific failure classification)
+  const output = adapter.parseResult(raw);
+
+  return { task, vendor, output, raw };
 }

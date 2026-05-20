@@ -5,26 +5,30 @@
 // Per spec §3 #4 (no harness reaction core): ONE invocation = ONE action = ONE exit.
 // No retry, no fallback, no state across invocations.
 
-import { resolveDispatch, getStatus } from '../src/dispatch.js';
+import { resolveDispatch, getStatus, executeDispatch } from '../src/dispatch.js';
 import { listTaskTypes } from '../src/tasks.js';
+import { listAdapters } from '../src/vendors/index.js';
 import { resolve, join } from 'node:path';
 import { existsSync } from 'node:fs';
 
 const args = process.argv.slice(2);
-const VERSION = '0.2.0-phase-1';
+const VERSION = '0.3.0-phase-2';
 
 function printUsage() {
   console.log(`hopper-dispatch v${VERSION}`);
   console.log('');
   console.log('Usage:');
-  console.log('  hopper-dispatch <task-id>       Resolve dispatch for a task (Phase 1: no vendor spawn yet)');
+  console.log('  hopper-dispatch <task-id>       Dispatch a task to its vendor (Phase 2: real subprocess)');
+  console.log('  hopper-dispatch --resolve <id>   Resolve dispatch without spawning (Phase 1 behavior)');
   console.log('  hopper-dispatch --status         Show queue summary');
-  console.log('  hopper-dispatch --smoke          Phase 0 smoke test');
+  console.log('  hopper-dispatch --smoke          Standalone CLI smoke test');
   console.log('  hopper-dispatch --task-types     List available task-type frames');
+  console.log('  hopper-dispatch --vendors        List registered vendor adapters');
   console.log('  hopper-dispatch --help           Show this message');
   console.log('  hopper-dispatch --version        Print version');
   console.log('');
-  console.log('Env: HOPPER_DIR overrides .hopper/ location (default: ./.hopper/)');
+  console.log('Env: HOPPER_DIR overrides .hopper/ location');
+  console.log('     HOPPER_DEBUG=1 prints composed prompt + raw subprocess result');
 }
 
 function printSmoke() {
@@ -92,37 +96,100 @@ async function main() {
     return;
   }
 
-  // Treat first non-flag arg as task-id
+  if (args.includes('--vendors')) {
+    const vendors = listAdapters();
+    console.log(`hopper-dispatch v${VERSION} — registered vendor adapters:`);
+    for (const v of vendors) console.log(`  - ${v}`);
+    return;
+  }
+
+  // --resolve <id>: Phase 1 behavior (no spawn)
+  const resolveIdx = args.indexOf('--resolve');
+  if (resolveIdx !== -1) {
+    const taskId = args[resolveIdx + 1];
+    if (!taskId || taskId.startsWith('-')) {
+      console.error('Error: --resolve requires a task-id argument.');
+      process.exit(1);
+    }
+    await runResolve(hopperDir, taskId);
+    return;
+  }
+
+  // Treat first non-flag arg as task-id (Phase 2: real spawn)
   const taskId = args.find((a) => !a.startsWith('-'));
   if (!taskId) {
     console.error('Error: no task-id provided. Use --help for usage.');
     process.exit(1);
   }
+  await runDispatch(hopperDir, taskId);
+}
 
-  // Phase 1: resolve dispatch (no vendor spawn yet)
+async function runResolve(hopperDir, taskId) {
   try {
     const result = await resolveDispatch({ hopperDir, taskId });
     console.log(`hopper-dispatch v${VERSION} — resolved dispatch for ${taskId}`);
-    console.log('');
     console.log(`  Task-type: ${result.task.taskType}`);
-    console.log(`  Status:    ${result.task.status}`);
-    console.log(`  Priority:  ${result.task.priority}`);
     console.log(`  Vendor:    ${result.vendor}`);
     console.log(`  Brief:     ${result.task.brief}`);
-    console.log('');
-    console.log('Phase 1 stops here. Vendor adapter (T-PLUGIN-05a-e) will:');
-    console.log(`  1. Call cli/src/vendors/${result.vendor}.js with the composed prompt`);
-    console.log(`  2. Spawn ${result.vendor} subprocess (ONCE, with hard timeout)`);
-    console.log(`  3. Write .hopper/handoffs/${taskId}-output.md`);
-    console.log('');
-    console.log(`Composed prompt length: ${result.composedPrompt.length} chars`);
-    console.log('(Set HOPPER_DEBUG=1 to print full composed prompt)');
+    console.log(`  Composed prompt length: ${result.composedPrompt.length} chars`);
     if (process.env.HOPPER_DEBUG) {
       console.log('');
       console.log('=== COMPOSED PROMPT ===');
       console.log(result.composedPrompt);
       console.log('=== END PROMPT ===');
     }
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+async function runDispatch(hopperDir, taskId) {
+  try {
+    console.error(`hopper-dispatch v${VERSION} — dispatching ${taskId}...`);
+    const startedAt = Date.now();
+    const result = await executeDispatch({ hopperDir, taskId });
+    const elapsedMs = Date.now() - startedAt;
+
+    console.log('');
+    console.log('=== DISPATCH RESULT ===');
+    console.log(`Task:     ${result.task.id} (${result.task.taskType})`);
+    console.log(`Vendor:   ${result.vendor}`);
+    console.log(`Status:   ${result.output.status}`);
+    console.log(`Duration: ${elapsedMs}ms`);
+    if (result.output.usage) {
+      console.log(`Usage:    ${JSON.stringify(result.output.usage)}`);
+    }
+    console.log('');
+    if (result.output.status === 'success') {
+      console.log('--- OUTPUT ---');
+      console.log(result.output.text);
+      console.log('--- END OUTPUT ---');
+    } else {
+      console.log(`--- ${result.output.status.toUpperCase()} ---`);
+      console.log(result.output.error || '(no error message)');
+      if (result.output.text) {
+        console.log('');
+        console.log('--- PARTIAL OUTPUT ---');
+        console.log(result.output.text);
+      }
+      console.log('--- END ---');
+    }
+
+    if (process.env.HOPPER_DEBUG) {
+      console.log('');
+      console.log('=== RAW SUBPROCESS RESULT ===');
+      console.log(JSON.stringify({
+        exitCode: result.raw.exitCode,
+        timedOut: result.raw.timedOut,
+        durationMs: result.raw.durationMs,
+        stdoutLen: result.raw.stdout.length,
+        stderrLen: result.raw.stderr.length,
+        logFileLen: result.raw.logFileContent ? result.raw.logFileContent.length : null,
+      }, null, 2));
+    }
+
+    if (result.output.status !== 'success') process.exit(1);
   } catch (err) {
     console.error(`Error: ${err.message}`);
     process.exit(1);

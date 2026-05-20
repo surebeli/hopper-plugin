@@ -41,6 +41,18 @@ Tier key: `sub` = subscription quota (ChatGPT Plus for Codex CLI, Claude Pro for
 
 **Phase 1 subtotal**: $0 marginal cost (Strategy-as-developer in Claude Code TUI subscription). 5 tasks done. 42 total unit tests passing.
 
+### Phase 2 adapter implementations (2026-05-20)
+
+| Date | Task | Task-type | Model | Tokens In/Out | Approx $ | Tier | Notes |
+|------|------|-----------|-------|---------------|----------|------|-------|
+| 2026-05-20 | T-PLUGIN-05a | code-impl | claude-opus-4-7 | n/a | $0 marginal | sub | Codex adapter; 9 tests pass |
+| 2026-05-20 | T-PLUGIN-05b | code-impl | claude-opus-4-7 | n/a | $0 marginal | sub | Kimi adapter; HTTP 402 detection |
+| 2026-05-20 | T-PLUGIN-05c | code-impl | claude-opus-4-7 | n/a | $0 marginal | sub | OpenCode adapter; ANSI strip |
+| 2026-05-20 | T-PLUGIN-05d | code-impl | claude-opus-4-7 | n/a | $0 marginal | sub | Copilot adapter; quota detection |
+| 2026-05-20 | T-PLUGIN-05e | code-impl | claude-opus-4-7 | n/a | $0 marginal | sub | agy adapter with silent auth-fail; 22 tests |
+
+**Phase 2 subtotal**: $0 marginal. 5 adapters + dispatch wiring + 55 new tests = 107 total tests passing.
+
 **Cumulative (Phase 0 + Phase 1)**: ~$0.08 API + 6 codex audit cycles ~$3.30 + 1 phase-0 audit ~$0.55 + 3 v2.0.3 audit iterations ~$1.50 = **~$5.43 total** demo development cost so far.
 
 ---

@@ -58,5 +58,12 @@ Anchor: `.hopper/queue.md::root`
 - T-PLUGIN-03 done at 2026-05-20T<later3>+08:00 — tasks library loader + anti-persona verifier; 11 unit tests pass; all 6 existing frames verified anti-persona-clean.
 - T-PLUGIN-04 done at 2026-05-20T<later3>+08:00 — AGENTS parser + deterministic vendor router; 7 unit tests pass; 10-call determinism test confirms no state leakage.
 - T-PLUGIN-01 done at 2026-05-20T<later3>+08:00 — repo init + plugin manifest (Phase 0 + Phase 1); E2E smoke against actual queue.md works; Prong 1 install user-verify separate unified user-action gate.
+- Phase 2 batch started at 2026-05-20T<later4>+08:00 by strategy-as-developer — T-PLUGIN-05a/b/c/d/e in parallel.
+- T-PLUGIN-05a done at 2026-05-20T<later4>+08:00 — Codex adapter; 9 contract tests pass.
+- T-PLUGIN-05b done at 2026-05-20T<later4>+08:00 — Kimi adapter with 402 membership detection; 9 tests pass.
+- T-PLUGIN-05c done at 2026-05-20T<later4>+08:00 — OpenCode adapter; 9 tests pass; pin 0.14.7 advisory only.
+- T-PLUGIN-05d done at 2026-05-20T<later4>+08:00 — Copilot adapter with quota detection; 9 tests pass.
+- T-PLUGIN-05e done at 2026-05-20T<later4>+08:00 — agy adapter with silent auth-fail detection per codex F2; 22 tests pass (10 contract + 12 quirks); real smoke gated on user OAuth.
+- Phase 2 wiring: dispatch.js gained `executeDispatch` (preflight + spawn + parseResult chain); cli/src/vendors/index.js registry; bin/hopper-dispatch v0.3.0-phase-2 with --vendors flag + real spawn entry. 107 total tests pass.
 - T-PLUGIN-00b done at 2026-05-20T23:15:00+08:00 — Verdict PASS_WITH_NOTE; 2 of 5 vendors fully smoke-verified (Codex + OpenCode); Kimi auth blocked; Copilot/Gemini not installed; documented for user-action
 - T-PLUGIN-00.5 done at 2026-05-20T23:15:00+08:00 — Verdict PASS; 6 .hopper/tasks/*.md frames written; anti-persona test passes
