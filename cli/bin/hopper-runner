@@ -1,0 +1,174 @@
+#!/usr/bin/env node
+// hopper-runner — detached wrapper owning a single vendor subprocess lifecycle
+// Anchor: cli/bin/hopper-runner
+//
+// Per spec v2.1.0 §14.6: this wrapper is invoked exclusively by hopper-dispatch
+// --background as a detached child. It then spawns the vendor adapter EXACTLY
+// ONCE (non-detached, so this wrapper owns the lifecycle), waits for vendor
+// exit, and atomically updates the output.md frontmatter status.
+//
+// Single-spawn invariant: this script contains exactly one spawn() call.
+// Counter-tested in tests/integration/runner-single-spawn.test.js.
+
+import { spawn } from 'node:child_process';
+import { openSync, closeSync } from 'node:fs';
+import { readFrontmatter, writeFrontmatter } from '../src/background.js';
+import { getAdapter } from '../src/vendors/index.js';
+
+function parseRunnerArgs(argv) {
+  // Format: --task-id X --hopper-dir Y --adapter Z --output-md A --log B -- <adapter argv...>
+  const parsed = { adapterArgv: [] };
+  let i = 0;
+  let sawSeparator = false;
+  while (i < argv.length) {
+    const a = argv[i];
+    if (sawSeparator) {
+      parsed.adapterArgv.push(a);
+      i++;
+      continue;
+    }
+    if (a === '--') {
+      sawSeparator = true;
+      i++;
+      continue;
+    }
+    if (a.startsWith('--')) {
+      const key = a.slice(2).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+      const val = argv[i + 1];
+      if (val === undefined || val.startsWith('--')) {
+        throw new Error(`hopper-runner: flag ${a} requires a value`);
+      }
+      parsed[key] = val;
+      i += 2;
+      continue;
+    }
+    throw new Error(`hopper-runner: unexpected arg ${a}`);
+  }
+  return parsed;
+}
+
+function fail(outputMdPath, message) {
+  // best-effort frontmatter update on early failure
+  try {
+    const fm = readFrontmatter(outputMdPath);
+    writeFrontmatter(outputMdPath, {
+      ...fm,
+      status: 'failed',
+      end_time: new Date().toISOString(),
+      exit_code: -1,
+      duration_ms: Date.now() - Date.parse(fm.start_time || new Date().toISOString()),
+      _body: (fm._body || '') + `\n## Failure (runner)\n${message}\n`,
+    });
+  } catch (_) {
+    // if we can't even write frontmatter, all we can do is exit
+  }
+  process.stderr.write(`hopper-runner: ${message}\n`);
+  process.exit(1);
+}
+
+async function main() {
+  let opts;
+  try {
+    opts = parseRunnerArgs(process.argv.slice(2));
+  } catch (err) {
+    process.stderr.write(`${err.message}\n`);
+    process.exit(2);
+  }
+
+  const { taskId, hopperDir, adapter: adapterName, outputMd: outputMdPath, log: logPath, adapterArgv } = opts;
+  if (!taskId || !hopperDir || !adapterName || !outputMdPath || !logPath) {
+    process.stderr.write('hopper-runner: missing required flags (--task-id, --hopper-dir, --adapter, --output-md, --log)\n');
+    process.exit(2);
+  }
+
+  const adapter = getAdapter(adapterName);
+  if (!adapter) {
+    fail(outputMdPath, `Unknown adapter: ${adapterName}`);
+  }
+
+  const t0 = Date.now();
+
+  // Open log fds for vendor stdio. The runner's own stdout/stderr was already
+  // redirected to logPath by the parent (hopper-dispatch). We re-open the file
+  // for the vendor so its writes are tracked separately for failure analysis.
+  let fdOut, fdErr;
+  try {
+    fdOut = openSync(logPath, 'a');
+    fdErr = openSync(logPath, 'a');
+  } catch (err) {
+    fail(outputMdPath, `Could not open log file ${logPath}: ${err.message}`);
+  }
+
+  // *** THE single spawn (spec §3 #4) ***
+  const vendor = spawn(adapter.command, adapterArgv, {
+    stdio: ['ignore', fdOut, fdErr],
+    windowsHide: true,
+    cwd: process.cwd(),
+    env: process.env,
+  });
+
+  // Close our copies of the fds; vendor has its own.
+  closeSync(fdOut);
+  closeSync(fdErr);
+
+  let timedOut = false;
+  const timeoutMs = adapter.timeoutMs({ background: true });
+  const killTimer = setTimeout(() => {
+    timedOut = true;
+    try { vendor.kill('SIGTERM'); } catch (_) {}
+    // Hard-kill after 5s grace
+    setTimeout(() => { try { vendor.kill('SIGKILL'); } catch (_) {} }, 5000).unref();
+  }, timeoutMs);
+  killTimer.unref();
+
+  vendor.on('exit', (code, signal) => {
+    clearTimeout(killTimer);
+    const duration_ms = Date.now() - t0;
+
+    // Classify status: success | failed (timeout / non-zero / signal)
+    let status = 'failed';
+    if (code === 0 && !timedOut && !signal) {
+      status = 'done';
+    }
+
+    // Re-read frontmatter; we don't have the adapter.parseResult chain here
+    // because the vendor's stdout went to a file we are NOT reading back (large).
+    // The .log sidecar IS the result for background mode; parseResult-style
+    // classification only runs in sync mode. The user runs --watch to consume.
+    try {
+      const fm = readFrontmatter(outputMdPath);
+      writeFrontmatter(outputMdPath, {
+        ...fm,
+        status,
+        end_time: new Date().toISOString(),
+        exit_code: code === null ? -1 : code,
+        signal: signal || null,
+        timed_out: timedOut || null,
+        duration_ms,
+        _body: (fm._body || '') +
+          `\n## Status (background completion)\n` +
+          `- exit_code: ${code === null ? -1 : code}\n` +
+          (signal ? `- signal: ${signal}\n` : '') +
+          (timedOut ? `- timed_out: true\n` : '') +
+          `- duration_ms: ${duration_ms}\n` +
+          `- end_time: ${new Date().toISOString()}\n` +
+          `- log: see \`${logPath.split(/[\\/]/).pop()}\` for raw output\n`,
+      });
+    } catch (err) {
+      process.stderr.write(`hopper-runner: failed to write final frontmatter: ${err.message}\n`);
+      process.exit(2);
+    }
+
+    process.exit(code === null ? 1 : code);
+  });
+
+  vendor.on('error', (err) => {
+    clearTimeout(killTimer);
+    fail(outputMdPath, `Vendor spawn error: ${err.message} (command: ${adapter.command})`);
+  });
+}
+
+main().catch((err) => {
+  process.stderr.write(`hopper-runner fatal: ${err.message}\n`);
+  process.exit(2);
+});

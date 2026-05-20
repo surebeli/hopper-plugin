@@ -1,0 +1,342 @@
+// Background dispatch infrastructure (T-PLUGIN-PHASE5a-1)
+// Anchor: cli/src/background.js
+//
+// Per spec v2.1.0 §14: background dispatch lives in output.md frontmatter,
+// no new JSON state files. This module owns:
+//   - reading + writing frontmatter atomically (renameSync over tmp)
+//   - cross-platform liveness check via process.kill(pid, 0)
+//   - preflight that detects in-progress duplicate dispatches + 24h orphan rule
+//   - the spawnDetached() entry called by hopper-dispatch --background
+//
+// Per spec §3 #4 single-spawn invariant: this module wires up exactly ONE
+// hopper-runner spawn per dispatch. hopper-runner itself spawns the vendor
+// adapter exactly once. No retry, no fallback, no orchestration.
+
+import { spawn } from 'node:child_process';
+import {
+  openSync, closeSync, existsSync, renameSync,
+  readFileSync, writeFileSync, statSync, readdirSync,
+} from 'node:fs';
+import { resolve, dirname, basename, join } from 'node:path';
+import { validateTaskId } from './validation.js';
+
+const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/;
+
+export const ORPHAN_CEILING_HOURS = 24;
+
+/**
+ * Minimal flat-YAML frontmatter parser. Handles only the schema we own:
+ * scalar key: value pairs, no nested objects, no arrays. ISO-8601 dates
+ * pass through as strings. Quoted strings are unquoted; null/true/false
+ * literals are converted.
+ *
+ * @param {string} path
+ * @returns {{ _body: string } & Record<string, any>}
+ */
+export function readFrontmatter(path) {
+  const txt = readFileSync(path, 'utf-8');
+  const m = txt.match(FRONTMATTER_RE);
+  if (!m) return { _body: txt };
+  const fm = { _body: m[2] };
+  for (const line of m[1].split('\n')) {
+    const trimmed = line.replace(/^\s+/, '');
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const colonIdx = trimmed.indexOf(':');
+    if (colonIdx < 0) continue;
+    const key = trimmed.slice(0, colonIdx).trim();
+    let val = trimmed.slice(colonIdx + 1).trim();
+    // strip optional inline comment (not perfect; OK for our schema)
+    const hashIdx = val.indexOf(' #');
+    if (hashIdx >= 0) val = val.slice(0, hashIdx).trim();
+    fm[key] = parseScalar(val);
+  }
+  return fm;
+}
+
+function parseScalar(s) {
+  if (s === '' || s === 'null' || s === '~') return null;
+  if (s === 'true') return true;
+  if (s === 'false') return false;
+  // numeric (integers only — we don't store floats)
+  if (/^-?\d+$/.test(s)) return parseInt(s, 10);
+  // quoted string
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+    return s.slice(1, -1);
+  }
+  return s;
+}
+
+function emitScalar(v) {
+  if (v === null || v === undefined) return 'null';
+  if (typeof v === 'boolean') return v ? 'true' : 'false';
+  if (typeof v === 'number') return String(v);
+  // string — quote only if it contains characters that would confuse the parser
+  if (typeof v === 'string') {
+    if (/[:#\n\r]|^\s|\s$|^(?:true|false|null|~)$|^-?\d+$/.test(v)) {
+      return `"${v.replace(/"/g, '\\"')}"`;
+    }
+    return v;
+  }
+  throw new Error(`Cannot emit scalar of type ${typeof v}: ${v}`);
+}
+
+/**
+ * Write frontmatter back atomically via tmp-file + rename. Preserves _body
+ * verbatim. Drops keys whose values are undefined.
+ *
+ * @param {string} path
+ * @param {object} fm
+ */
+export function writeFrontmatter(path, fm) {
+  const { _body = '', ...rest } = fm;
+  const lines = [];
+  for (const [k, v] of Object.entries(rest)) {
+    if (v === undefined) continue;
+    lines.push(`${k}: ${emitScalar(v)}`);
+  }
+  const out = `---\n${lines.join('\n')}\n---\n${_body}`;
+  const tmp = path + '.tmp';
+  writeFileSync(tmp, out, 'utf-8');
+  renameSync(tmp, path);
+}
+
+/**
+ * Cross-platform PID liveness probe. Per Node docs: signal 0 is
+ * platform-independent existence check. EPERM means process exists but
+ * we can't signal it (defensively return true). ESRCH means dead.
+ *
+ * @param {number|null|undefined} pid
+ * @returns {boolean}
+ */
+export function isAlive(pid) {
+  if (!pid || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    if (err.code === 'EPERM') return true;
+    return false;
+  }
+}
+
+/**
+ * Compute hours elapsed since a given ISO-8601 timestamp.
+ * Returns Infinity if input is invalid or missing.
+ */
+export function hoursSince(isoString) {
+  if (!isoString) return Infinity;
+  const t = Date.parse(isoString);
+  if (!Number.isFinite(t)) return Infinity;
+  return (Date.now() - t) / 3.6e6;
+}
+
+/**
+ * Preflight check before a new dispatch. Inspects an existing output.md
+ * (if any) and decides whether the new dispatch may proceed.
+ *
+ * Per spec v2.1.0 §14.4 + §14.5:
+ *   - status=done | failed | orphaned         → OK to overwrite
+ *   - status=in-progress + age >= 24h         → re-classify as orphaned, then OK
+ *   - status=in-progress + age < 24h + alive  → REFUSE (job is running)
+ *   - status=in-progress + dead PID            → re-classify as orphaned, then OK
+ *
+ * Returns { ok: boolean, reason?: string }. When ok=true and reclassification
+ * happened, this fn has already rewritten the frontmatter.
+ *
+ * @param {string} outputMdPath
+ */
+export function preflightDispatch(outputMdPath) {
+  if (!existsSync(outputMdPath)) return { ok: true };
+
+  let fm;
+  try {
+    fm = readFrontmatter(outputMdPath);
+  } catch (err) {
+    // Corrupt frontmatter — proceed but don't try to preserve previous state
+    return { ok: true };
+  }
+
+  if (fm.status !== 'in-progress') return { ok: true };
+
+  const ageH = hoursSince(fm.start_time);
+  if (ageH >= ORPHAN_CEILING_HOURS) {
+    writeFrontmatter(outputMdPath, { ...fm, status: 'orphaned' });
+    return { ok: true };
+  }
+
+  if (isAlive(fm.pid)) {
+    return {
+      ok: false,
+      reason: `task ${fm.task_id || basename(outputMdPath)} is already running ` +
+              `(pid ${fm.pid}, started ${fm.start_time}). ` +
+              `Use 'hopper-dispatch --watch ${fm.task_id || ''}' to follow, ` +
+              `or wait for it to finish.`,
+    };
+  }
+
+  // PID dead but status still in-progress → orphaned
+  writeFrontmatter(outputMdPath, { ...fm, status: 'orphaned' });
+  return { ok: true };
+}
+
+/**
+ * Spawn the hopper-runner wrapper detached. Returns immediately.
+ *
+ * Per spec §3 #4: this is the ONLY spawn point in the background path. The
+ * wrapper, once running, will spawn the vendor adapter ONCE. No retry.
+ *
+ * @param {object} args
+ * @param {string} args.hopperDir
+ * @param {string} args.taskId
+ * @param {string} args.adapterName            normalized vendor name
+ * @param {string[]} args.adapterArgv          argv elements for the vendor (after `adapter` keyword)
+ * @param {string} args.runnerPath             absolute path to cli/bin/hopper-runner
+ * @param {string} [args.hostNative]           which host-native path is being bypassed/falling back (informational)
+ * @param {string|null} [args.stdinInput]      adapter stdin payload (kept null in background mode; piping stdin to detached child is unreliable)
+ * @returns {{ pid: number, outputMdPath: string, logPath: string, startTime: string }}
+ */
+export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, runnerPath, hostNative = null, stdinInput = null }) {
+  validateTaskId(taskId);
+
+  const handoffDir = join(hopperDir, 'handoffs');
+  const outputMdPath = join(handoffDir, `${taskId}-output.md`);
+  const logPath = outputMdPath.replace(/\.md$/, '.log');
+
+  const pf = preflightDispatch(outputMdPath);
+  if (!pf.ok) {
+    const err = new Error(`Refusing dispatch: ${pf.reason}`);
+    err.code = 'EALREADYRUNNING';
+    throw err;
+  }
+
+  // Per spec §14 stdin handling: background mode forbids stdin (would require
+  // a pipe that survives parent exit, which is fragile cross-platform).
+  // Adapters that need stdinMode='pipe' must compose prompt into argv instead.
+  if (stdinInput) {
+    throw new Error(
+      `Background mode does not support stdin piping (adapter ${adapterName} ` +
+      `requires stdinMode='pipe'). Use sync mode or update the adapter to ` +
+      `accept the prompt as an argv element.`
+    );
+  }
+
+  const startTime = new Date().toISOString();
+
+  // Seed frontmatter BEFORE spawn. PID will be patched in after spawn returns.
+  writeFrontmatter(outputMdPath, {
+    task_id: taskId,
+    adapter: adapterName,
+    status: 'in-progress',
+    pid: null,
+    start_time: startTime,
+    end_time: null,
+    exit_code: null,
+    duration_ms: null,
+    mode: 'background',
+    host_native: hostNative,
+    session_id: null,
+    log: `./${basename(logPath)}`,
+    started_by_pid: process.pid,
+    _body: `\n# ${taskId} — ${adapterName} (background, in-progress)\n\n` +
+           `Output streaming to \`${basename(logPath)}\`. Status updates here.\n`,
+  });
+
+  // Open log file with O_APPEND. Two fds (one for stdout, one for stderr) is fine —
+  // kernel guarantees atomic appends per write.
+  const fdOut = openSync(logPath, 'a');
+  const fdErr = openSync(logPath, 'a');
+
+  // Spawn the runner. node executes our runner script with task metadata.
+  const child = spawn(process.execPath, [
+    runnerPath,
+    '--task-id', taskId,
+    '--hopper-dir', hopperDir,
+    '--adapter', adapterName,
+    '--output-md', outputMdPath,
+    '--log', logPath,
+    '--',
+    ...adapterArgv,
+  ], {
+    detached: true,
+    stdio: ['ignore', fdOut, fdErr],
+    windowsHide: true,
+    cwd: process.cwd(),
+    env: { ...process.env, HOPPER_RUNNER_INVOKED: '1' },
+  });
+
+  // Parent's fd copies no longer needed; child has its own duplicates post-spawn.
+  closeSync(fdOut);
+  closeSync(fdErr);
+
+  if (!child.pid) {
+    throw new Error('Failed to spawn hopper-runner (no PID returned)');
+  }
+
+  child.unref();
+
+  // Patch the PID into frontmatter. Brief race window: runner might already
+  // be writing status footer if it finished in <1ms. Re-read + merge.
+  const fm = readFrontmatter(outputMdPath);
+  if (fm.status === 'in-progress' && !fm.pid) {
+    writeFrontmatter(outputMdPath, { ...fm, pid: child.pid });
+  }
+
+  return { pid: child.pid, outputMdPath, logPath, startTime };
+}
+
+/**
+ * List all in-progress jobs by scanning handoffs/. Read-only.
+ * @param {string} hopperDir
+ * @returns {Array<{ task_id, adapter, pid, start_time, age_hours, alive }>}
+ */
+export function listInProgressJobs(hopperDir) {
+  const handoffDir = join(hopperDir, 'handoffs');
+  if (!existsSync(handoffDir)) return [];
+  const files = readdirSync(handoffDir).filter((f) => f.endsWith('-output.md'));
+  const results = [];
+  for (const f of files) {
+    const path = join(handoffDir, f);
+    try {
+      const fm = readFrontmatter(path);
+      if (fm.status === 'in-progress') {
+        results.push({
+          task_id: fm.task_id || f.replace(/-output\.md$/, ''),
+          adapter: fm.adapter || 'unknown',
+          pid: fm.pid,
+          start_time: fm.start_time,
+          age_hours: hoursSince(fm.start_time),
+          alive: isAlive(fm.pid),
+          path,
+        });
+      }
+    } catch (_) {
+      // skip unparseable files
+    }
+  }
+  return results;
+}
+
+/**
+ * Re-classify stale in-progress jobs to orphaned. Mutates frontmatter.
+ * Returns list of reclassified task IDs.
+ * @param {string} hopperDir
+ * @returns {string[]}
+ */
+export function reapStaleJobs(hopperDir) {
+  const jobs = listInProgressJobs(hopperDir);
+  const reaped = [];
+  for (const job of jobs) {
+    const shouldReap = job.age_hours >= ORPHAN_CEILING_HOURS || !job.alive;
+    if (!shouldReap) continue;
+    const fm = readFrontmatter(job.path);
+    writeFrontmatter(job.path, {
+      ...fm,
+      status: 'orphaned',
+      _body: (fm._body || '') + `\n## Reaped\n- Reaped at: ${new Date().toISOString()}\n- Reason: ${job.alive ? `age ${job.age_hours.toFixed(1)}h exceeds ${ORPHAN_CEILING_HOURS}h ceiling` : 'PID not alive'}\n`,
+    });
+    reaped.push(job.task_id);
+  }
+  return reaped;
+}
+
+// ORPHAN_CEILING_HOURS already exported via the const declaration above.

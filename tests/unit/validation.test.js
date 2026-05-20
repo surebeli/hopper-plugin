@@ -47,7 +47,8 @@ test('validateTaskId throws on non-string', () => {
 
 test('ALLOWED_DISPATCH_FLAGS is frozen + canonical', () => {
   assert.ok(Object.isFrozen(ALLOWED_DISPATCH_FLAGS));
-  assert.deepEqual([...ALLOWED_DISPATCH_FLAGS], ['--write', '--force']);
+  // --background added in spec v2.1.0 §14 (Phase 5a)
+  assert.deepEqual([...ALLOWED_DISPATCH_FLAGS], ['--write', '--force', '--background']);
 });
 
 test('validateDispatchFlags accepts --write, --force', () => {

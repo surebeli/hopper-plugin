@@ -7,7 +7,7 @@
 
 import { resolveDispatch, getStatus, executeDispatch } from '../src/dispatch.js';
 import { listTaskTypes } from '../src/tasks.js';
-import { listAdapters } from '../src/vendors/index.js';
+import { listAdapters, getAdapter } from '../src/vendors/index.js';
 import { writeOutput } from '../src/output.js';
 import {
   validateTaskId,
@@ -17,20 +17,37 @@ import {
   ALLOWED_DISPATCH_FLAGS,
   ALLOWED_DISPATCH_VALUE_FLAGS,
 } from '../src/validation.js';
-import { resolve, join } from 'node:path';
-import { existsSync } from 'node:fs';
+import {
+  spawnDetached,
+  listInProgressJobs,
+  reapStaleJobs,
+  readFrontmatter,
+  isAlive,
+  hoursSince,
+} from '../src/background.js';
+import { watchFile, unwatchFile, readFileSync, existsSync, openSync, readSync, closeSync, statSync } from 'node:fs';
+import { resolve, join, dirname, basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
-const VERSION = '0.4.0-phase-3';
+const VERSION = '0.5.0-phase-5a';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const RUNNER_PATH = join(__dirname, 'hopper-runner');
 
 function printUsage() {
   console.log(`hopper-dispatch v${VERSION}`);
   console.log('');
   console.log('Usage:');
-  console.log('  hopper-dispatch <task-id>                       Dispatch + spawn; print result');
-  console.log('  hopper-dispatch <task-id> --write [--force]     Dispatch + write output.md');
+  console.log('  hopper-dispatch <task-id>                       Dispatch + spawn (sync); print result');
+  console.log('  hopper-dispatch <task-id> --background          Dispatch + return immediately; result in .md (spec §14)');
+  console.log('  hopper-dispatch <task-id> --write [--force]     Dispatch + write output.md (sync mode only)');
   console.log('  hopper-dispatch <task-id> --model <name>        Override vendor model (e.g. gpt-5.5, claude-opus-4-7)');
   console.log('  hopper-dispatch <task-id> --reasoning <level>   Override reasoning effort (low|medium|high|xhigh)');
+  console.log('  hopper-dispatch --watch <task-id>               Tail-follow a background job until exit');
+  console.log('  hopper-dispatch --jobs                          List all in-progress background jobs');
+  console.log('  hopper-dispatch --reap                          Re-classify stale (>24h or dead-PID) jobs as orphaned');
   console.log('  hopper-dispatch --resolve <id>                  Resolve dispatch without spawning');
   console.log('  hopper-dispatch --status                        Show queue summary');
   console.log('  hopper-dispatch --smoke                         Standalone CLI smoke test');
@@ -47,6 +64,8 @@ function printUsage() {
   console.log('');
   console.log('Env: HOPPER_DIR overrides .hopper/ location');
   console.log('     HOPPER_DEBUG=1 prints composed prompt + raw subprocess result');
+  console.log('     HOPPER_HOST_VENDOR set by Tier B/C hosts; triggers heterogeneous-only warning');
+  console.log('     HOPPER_ALLOW_SAME_VENDOR=1 suppresses heterogeneous-only warning');
 }
 
 function printSmoke() {
@@ -107,6 +126,26 @@ async function main() {
     return;
   }
 
+  // Background job mgmt commands (spec §14.8)
+  if (args.includes('--jobs')) {
+    runJobsList(hopperDir);
+    return;
+  }
+  if (args.includes('--reap')) {
+    runReap(hopperDir);
+    return;
+  }
+  const watchIdx = args.indexOf('--watch');
+  if (watchIdx !== -1) {
+    const taskId = args[watchIdx + 1];
+    if (!taskId || taskId.startsWith('-')) {
+      console.error('Error: --watch requires a task-id.');
+      process.exit(1);
+    }
+    await runWatch(hopperDir, taskId);
+    return;
+  }
+
   if (args.includes('--task-types')) {
     const types = await listTaskTypes(hopperDir);
     console.log(`hopper-dispatch v${VERSION} — available task-types:`);
@@ -164,11 +203,16 @@ async function main() {
 
   const writeFlag = bareFlags.includes('--write');
   const forceFlag = bareFlags.includes('--force');
+  const backgroundFlag = bareFlags.includes('--background');
   const adapterOpts = {};
   if (valueFlags.model !== undefined) adapterOpts.model = valueFlags.model;
   if (valueFlags.reasoning !== undefined) adapterOpts.reasoning = valueFlags.reasoning;
 
-  await runDispatch(hopperDir, taskId, { write: writeFlag, force: forceFlag, adapterOpts });
+  if (backgroundFlag) {
+    await runBackgroundDispatch(hopperDir, taskId, { adapterOpts });
+  } else {
+    await runDispatch(hopperDir, taskId, { write: writeFlag, force: forceFlag, adapterOpts });
+  }
 }
 
 /**
@@ -179,7 +223,7 @@ async function main() {
  */
 function parseDispatchArgs(args) {
   const META_FLAGS = new Set(['--help', '-h', '--version', '-v', '--smoke', '--status',
-    '--task-types', '--vendors', '--resolve']);
+    '--task-types', '--vendors', '--resolve', '--watch', '--jobs', '--reap']);
   const VALUE_FLAGS = new Set(ALLOWED_DISPATCH_VALUE_FLAGS);
   const BARE_FLAGS = new Set(ALLOWED_DISPATCH_FLAGS);
 
@@ -317,6 +361,193 @@ async function runDispatch(hopperDir, taskId, { write = false, force = false, ad
     console.error(`Error: ${err.message}`);
     process.exit(1);
   }
+}
+
+// ─── Background mode (spec §14) ───────────────────────────────────────
+
+async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {} } = {}) {
+  // We need a resolved adapter + argv WITHOUT executing. resolveDispatch
+  // returns the composed prompt; we then ask the adapter for argv.
+  let resolved;
+  try {
+    resolved = await resolveDispatch({ hopperDir, taskId });
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
+
+  const adapter = getAdapter(resolved.vendor);
+  if (!adapter) {
+    console.error(`Error: unknown vendor '${resolved.vendor}'`);
+    process.exit(1);
+  }
+
+  // Heterogeneous-only warning (spec §14.7)
+  const hostVendor = process.env.HOPPER_HOST_VENDOR;
+  if (hostVendor && hostVendor === resolved.vendor && process.env.HOPPER_ALLOW_SAME_VENDOR !== '1') {
+    console.error(
+      `Warning: invoked from host '${hostVendor}' but resolved vendor is also '${resolved.vendor}'.\n` +
+      `hopper-plugin's value proposition assumes heterogeneous combinations.\n` +
+      `Continuing anyway. Set HOPPER_ALLOW_SAME_VENDOR=1 to suppress.`
+    );
+  }
+
+  // Adapter envPreflight gate
+  const preflight = adapter.envPreflight();
+  if (!preflight.ok) {
+    console.error(`Error: adapter ${resolved.vendor} preflight failed: ${preflight.missing.join(' | ')}`);
+    process.exit(1);
+  }
+  if (preflight.missing && preflight.missing.length > 0) {
+    for (const msg of preflight.missing) console.error(`Note: ${msg}`);
+  }
+
+  // Adapter stdin handling
+  if (adapter.stdinMode === 'pipe') {
+    console.error(`Error: adapter ${resolved.vendor} requires stdinMode='pipe'; background mode does not support stdin piping (spec §14).`);
+    console.error('Use sync mode (omit --background) for this vendor, or update the adapter to accept prompt as argv.');
+    process.exit(1);
+  }
+
+  // Build argv. logFile gets injected by spawnDetached path NOT here — adapter
+  // sees logFile via opts only if it needs it. For background, the log lives
+  // at <task-id>-output.log next to the .md.
+  const handoffDir = join(hopperDir, 'handoffs');
+  const outputMdPath = join(handoffDir, `${taskId}-output.md`);
+  const logPath = outputMdPath.replace(/\.md$/, '.log');
+  const effectiveOpts = { ...adapterOpts, logFile: logPath };
+  const adapterArgv = adapter.args(resolved.composedPrompt, effectiveOpts);
+
+  try {
+    const result = spawnDetached({
+      hopperDir,
+      taskId,
+      adapterName: resolved.vendor,
+      adapterArgv: [resolved.vendor, ...adapterArgv].slice(1), // pass argv only, adapter name passed via --adapter
+      runnerPath: RUNNER_PATH,
+      hostNative: hostVendor || null,
+    });
+    console.log('=== BACKGROUND DISPATCH STARTED ===');
+    console.log(`Task:        ${taskId}`);
+    console.log(`Vendor:      ${resolved.vendor}`);
+    console.log(`Runner PID:  ${result.pid}`);
+    console.log(`Started at:  ${result.startTime}`);
+    console.log(`Output (md): ${result.outputMdPath}`);
+    console.log(`Log (raw):   ${result.logPath}`);
+    console.log('');
+    console.log(`Follow with: hopper-dispatch --watch ${taskId}`);
+    console.log(`List jobs:   hopper-dispatch --jobs`);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(err.code === 'EALREADYRUNNING' ? 3 : 1);
+  }
+}
+
+function runJobsList(hopperDir) {
+  const jobs = listInProgressJobs(hopperDir);
+  if (jobs.length === 0) {
+    console.log('No in-progress background jobs.');
+    return;
+  }
+  console.log(`hopper-dispatch v${VERSION} — ${jobs.length} in-progress job(s):`);
+  console.log('');
+  console.log('TASK ID                  VENDOR     PID     AGE     ALIVE  STARTED');
+  console.log('-----------------------  ---------  ------  ------  -----  -------------------------');
+  for (const job of jobs) {
+    console.log(
+      `${(job.task_id || '?').padEnd(23)}  ` +
+      `${(job.adapter || '?').padEnd(9)}  ` +
+      `${String(job.pid || '?').padEnd(6)}  ` +
+      `${(isFinite(job.age_hours) ? job.age_hours.toFixed(1) + 'h' : '?').padEnd(6)}  ` +
+      `${(job.alive ? 'yes' : 'no').padEnd(5)}  ` +
+      `${job.start_time || '?'}`
+    );
+  }
+  console.log('');
+  console.log('Stale jobs (>24h or dead PID) can be cleaned with: hopper-dispatch --reap');
+}
+
+function runReap(hopperDir) {
+  const reaped = reapStaleJobs(hopperDir);
+  if (reaped.length === 0) {
+    console.log('No stale jobs to reap.');
+    return;
+  }
+  console.log(`Reaped ${reaped.length} job(s) to status=orphaned:`);
+  for (const id of reaped) console.log(`  - ${id}`);
+}
+
+async function runWatch(hopperDir, taskId) {
+  const outputMdPath = join(hopperDir, 'handoffs', `${taskId}-output.md`);
+  if (!existsSync(outputMdPath)) {
+    console.error(`Error: no output file at ${outputMdPath}. Has this task been dispatched?`);
+    process.exit(1);
+  }
+
+  let initialFm;
+  try {
+    initialFm = readFrontmatter(outputMdPath);
+  } catch (err) {
+    console.error(`Error reading frontmatter: ${err.message}`);
+    process.exit(1);
+  }
+
+  console.error(`Watching ${taskId} (status: ${initialFm.status}, pid: ${initialFm.pid || 'n/a'})`);
+  console.error(`Log: ${initialFm.log || 'n/a'}`);
+  console.error('');
+
+  const logPath = outputMdPath.replace(/\.md$/, '.log');
+  let lastSize = 0;
+  let lastStatus = initialFm.status;
+
+  // Emit any existing log content first
+  if (existsSync(logPath)) {
+    try {
+      const stat = statSync(logPath);
+      if (stat.size > 0) {
+        process.stdout.write(readFileSync(logPath, 'utf-8'));
+        lastSize = stat.size;
+      }
+    } catch (_) {}
+  }
+
+  // Watch loop
+  const handler = (curr, prev) => {
+    if (curr.mtimeMs === prev.mtimeMs && curr.size === prev.size) return;
+    // Read new log content
+    if (existsSync(logPath)) {
+      try {
+        const stat = statSync(logPath);
+        if (stat.size > lastSize) {
+          const fd = openSync(logPath, 'r');
+          const buf = Buffer.alloc(stat.size - lastSize);
+          readSync(fd, buf, 0, buf.length, lastSize);
+          closeSync(fd);
+          process.stdout.write(buf);
+          lastSize = stat.size;
+        }
+      } catch (_) {}
+    }
+    // Check status
+    try {
+      const fm = readFrontmatter(outputMdPath);
+      if (fm.status !== lastStatus) {
+        lastStatus = fm.status;
+        if (fm.status === 'done' || fm.status === 'failed' || fm.status === 'orphaned') {
+          unwatchFile(outputMdPath, handler);
+          console.error('');
+          console.error(`=== TASK ${fm.status.toUpperCase()} ===`);
+          console.error(`exit_code: ${fm.exit_code} | duration: ${fm.duration_ms}ms${fm.signal ? ' | signal: ' + fm.signal : ''}${fm.timed_out ? ' | TIMED OUT' : ''}`);
+          process.exit(fm.status === 'done' ? 0 : 1);
+        }
+      }
+    } catch (_) {}
+  };
+
+  watchFile(outputMdPath, { interval: 500 }, handler);
+
+  // Tick once now in case state is already terminal
+  handler(statSync(outputMdPath), { mtimeMs: -1, size: -1 });
 }
 
 main().catch((err) => {

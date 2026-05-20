@@ -18,7 +18,7 @@
 export const TASK_ID_PATTERN = /^[A-Za-z][A-Za-z0-9._-]{0,99}$/;
 
 /** Canonical bare flag whitelist for dispatch invocations. */
-export const ALLOWED_DISPATCH_FLAGS = Object.freeze(['--write', '--force']);
+export const ALLOWED_DISPATCH_FLAGS = Object.freeze(['--write', '--force', '--background']);
 
 /** Value-taking flag whitelist (each consumes the next argv as its value). */
 export const ALLOWED_DISPATCH_VALUE_FLAGS = Object.freeze(['--model', '--reasoning']);
