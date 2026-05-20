@@ -21,7 +21,7 @@ Previous schema bound `nickname → role → model`. v2.0 binds **`nickname → 
 | `kimi-builder` | `6c5ac7fa-7a5e-40b4-920a-b4fe1d562876` | kimi-cli (kimi-v2.6-thinking) | `kimi -p "<input>" --print --afk --output-format stream-json --final-message-only -m kimi-thinking` (per T-PLUGIN-00b research) | New in hopper-plugin; first dogfood of Kimi adapter |
 | `opencode-builder` | `6db17b47-ba7f-4a16-8890-832ce18c43cb` | opencode (pin 0.14.7) | `opencode run --model <provider/model> "<input>"` | New; pin version per known regression #3213 |
 | `copilot-builder` | `7a1c4d50-3b8e-4f2a-9c11-d4e3f8a9b234` | copilot-cli (Sonnet 4.5 default) | `copilot -p "<input>" --headless` (with `GH_TOKEN` env) | Premium quota meters per call — use sparingly |
-| `antigravity-builder` | `9e2f1a3d-7b4c-4d8e-a1f6-c3b2d9e4f567` | antigravity-cli OR gemini-cli (until 2026-06-18) | TBD per T-PLUGIN-00b spike (Antigravity OAuth path uncertain; Gemini fallback `gemini -p "<input>"`) | Bridge strategy until Antigravity headless auth resolves |
+| `gemini-builder` | `9e2f1a3d-7b4c-4d8e-a1f6-c3b2d9e4f567` | gemini-cli (until 2026-06-18 for non-enterprise) | `gemini -p "<input>"` (per T-PLUGIN-00b spike) | 5th functional vendor per codex F4 correction (was overclaim "Antigravity-with-Gemini-bridge"). Antigravity adapter is documented `vendors/antigravity.ts.spec.md` only, post-essay implementation |
 | `critic-claude-opus` | `b3d5e7f9-1a2c-4e8a-b9c1-d4e6f8a9c123` | claude-opus-xhigh (fresh subagent) | (Strategy invokes /codex separately, OOB; not a queue role) | Adversarial review |
 
 ---
@@ -33,7 +33,7 @@ Plugin routes by Task-type + this table. queue.md row may override via optional 
 | Task-type | Default vendor | Why |
 |---|---|---|
 | `spec-write` | codex-builder | High reasoning; sticky from spec-writing experience in myWriteAssistant |
-| `code-impl` | round-robin (kimi → opencode → codex) | Cost optimization; cheap tiers handle bulk |
+| `code-impl` | kimi-builder *(static default — codex F1 fix; no round-robin / stateful rotation)* | Cheap tier handles bulk; if user wants different vendor for specific task, override via row-level Vendor column in queue.md |
 | `code-review-adversarial` | (Strategy OOB /codex) | Out-of-band; not plugin-dispatched |
 | `code-review-acceptance` | codex-builder | Continuity with sticky Leader pattern |
 | `sidecar-polish` | kimi-builder OR deepseek-flash-via-future-adapter | Cheap-fast suitable for hygiene checks |

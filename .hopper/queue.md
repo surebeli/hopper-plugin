@@ -22,12 +22,13 @@ Anchor: `.hopper/queue.md::root`
 | T-PLUGIN-01 | code-impl | pending | T-PLUGIN-00, T-PLUGIN-00.5 | normal | Repo init + Claude Code plugin manifest (uses T-00-resolved values verbatim). |
 | T-PLUGIN-02 | code-impl | pending | T-PLUGIN-01 | normal | Core queue.md parser (v2 schema, Task-type column). |
 | T-PLUGIN-03 | code-impl | pending | T-PLUGIN-01 | normal | Tasks library loader: `loadTaskFrame(taskType): string`. |
-| T-PLUGIN-04 | code-impl | pending | T-PLUGIN-02, T-PLUGIN-03 | normal | AGENTS.md parser + vendor router (task-type → vendor adapter). |
-| T-PLUGIN-05a | code-impl | pending | T-PLUGIN-04 | normal | Codex vendor adapter (cli/src/vendors/codex.ts, ~40 lines). |
+| T-PLUGIN-04 | code-impl | pending | T-PLUGIN-02, T-PLUGIN-03 | normal | AGENTS.md parser + vendor router (task-type → vendor adapter, deterministic static lookup; no round-robin). |
+| T-PLUGIN-04.5 | spec-write | pending | T-PLUGIN-00b | high | Vendor adapter contract + shared subprocess wrapper (NEW per codex F5; defines VendorAdapter interface + runSubprocessOnce in cli/src/subprocess.ts; all 5 adapters depend on this) |
+| T-PLUGIN-05a | code-impl | pending | T-PLUGIN-04, T-PLUGIN-04.5 | normal | Codex vendor adapter (cli/src/vendors/codex.ts, ~50-80 lines on top of shared wrapper). |
 | T-PLUGIN-05b | code-impl | pending | T-PLUGIN-04, T-PLUGIN-00b | normal | Kimi vendor adapter (kimi -p --print --afk, ~40 lines). |
 | T-PLUGIN-05c | code-impl | pending | T-PLUGIN-04, T-PLUGIN-00b | normal | OpenCode vendor adapter (opencode run, pin 0.14.7 per #3213, ~50 lines). |
 | T-PLUGIN-05d | code-impl | pending | T-PLUGIN-04, T-PLUGIN-00b | normal | Copilot vendor adapter (copilot -p, GH_TOKEN auth, quota-aware, ~40 lines). |
-| T-PLUGIN-05e | code-impl | pending | T-PLUGIN-04, T-PLUGIN-00b | normal | Antigravity adapter (with Gemini CLI bridge until 2026-06-18). May land as spec doc only if OAuth blocks headless. |
+| T-PLUGIN-05e | code-impl | pending | T-PLUGIN-04, T-PLUGIN-04.5, T-PLUGIN-00b | normal | Gemini vendor adapter (cli/src/vendors/gemini.ts, ~50-80 lines on shared wrapper). 5th functional vendor per codex F4 correction. Antigravity is doc-only `vendors/antigravity.ts.spec.md`, post-essay. |
 | T-PLUGIN-06 | code-impl | pending | T-PLUGIN-05a | normal | Output.md writer + queue/cost-row suggested-edit prompts. |
 | T-PLUGIN-07 | code-impl | pending | T-PLUGIN-06 | normal | Claude Code slash command wiring (Tier B full). |
 | T-PLUGIN-08a | code-impl | pending | T-PLUGIN-07 | normal | Codex CLI host adapter (Tier C #1, custom prompt wrapper). |
@@ -43,3 +44,4 @@ Anchor: `.hopper/queue.md::root`
 
 - queue initialized at 2026-05-20T02:42:00+08:00 by strategy-primary (claude-opus-4-7) — 11 tasks v1.1.1 schema
 - queue migrated to v2 schema at 2026-05-20T03:30:00+08:00 by strategy-primary — Task-type column primary; added T-PLUGIN-00b (vendor spike), T-PLUGIN-00.5 (tasks library), T-PLUGIN-05a-e (5 vendor adapters), T-PLUGIN-08a/b (2 host adapters); total 18 tasks; per spec v2.0 amendments A (task-based) + B (no-harness-core) + C (5-vendor scope per user decision C+)
+- queue patched at 2026-05-20T<later> by strategy-primary — T-PLUGIN-04.5 vendor adapter contract task added (codex F5 fix); T-PLUGIN-05e brief updated to Gemini (not Antigravity; codex F4 fix); adapter line counts revised; total 19 tasks; per spec v2.0.1 codex audit response

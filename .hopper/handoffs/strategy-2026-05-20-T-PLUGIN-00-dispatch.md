@@ -37,7 +37,7 @@ Since the v1.1.1 dispatch on this same file:
 
 ### Leader fully authorized to decide:
 
-- T-PLUGIN-00 / T-PLUGIN-00b / T-PLUGIN-00.5 prong execution order, Builder selection, retry strategy
+- T-PLUGIN-00 / T-PLUGIN-00b / T-PLUGIN-00.5 prong execution order, Builder selection (NOT retry strategy — hard acceptance #4 forbids in-plugin retry; if a prong fails after one subprocess attempt, ESCALATE per §4 #9, do NOT silently retry)
 - Whether to run T-PLUGIN-00 and T-PLUGIN-00b serially or in parallel (Builder bandwidth permitting)
 - Critic dispatch on resolved.md outputs once written (Critic verifies resolved values are concrete, not hand-wave)
 - All Round 2 escalation triggers (sustained) + P1 additions + Phase 0 spike-specific (see §4)
