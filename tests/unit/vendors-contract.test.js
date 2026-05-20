@@ -116,20 +116,26 @@ test('opencode adapter args() uses run subcommand', () => {
   assert.equal(argv[0], 'run');
 });
 
-test('copilot adapter requires GH_TOKEN env var', () => {
-  // Save then clear env var
+test('copilot adapter surfaces GH_TOKEN warning when no env token present', () => {
+  // Per codex Phase 2 audit F1: preflight is now SOFT-WARN (ok=true) when no
+  // env token, because gh CLI auth cache can be a fallback. The warning text
+  // must still mention GH_TOKEN so the user knows what to set.
   const saved = process.env.GH_TOKEN;
   const savedAlt = process.env.GITHUB_TOKEN;
+  const savedCopilot = process.env.COPILOT_GITHUB_TOKEN;
   delete process.env.GH_TOKEN;
   delete process.env.GITHUB_TOKEN;
+  delete process.env.COPILOT_GITHUB_TOKEN;
   try {
     const a = getAdapter('copilot');
     const result = a.envPreflight();
-    assert.equal(result.ok, false);
-    assert.ok(result.missing.some((m) => /GH_TOKEN/i.test(m)));
+    assert.equal(result.ok, true, 'soft-warn: ok=true even without env token (gh CLI may cover)');
+    assert.ok(result.missing.some((m) => /GH_TOKEN/i.test(m)),
+      'warning text must mention GH_TOKEN so user can fix it');
   } finally {
     if (saved !== undefined) process.env.GH_TOKEN = saved;
     if (savedAlt !== undefined) process.env.GITHUB_TOKEN = savedAlt;
+    if (savedCopilot !== undefined) process.env.COPILOT_GITHUB_TOKEN = savedCopilot;
   }
 });
 

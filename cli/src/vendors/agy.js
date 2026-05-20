@@ -86,8 +86,8 @@ export const agyAdapter = {
   },
 
   parseResult(raw) {
-    // CRITICAL per codex F2: agy exits 0 with empty stdout when not auth'd.
-    // Failure classification taxonomy:
+    // Per codex Phase 2 audit F2: classify over BOTH log + stderr.
+    // Missing log is distinguishable from empty-clean log.
     if (raw.timedOut) {
       return { text: raw.stdout, status: 'timeout', error: `agy -p timed out after ${raw.durationMs}ms (default 5min print-timeout exceeded)` };
     }
@@ -99,18 +99,22 @@ export const agyAdapter = {
       };
     }
 
-    // Inspect --log-file content (the silent-fail detection key per codex F2)
+    // Combine signals: log file content (if read) + stderr (always captured).
+    // Per F2: stderr may contain failure pattern when log is missing/disabled.
     const log = raw.logFileContent || '';
+    const logFileMissing = raw.logFileContent === undefined;
+    const signal = `${log}\n${raw.stderr || ''}`;
 
-    if (/You are not logged into Antigravity|Failed to get OAuth token|error getting token source/i.test(log)) {
+    // Auth-fail patterns (per T-00b diagnostic + codex F2 enumeration)
+    if (/You are not logged into Antigravity|Failed to get OAuth token|error getting token source/i.test(signal)) {
       return {
         text: '',
         status: 'auth-fail',
-        error: 'agy is not OAuth-authed. Run `agy` interactively once (browser OAuth flow). After login, -p mode works headless.',
+        error: `agy is not OAuth-authed. Run \`agy\` interactively once (browser OAuth flow). After login, -p mode works headless.${logFileMissing ? ' [Note: --log-file content was missing; auth pattern matched stderr]' : ''}`,
       };
     }
 
-    if (/deadline exceeded|context cancelled|context deadline/i.test(log)) {
+    if (/deadline exceeded|context cancelled|context deadline/i.test(signal)) {
       return {
         text: raw.stdout,
         status: 'timeout',
@@ -118,11 +122,11 @@ export const agyAdapter = {
       };
     }
 
-    if (/permission|access denied|forbidden/i.test(log)) {
+    if (/permission|access denied|forbidden/i.test(signal)) {
       return {
         text: raw.stdout,
         status: 'permission-fail',
-        error: `agy permission error. Log excerpt: ${log.slice(0, 300)}`,
+        error: `agy permission error. Signal excerpt: ${signal.slice(0, 300)}`,
       };
     }
 
@@ -135,14 +139,14 @@ export const agyAdapter = {
       return {
         text: '',
         status: 'unknown-fail',
-        error: `agy returned empty output with exit 0 but no matching error pattern in log. Log: ${log.slice(0, 500)}`,
+        error: `agy returned empty output with exit 0 but no matching error pattern.${logFileMissing ? ' [Note: --log-file content was missing — adapter could not read diagnostic log.]' : ''} Log excerpt: ${log.slice(0, 300)}. Stderr excerpt: ${(raw.stderr || '').slice(0, 200)}`,
       };
     }
 
     return {
       text: raw.stdout,
       status: 'unknown-fail',
-      error: `agy exited ${raw.exitCode}. Stderr: ${(raw.stderr || '').slice(0, 300)}. Log: ${log.slice(0, 300)}`,
+      error: `agy exited ${raw.exitCode}.${logFileMissing ? ' [log file missing]' : ''} Stderr: ${(raw.stderr || '').slice(0, 300)}. Log: ${log.slice(0, 300)}`,
     };
   },
 };

@@ -20,13 +20,15 @@ export const copilotAdapter = {
   },
 
   envPreflight() {
-    // GH_TOKEN OR GITHUB_TOKEN required for headless mode
-    if (process.env.GH_TOKEN || process.env.GITHUB_TOKEN) {
+    // Per codex Phase 2 audit F1: broaden to include COPILOT_GITHUB_TOKEN
+    // + gh CLI auth fallback (Copilot CLI can sometimes pick up `gh auth status`).
+    if (process.env.GH_TOKEN || process.env.GITHUB_TOKEN || process.env.COPILOT_GITHUB_TOKEN) {
       return { ok: true, missing: [] };
     }
+    // Soft warn — gh CLI may have auth cached (Copilot can fall back to it on some installs)
     return {
-      ok: false,
-      missing: ['Set GH_TOKEN (or GITHUB_TOKEN) with a PAT having "Copilot Requests" permission. See https://docs.github.com/copilot/concepts/agents/about-copilot-cli'],
+      ok: true,
+      missing: ['Note: no GH_TOKEN/GITHUB_TOKEN/COPILOT_GITHUB_TOKEN env var set. Copilot may pick up `gh auth status` cache, or smoke may fail. See https://docs.github.com/copilot/concepts/agents/about-copilot-cli'],
     };
   },
 

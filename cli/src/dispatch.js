@@ -114,14 +114,25 @@ export async function getStatus(hopperDir) {
  * }>}
  */
 export async function executeDispatch({ hopperDir, taskId, adapterOpts = {} }) {
-  // 1. Resolve (Phase 1)
   const resolved = await resolveDispatch({ hopperDir, taskId });
+  const adapter = getAdapter(resolved.vendor);
+  return executeWithAdapter({ resolved, adapter, adapterOpts });
+}
+
+/**
+ * Lower-level dispatch entry: takes already-resolved task + adapter directly.
+ * Enables E2E testing per codex Phase 2 audit F3 (inject a fake adapter +
+ * counter-binary to prove one-spawn-per-dispatch end-to-end).
+ *
+ * @param {object} args
+ * @param {object} args.resolved      Output of resolveDispatch
+ * @param {import('./types.js').VendorAdapter} args.adapter
+ * @param {import('./types.js').AdapterOpts} [args.adapterOpts]
+ */
+export async function executeWithAdapter({ resolved, adapter, adapterOpts = {} }) {
   const { task, vendor, composedPrompt } = resolved;
 
-  // 2. Load adapter (Phase 2)
-  const adapter = getAdapter(vendor);
-
-  // 3. envPreflight — if not ok, fail FAST without spawning subprocess
+  // envPreflight — if not ok, fail FAST without spawning subprocess
   const preflight = adapter.envPreflight();
   if (!preflight.ok) {
     return {
@@ -132,28 +143,22 @@ export async function executeDispatch({ hopperDir, taskId, adapterOpts = {} }) {
         status: 'auth-fail',
         error: `Adapter ${vendor} preflight failed: ${preflight.missing.join(' | ')}`,
       },
-      raw: {
-        exitCode: -1,
-        stdout: '',
-        stderr: '',
-        timedOut: false,
-        durationMs: 0,
-      },
+      raw: { exitCode: -1, stdout: '', stderr: '', timedOut: false, durationMs: 0 },
     };
   }
 
-  // 4. Prepare log file if adapter wants one (codex F2 silent-fail detection)
+  // Prepare log file if adapter wants one (codex F2 silent-fail detection)
   let logPath = null;
   if (typeof adapter.prepareLog === 'function') {
-    const hint = adapter.prepareLog(taskId, adapter.name);
+    const hint = adapter.prepareLog(task.id, adapter.name);
     logPath = hint.logPath || null;
   }
 
-  // 5. Build args (adapter may want logFile threaded through opts)
+  // Build args (adapter may want logFile threaded through opts)
   const effectiveOpts = { ...adapterOpts, logFile: logPath };
   const args = adapter.args(composedPrompt, effectiveOpts);
 
-  // 6. Spawn subprocess ONCE (per spec §3 #4)
+  // Spawn subprocess ONCE (per spec §3 #4)
   const stdinInput = adapter.stdinMode === 'pipe' ? composedPrompt : null;
   const raw = await runSubprocessOnce({
     command: adapter.command,
@@ -163,7 +168,7 @@ export async function executeDispatch({ hopperDir, taskId, adapterOpts = {} }) {
     logFilePath: logPath,
   });
 
-  // 7. Parse result (adapter-specific failure classification)
+  // Parse result (adapter-specific failure classification)
   const output = adapter.parseResult(raw);
 
   return { task, vendor, output, raw };

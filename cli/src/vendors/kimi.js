@@ -25,14 +25,20 @@ export const kimiAdapter = {
   },
 
   envPreflight() {
-    const cfgPath = join(homedir(), '.kimi', 'config.toml');
-    if (!existsSync(cfgPath)) {
-      return {
-        ok: false,
-        missing: ['Configure kimi auth: run `kimi /connect` interactively OR set API key in ~/.kimi/config.toml'],
-      };
+    // Per codex Phase 2 audit F1: kimi may have config.toml OR config.json variant.
+    const candidates = [
+      join(homedir(), '.kimi', 'config.toml'),
+      join(homedir(), '.kimi', 'config.json'),
+    ];
+    if (candidates.some((p) => existsSync(p))) return { ok: true, missing: [] };
+    if (process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY) {
+      return { ok: true, missing: [] };
     }
-    return { ok: true, missing: [] };
+    // Soft warn
+    return {
+      ok: true,
+      missing: ['Note: no kimi config.toml/config.json or KIMI_API_KEY found. If smoke fails, run `kimi /connect` or set KIMI_API_KEY.'],
+    };
   },
 
   timeoutMs(_opts) {

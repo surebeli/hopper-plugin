@@ -25,20 +25,25 @@ export const opencodeAdapter = {
   },
 
   envPreflight() {
-    // opencode stores auth in platform-specific paths
-    // Windows: %APPDATA%\opencode\auth.json typically
-    // Linux/Mac: ~/.local/share/opencode/auth.json
+    // Per codex Phase 2 audit F1: broaden checks.
+    // OpenCode auth paths (3 platforms) + env-var fallbacks + opencode.json
     const candidates = [
       join(homedir(), '.local', 'share', 'opencode', 'auth.json'),
       join(homedir(), 'AppData', 'Roaming', 'opencode', 'auth.json'),
       join(homedir(), 'Library', 'Application Support', 'opencode', 'auth.json'),
+      // Also accept project-local opencode.json
+      join(process.cwd(), 'opencode.json'),
     ];
-    if (candidates.some((p) => existsSync(p))) {
+    if (candidates.some((p) => existsSync(p))) return { ok: true, missing: [] };
+    // Env-var fallback (opencode honors per-provider env refs)
+    if (process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY ||
+        process.env.GROQ_API_KEY || process.env.DEEPSEEK_API_KEY) {
       return { ok: true, missing: [] };
     }
+    // Soft warn — opencode may have other config we cannot detect
     return {
-      ok: false,
-      missing: ['Configure opencode providers: run `opencode auth` interactively OR set env-var refs in opencode.json'],
+      ok: true,
+      missing: ['Note: no obvious opencode auth detected. If smoke fails, run `opencode auth` OR set provider env refs in opencode.json.'],
     };
   },
 

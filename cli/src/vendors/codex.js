@@ -26,14 +26,17 @@ export const codexAdapter = {
   },
 
   envPreflight() {
-    const authPath = join(homedir(), '.codex', 'auth.json');
-    if (!existsSync(authPath)) {
-      return {
-        ok: false,
-        missing: ['Run `codex login` to authenticate. Stores auth in ~/.codex/auth.json'],
-      };
-    }
-    return { ok: true, missing: [] };
+    // Per codex Phase 2 audit F1: broaden checks to avoid false-negatives.
+    // codex supports: ~/.codex/auth.json (default), $CODEX_HOME override,
+    // $CODEX_API_KEY env, $OPENAI_API_KEY env (keychain backed in some installs).
+    const codexHome = process.env.CODEX_HOME || join(homedir(), '.codex');
+    if (existsSync(join(codexHome, 'auth.json'))) return { ok: true, missing: [] };
+    if (process.env.CODEX_API_KEY || process.env.OPENAI_API_KEY) return { ok: true, missing: [] };
+    // Soft warn instead of hard block — codex may use keychain we cannot detect.
+    return {
+      ok: true,
+      missing: ['Note: no obvious codex auth artifact found. If smoke fails, run `codex login` OR set CODEX_API_KEY/OPENAI_API_KEY.'],
+    };
   },
 
   timeoutMs(opts) {
