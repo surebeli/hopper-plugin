@@ -319,9 +319,11 @@ Spec said "≥3 of 4 vendors print expected output". Path A user-unblock resolve
 | Copilot | ✅ | HOPPER_COPILOT_OK (post install) |
 | ~~Gemini~~ → **Antigravity (agy)** | ⏳ pending OAuth | ⏳ HOPPER_AGY_OK pending (user-action gate) |
 
-Antigravity: not in functional pool. `agy` (the actual antigravity CLI) not installed on this machine. Stays `vendors/antigravity.ts.spec.md` documented-only per codex F4 correction.
+**Status update v2.0.3 (post Gemini→agy swap 2026-05-20)**: Antigravity (agy v1.0.0) **IS in functional pool** (swapped in for Gemini). `agy` installed at `C:\Users\litianyi\AppData\Local\agy\bin\agy.exe` per user 2026-05-20. Smoke pending user OAuth completion (one-time interactive `agy` flow). Adapter code can proceed under unified user-action gate per spec §11.
 
-**5 functional vendor pool LOCKED. T-PLUGIN-04.5 + T-PLUGIN-05a-e can proceed for all 5.**
+Gemini is NOT in functional pool (swapped out). Optionally lands as `vendors/gemini.ts.spec.md` post-essay-only if user later wants pre-6/18 bridge.
+
+**5 functional vendor pool LOCKED: Codex / Kimi / OpenCode / Copilot / Antigravity-agy.** T-PLUGIN-04.5 + T-PLUGIN-05a-e can proceed (agy smoke verification gated on user OAuth).
 
 ### Next recommendation (cursor-aware)
 
