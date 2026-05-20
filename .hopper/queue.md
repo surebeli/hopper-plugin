@@ -29,8 +29,8 @@ Anchor: `.hopper/queue.md::root`
 | T-PLUGIN-05c | code-impl | done | T-PLUGIN-04, T-PLUGIN-00b | normal | OpenCode vendor adapter with ANSI strip + run subcommand (~60 lines). Pin 0.14.7 advisory only. 9 tests pass. |
 | T-PLUGIN-05d | code-impl | done | T-PLUGIN-04, T-PLUGIN-00b | normal | Copilot vendor adapter with GH_TOKEN preflight + quota detection (~60 lines). 9 tests pass. |
 | T-PLUGIN-05e | code-impl | done | T-PLUGIN-04, T-PLUGIN-04.5, T-PLUGIN-00b | normal | **Antigravity (agy) adapter** (~115 lines). Silent auth-fail detection via unique --log-file per codex F2. 22 tests pass (10 contract + 12 quirks). Real smoke gated on user OAuth per spec §11 unified user-action gate. |
-| T-PLUGIN-06 | code-impl | pending | T-PLUGIN-05a | normal | Output.md writer + queue/cost-row suggested-edit prompts. |
-| T-PLUGIN-07 | code-impl | pending | T-PLUGIN-06 | normal | Claude Code slash command wiring (Tier B full). |
+| T-PLUGIN-06 | code-impl | done | T-PLUGIN-05a | normal | Output.md writer (cli/src/output.js, ~250 lines) + Phase-2-schema-faithful template + sidecar raw file for long outputs + suggested queue/cost edits printed to stdout. Codex mini-audit FIX_AND_RECHECK → PROCEED_TO_T07 (all 4 P1 findings resolved). 16+13 tests pass. |
+| T-PLUGIN-07 | code-impl | done | T-PLUGIN-06 | normal | Claude Code Tier B slash commands wired: /hopper:dispatch + /hopper:status + /hopper:smoke + /hopper:vendors as commands/*.md prompt templates; plugin.json simplified to standard schema. 12 host-adapter tests pass. User-action gate (T-00 Prong 1 install verify) still open per spec §11. |
 | T-PLUGIN-08a | code-impl | pending | T-PLUGIN-07 | normal | Codex CLI host adapter (Tier C #1, custom prompt wrapper). |
 | T-PLUGIN-08b | code-impl | pending | T-PLUGIN-07 | normal | OpenCode host adapter (Tier C #2, plugin module). Either 08a or 08b minimum for cross-host PASS. |
 | T-PLUGIN-09 | spec-write | pending | T-PLUGIN-08a, T-PLUGIN-08b | normal | README + 30-60s screencast (multi-vendor switch demo). |
@@ -39,6 +39,10 @@ Anchor: `.hopper/queue.md::root`
 ---
 
 ## Activity log
+
+- 2026-05-20 (Phase 3): T-PLUGIN-06 + T-PLUGIN-07 dispatched as Strategy-as-developer per user goal 2026-05-19. Mini-audit checkpoint after T-06: codex returned FIX_AND_RECHECK with 4 P1/P2 findings (format fidelity, lossy long outputs, task.id path safety, markdown injection). All 4 fixed in commit 7b8624c; recheck verdict PROCEED_TO_T07. T-07 wired 4 slash commands (dispatch/status/smoke/vendors) as commands/*.md prompt templates, simplified plugin.json to standard schema (removed tentative commands/entry/permissions blocks). 158/158 tests pass.
+
+
 
 > Each pop / done / failed by popping session appends a line. Format per PING.md §Step 3 / §Step 7.
 
