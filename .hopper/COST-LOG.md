@@ -29,6 +29,20 @@ Tier key: `sub` = subscription quota (ChatGPT Plus for Codex CLI, Claude Pro for
 
 **Phase 0 final subtotal**: ~$0.08 API + sub-quota consumption. 5/5 vendors smoke-verified.
 
+### Phase 1 plumbing (2026-05-20)
+
+| Date | Task | Task-type | Model | Tokens In/Out | Approx $ | Tier | Notes |
+|------|------|-----------|-------|---------------|----------|------|-------|
+| 2026-05-20 | T-PLUGIN-04.5 | spec-write | claude-opus-4-7 (Strategy-as-developer) | n/a | $0 marginal | sub | VendorAdapter contract + runSubprocessOnce; 11 unit tests pass |
+| 2026-05-20 | T-PLUGIN-02 | code-impl | claude-opus-4-7 | n/a | $0 marginal | sub | queue.md v2 parser; 12 unit tests pass |
+| 2026-05-20 | T-PLUGIN-03 | code-impl | claude-opus-4-7 | n/a | $0 marginal | sub | tasks library loader + anti-persona verifier; 11 unit tests pass |
+| 2026-05-20 | T-PLUGIN-04 | code-impl | claude-opus-4-7 | n/a | $0 marginal | sub | AGENTS parser + deterministic vendor router; 7 unit tests pass |
+| 2026-05-20 | T-PLUGIN-01 | code-impl | claude-opus-4-7 | n/a | $0 marginal | sub | Repo init + plugin manifest expanded with test scripts + dispatch wiring |
+
+**Phase 1 subtotal**: $0 marginal cost (Strategy-as-developer in Claude Code TUI subscription). 5 tasks done. 42 total unit tests passing.
+
+**Cumulative (Phase 0 + Phase 1)**: ~$0.08 API + 6 codex audit cycles ~$3.30 + 1 phase-0 audit ~$0.55 + 3 v2.0.3 audit iterations ~$1.50 = **~$5.43 total** demo development cost so far.
+
 ---
 
 ## Phase 1+ (post-spike, 2026-05-20 to 2026-05-25)

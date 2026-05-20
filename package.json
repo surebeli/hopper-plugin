@@ -8,7 +8,11 @@
   },
   "scripts": {
     "smoke": "node cli/bin/hopper-dispatch --smoke",
-    "test": "echo 'Tests land in T-PLUGIN-02+ (queue parser tests, adapter integration tests)'; exit 0"
+    "test": "node --test tests/unit/",
+    "test:queue": "node --test tests/unit/queue.test.js",
+    "test:tasks": "node --test tests/unit/tasks.test.js",
+    "test:agents": "node --test tests/unit/agents.test.js",
+    "test:subprocess": "node --test tests/unit/subprocess.test.js"
   },
   "engines": {
     "node": ">=18"
