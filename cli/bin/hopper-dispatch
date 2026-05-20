@@ -9,6 +9,7 @@ import { resolveDispatch, getStatus, executeDispatch } from '../src/dispatch.js'
 import { listTaskTypes } from '../src/tasks.js';
 import { listAdapters } from '../src/vendors/index.js';
 import { writeOutput } from '../src/output.js';
+import { validateTaskId, validateDispatchFlags } from '../src/validation.js';
 import { resolve, join } from 'node:path';
 import { existsSync } from 'node:fs';
 
@@ -124,6 +125,21 @@ async function main() {
     console.error('Error: no task-id provided. Use --help for usage.');
     process.exit(1);
   }
+
+  // Per codex Phase 4 audit P1: validate task-id + flags at CLI entry using
+  // the canonical validator so all 4 hosts apply identical rules.
+  try {
+    validateTaskId(taskId);
+    const extraFlags = args.filter((a) => a.startsWith('-') && a !== '--write' && a !== '--force'
+      && a !== '--help' && a !== '-h' && a !== '--version' && a !== '-v');
+    if (extraFlags.length > 0) {
+      validateDispatchFlags(extraFlags);  // throws on unknown flag
+    }
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(2);
+  }
+
   const writeFlag = args.includes('--write');
   const forceFlag = args.includes('--force');
   await runDispatch(hopperDir, taskId, { write: writeFlag, force: forceFlag });

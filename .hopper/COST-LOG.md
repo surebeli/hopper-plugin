@@ -76,3 +76,20 @@ Tier key: `sub` = subscription quota (ChatGPT Plus for Codex CLI, Claude Pro for
 ## Summary
 
 Pending T-PLUGIN-10 completion. Phase 0 + Phase 1-5 budget ceiling: ≤ $6 task work + audit cost. Current audit spend: ~$0.65.
+
+## Phase 3 + Phase 4 — Strategy-as-developer (2026-05-20)
+
+| Date | Task | Task-type | Model | Tokens In/Out | Approx $ | Tier | Notes |
+|------|------|-----------|-------|---------------|----------|------|-------|
+| 2026-05-20 | T-PLUGIN-06 | code-impl | claude-opus-4-7 (Strategy) | n/a (interactive) | $0 marginal | sub | Output.md writer; mini-audit FIX_AND_RECHECK → PROCEED_TO_T07 |
+| 2026-05-20 | T-PLUGIN-06 codex audit | code-review-adversarial | codex GPT-5.5 xhigh | ~25,000/~3,000 | ~$0.06 | sub | mini-audit + recheck; 4 P1 findings fixed |
+| 2026-05-20 | T-PLUGIN-07 | code-impl | claude-opus-4-7 (Strategy) | n/a | $0 marginal | sub | Tier B Claude Code slash wiring |
+| 2026-05-20 | T-PLUGIN-07 codex audit | code-review-adversarial | codex GPT-5.5 xhigh | ~30,000/~3,500 | ~$0.08 | sub | Phase 3 final audit + recheck; 6 findings (1 P0 + 3 P1 + 2 P2) all fixed |
+| 2026-05-20 | T-PLUGIN-08a | code-impl | claude-opus-4-7 (Strategy) | n/a | $0 marginal | sub | Tier C #1 Codex CLI wrapper |
+| 2026-05-20 | T-PLUGIN-08a codex audit | code-review-adversarial | codex GPT-5.5 xhigh | ~20,000/~2,500 | ~$0.05 | sub | mini-audit + recheck; 3 P1 fixes |
+| 2026-05-20 | T-PLUGIN-08b | code-impl | claude-opus-4-7 (Strategy) | n/a | $0 marginal | sub | Tier C #2 OpenCode wrapper |
+| 2026-05-20 | Phase 4 partial codex audit | code-review-adversarial | codex GPT-5.5 xhigh | ~22,000/~3,000 | ~$0.06 | sub | Phase 4 partial audit; 4 P1 + 2 P2; key P1 (centralize validation) fixed in same cycle |
+
+**Phase 3 + Phase 4 partial subtotal**: ~$0.25 API (codex audit costs) + 0 marginal sub cost (Strategy work).
+
+**Cumulative**: Phase 0 (~$0.08) + Phase 1 (codex audit ~$0.05) + Phase 2 (codex audit ~$0.08) + Phase 3 (~$0.14) + Phase 4 partial (~$0.11) ≈ ~$0.46 API + sub.

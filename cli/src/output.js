@@ -20,8 +20,8 @@
 
 import { mkdir, writeFile, access, lstat, realpath } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
+import { validateTaskId as canonicalValidateTaskId } from './validation.js';
 
-const TASK_ID_PATTERN = /^[A-Za-z][A-Za-z0-9._-]*$/;
 const PREVIEW_CHAR_LIMIT = 4096;
 
 /**
@@ -127,18 +127,12 @@ export async function writeOutput({ hopperDir, dispatchResult, force = false }) 
 }
 
 /**
- * Per codex F3: strict allowlist for task IDs that become file paths.
- * Forbids: path separators, '..', leading dot, special chars.
+ * Validate task.id is safe for file path use. Per codex Phase 4 audit P1,
+ * delegates to the canonical validator in cli/src/validation.js so all
+ * entry points share the same regex + '..' check.
  */
 export function validateTaskId(id) {
-  if (typeof id !== 'string') throw new Error(`task.id must be string, got ${typeof id}`);
-  if (id.length === 0) throw new Error('task.id must not be empty');
-  if (id.length > 100) throw new Error(`task.id exceeds 100 chars (got ${id.length})`);
-  if (!TASK_ID_PATTERN.test(id)) {
-    throw new Error(`task.id "${id}" contains unsafe characters. ` +
-      `Allowed: ^[A-Za-z][A-Za-z0-9._-]*$ (no slashes, no leading dot, no '..').`);
-  }
-  if (id.includes('..')) throw new Error(`task.id "${id}" contains '..' (path traversal).`);
+  canonicalValidateTaskId(id);
 }
 
 /**

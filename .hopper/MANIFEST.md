@@ -8,9 +8,9 @@ This project IS hopper-plugin development. Its `.hopper/` directory is dogfooded
 
 ## Current Phase
 
-**Phase**: Phase 3 complete + final audit cleared (2026-05-20). Phase 4 GREEN-LIGHT.
+**Phase**: Phase 4 partial complete (T-08a + T-08b done; T-09 + T-10 remaining). Phase 4 partial audit verdict PASS_WITH_CHANGES — T-09 GREEN-LIGHT; T-10 gated on T-09 + open user-action gates.
 
-**Status**: Spec v2.0.3 final. Phase 0 (3 tasks: T-00 in-progress per user-action gate; T-00b done 4/5 vendors verified + agy pending OAuth; T-00.5 done). Phase 1 (5 tasks done: T-01/02/03/04/04.5). Phase 2 (5 tasks done: T-05a/b/c/d/e). Phase 3 (2 tasks done: T-06 output writer + T-07 Tier B slash wiring). **161/163 tests passing** (2 symlink tests skipped on Windows). Plugin root hoisted to repo root per codex Phase 3 P0 F1.
+**Status**: Spec v2.0.3 final. Phase 0 (3 tasks). Phase 1 (5 tasks done). Phase 2 (5 tasks done). Phase 3 (2 tasks done). Phase 4 (2 of 4 done: T-08a Codex CLI host + T-08b OpenCode host; T-09 README/screencast + T-10 Critic acceptance pending). **197/206 tests passing** (9 Windows skips). Centralized task-id validation in `cli/src/validation.js` per Phase 4 audit P1.
 
 **Current cursor**: Phase 3 deliverables landed:
 - T-06 output.md writer (cli/src/output.js, ~250L) — codex mini-audit FIX_AND_RECHECK → PROCEED_TO_T07 (4 P1 findings fixed: format fidelity, lossy long outputs, task.id path safety, markdown injection)
@@ -25,8 +25,9 @@ Phase 4 (T-PLUGIN-08a Codex CLI host + T-PLUGIN-08b OpenCode host + T-PLUGIN-09 
 2. ✅ Phase 1 done (T-01/02/03/04/04.5 outputs at .hopper/handoffs/)
 3. ✅ Phase 2 done (T-05a/b/c/d/e outputs at .hopper/handoffs/); codex Phase 2 audit PASS_WITH_CHANGES → 3 P1 findings fixed (envPreflight false-negatives, agy stderr handling, E2E spawn-count test)
 4. ✅ Phase 3 done (T-06 + T-07 outputs); codex T-06 mini-audit FIX_AND_RECHECK → PROCEED_TO_T07; codex Phase 3 final audit REWORK → 6 findings (1 P0 + 3 P1 + 2 P2) all FIXED → recheck PASS_WITH_CHANGES with Phase 4 GREEN-LIGHT
-5. ⏭️ Phase 4 ready: T-PLUGIN-08a (Codex CLI host), T-08b (OpenCode host), T-09 (README + screencast), T-10 (Critic acceptance). Either T-08a OR T-08b minimum for cross-host PASS per spec §1 #2.
-6. ⏳ Pending user-action gates: T-PLUGIN-00 Prong 1 (Claude Code plugin install + /hopper:smoke); T-PLUGIN-05e (agy interactive OAuth)
+5. ✅ Phase 4 partial: T-08a + T-08b done (both Tier C wrappers functional, exceeds spec ≥1 requirement). Phase 4 partial audit PASS_WITH_CHANGES, no P0, T-09 GREEN-LIGHT yes
+6. ⏭️ Remaining Phase 4: T-PLUGIN-09 (README + 30-60s screencast showing 4-host dispatch equivalence) + T-PLUGIN-10 (Critic end-to-end acceptance of 5 hard criteria)
+7. ⏳ Pending user-action gates (block T-10 final acceptance, not T-09 prep): T-PLUGIN-00 Prong 1 (Claude Code plugin install + /hopper:smoke); T-PLUGIN-05e (agy interactive OAuth)
 
 **Escalation contract**: 8 carry-over from myWriteAssistant + 3 P1 + 6 spike-specific (Phase 0 v2.0):
 - #9 T-PLUGIN-00 prong fail → ping
@@ -74,3 +75,4 @@ Phase 4 (T-PLUGIN-08a Codex CLI host + T-PLUGIN-08b OpenCode host + T-PLUGIN-09 
 | 2026-05-20 | v2.0 migration: queue → v2 schema (Task-type col, 18 tasks); AGENTS.md → vendor binding; dispatch v2.0 supersedes v1.1.1 same-day; Phase 0 expanded to 3 tasks (T-00 + T-00b + T-00.5); per user goal directive (task-based, no-harness-core, 5-vendor) | Strategy Advisor (claude-opus-4-7) |
 | 2026-05-20 | Phase 2 complete (T-05a/b/c/d/e); codex audit PASS_WITH_CHANGES; 3 P1 fixes (F1 envPreflight broadening across 4 adapters, F2 agy stderr+missing-log handling, F3 E2E spawn-count test). 117 tests passing. | Strategy Advisor (claude-opus-4-7) |
 | 2026-05-20 | Phase 3 complete (T-06 output writer + T-07 Tier B slash wiring); codex mini-audit checkpoint after T-06 (FIX_AND_RECHECK → PROCEED_TO_T07, 4 P1 fixes); final Phase 3 audit REWORK → 6 findings (1 P0 + 3 P1 + 2 P2) ALL FIXED in commit 2b76c61 (plugin root hoisted to repo root, arg validation in slash commands, symlink-safe writes, MANIFEST cursor refresh, anti-persona phrasing, version drift); recheck PASS_WITH_CHANGES Phase 4 GREEN-LIGHT. 161/163 tests passing. | Strategy Advisor (claude-opus-4-7) |
+| 2026-05-20 | Phase 4 partial (T-08a Codex CLI host + T-08b OpenCode host); T-08a mini-audit FIX_AND_RECHECK → PROCEED_TO_T08B (3 P1 fixes: '..' rejection, symlink-safe SCRIPT_DIR, no-soft-orchestration prompt clause); Phase 4 partial audit PASS_WITH_CHANGES with 4 P1 + 2 P2 findings, addressed: validation centralized in `cli/src/validation.js`, dispatcher CLI now validates task-id + flags at entry, T-08a/b output.md handoffs written, root README refreshed, MANIFEST cursor advanced. T-09 + T-10 remain. 197/206 tests passing. | Strategy Advisor (claude-opus-4-7) |
