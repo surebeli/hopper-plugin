@@ -203,6 +203,31 @@ Anchor: `docs/release/PASS-RATIONALE.md::root`
 
 Per user directive 2026-05-20: these gates will be exercised during the demo testing phase. They do not block T-09 PASS materials nor T-10 Critic code+test-based acceptance.
 
+## v2.1.0 amendment — Async dispatch (spec §14, added 2026-05-21)
+
+§14 added to the spec to support long-running tasks without blocking the caller. **Does NOT modify §3 hard criteria.** All 5 still bind. The amendment adds:
+
+- `--background` opt-in flag at Tier A CLI
+- Host-native async paths: Claude Code (Bash `run_in_background=true` + Monitor) + OpenCode (plugin + `prompt_async` + `session.idle`)
+- Custom fallback for Codex CLI / Codex Desktop / Kimi-as-vendor / Copilot-as-vendor / Agy-as-vendor via `hopper-runner` detached wrapper
+- State lives in `output.md` frontmatter (spec §1 #1 preserved — no new JSON files)
+- 24h ceiling rule for PID-reuse mitigation
+- Status state machine: `in-progress → done | failed | orphaned`
+- Heterogeneous-only soft warning (HOPPER_ALLOW_SAME_VENDOR=1 suppresses)
+
+**§3 #4 single-spawn invariant preserved**: the hopper-runner wrapper itself spawns exactly once, and contains exactly one `spawn()` call. Counter-tested in `tests/integration/execute-dispatch-e2e.test.js` + `tests/unit/subprocess-spawn-count.test.js` + `tests/integration/background-e2e.test.js` (preflight protection + path-traversal rejection).
+
+**Forbidden under §14** (spec §14.10): re-dispatch on failure, auto-promote orphans, cross-task orchestration, vendor fallback chains, new JSON state files outside the existing schema.
+
+Phase 5 deliverables (this amendment):
+- `cli/src/background.js` (~270 LOC) — frontmatter parser/writer + isAlive + preflight + spawnDetached + listInProgressJobs + reapStaleJobs
+- `cli/bin/hopper-runner` (~140 LOC) — detached wrapper owning single vendor spawn
+- 4 new dispatcher commands: `--background`, `--watch`, `--jobs`, `--reap`
+- `commands/dispatch.md` Claude Code prompt extended (Mode A sync / Mode B background)
+- `hosts/opencode/plugins/hopper-async.ts` (~270 LOC) — OpenCode plugin using native `prompt_async`
+- Test count: 266/278 passing (+38 from Phase 4 baseline of 228/240; 12 Windows skips unchanged in shape)
+- Backing research: `docs/research/async-execution/` (5 docs)
+
 ## Conclusion
 
 All 5 hard criteria self-rated PASS (subject to user-action gates as documented). The codebase is essay-ready as evidence for:

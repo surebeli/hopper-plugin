@@ -5,6 +5,7 @@
 **Status (2026-05-20)**: Phase 4 complete. T-PLUGIN-10 Critic verdict PASS_WITH_NOTES; demo cleared for essay material with framing constraints noted below.
 
 - **Hosts (4)**: Tier A standalone CLI + Tier B Claude Code (4 slash commands) + Tier C #1 Codex CLI wrapper + Tier C #2 OpenCode wrapper. Cross-host equivalence verified structurally; live 4-host demo is a user-action exercise.
+- **Async dispatch (spec v2.1.0 §14, added 2026-05-21)**: `--background` opt-in keeps caller session responsive for long-running tasks. Native-preferred paths: Claude Code via Bash run_in_background + Monitor; OpenCode via bundled plugin + `prompt_async`. Codex CLI / Kimi / Copilot / Agy use the `hopper-runner` detached fallback. State in `output.md` frontmatter.
 - **Vendors (5 registered)**: codex, kimi, opencode, copilot, agy. **4 live-smoke-verified**; agy code-complete with live OAuth-gated smoke pending (T-PLUGIN-05e). Spec required ≥3 live-smoked; demo exceeds with 4.
 - **PASS materials**: see `docs/release/PASS-RATIONALE.md` (5 hard criteria self-assessment) + `docs/release/INSTALL-MATRIX.md` (install patterns) + `scripts/cross-host-verify.sh` (structural equivalence proof — all PASS).
 - **Test suite**: 207/216 passing (9 Windows skips by design). **10 codex audit cycles** cleared (8 phase audits + T-10 Critic + 1 final strict).

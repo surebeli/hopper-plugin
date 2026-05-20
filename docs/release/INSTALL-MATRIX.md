@@ -147,6 +147,98 @@ hopper-opencode T-PLUGIN-05a                         # Tier C #2: opencode tool-
 
 The equivalence is mechanically asserted by `tests/unit/validation.test.js` "cross-host parity" test, which reads all 3 host entry points (Tier B + Tier C #1 + Tier C #2) and verifies they cite the same canonical task-id regex literal.
 
+## Async dispatch (spec v2.1.0 §14)
+
+Long-running tasks (kimi-thinking, codex xhigh, agy reasoning — anything >1 min) freeze the calling session in sync mode. Async dispatch returns immediately with a runner PID; result lands in `.hopper/handoffs/<task-id>-output.md` when done. Per spec §14.4 constraint #4 ("prefer host-native"), each tier uses a different mechanism:
+
+| Tier | Async mechanism | Setup |
+|---|---|---|
+| Tier A standalone | `hopper-dispatch <id> --background` (custom fallback) | works out of box |
+| Tier B Claude Code | Bash tool `run_in_background=true` + Monitor (native) | works once plugin installed; prompt handles it |
+| Tier C #1 Codex CLI | Custom fallback (Codex has no native — open issue openai/codex#3968) | works via `hopper-codex` wrapper |
+| Tier C #2 OpenCode | Plugin: `POST /session/:id/prompt_async` + `session.idle` hook (native) | install plugin (below); requires `opencode serve` |
+
+### Async setup per tier
+
+**Tier A standalone** — no setup. Just add `--background`:
+
+```bash
+hopper-dispatch T-PLUGIN-05a --background
+# Returns immediately with PID
+hopper-dispatch --watch T-PLUGIN-05a   # follow log + status
+hopper-dispatch --jobs                 # list all in-progress
+hopper-dispatch --reap                 # clean stale (>24h or dead-PID)
+```
+
+**Tier B Claude Code** — no setup beyond plugin install. Inside Claude Code:
+
+```
+/hopper:dispatch T-PLUGIN-05a --background
+```
+
+Claude internally uses `Bash(run_in_background=true)` so your session does NOT freeze. Claude periodically polls the output.md frontmatter and reports status.
+
+**Tier C #1 Codex CLI** — pass `--background` to the wrapper:
+
+```bash
+hopper-codex T-PLUGIN-05a --background
+```
+
+The wrapper passes the flag through to inner `hopper-dispatch`, which spawns the hopper-runner detached process.
+
+**Tier C #2 OpenCode** — install the bundled plugin first:
+
+```bash
+# Project-local
+mkdir -p .opencode/plugins/
+cp /path/to/hopper-plugin/hosts/opencode/plugins/hopper-async.ts .opencode/plugins/
+
+# OR global
+mkdir -p ~/.config/opencode/plugins/
+cp /path/to/hopper-plugin/hosts/opencode/plugins/hopper-async.ts ~/.config/opencode/plugins/
+```
+
+Then restart `opencode serve` (or TUI). From inside an OpenCode session:
+
+> "Use hopper_dispatch tool to start T-PLUGIN-05a in the background"
+
+The plugin uses OpenCode's `prompt_async` natively — see `hosts/opencode/plugins/README.md` for details.
+
+### Async result retrieval
+
+All four tiers write to the SAME file: `.hopper/handoffs/<task-id>-output.md`. Frontmatter schema (spec §14.3):
+
+```yaml
+---
+task_id: T-PLUGIN-05a
+adapter: kimi
+status: in-progress    # in-progress | done | failed | orphaned
+pid: 24112             # runner wrapper PID
+start_time: 2026-05-21T14:33:02.117Z
+end_time: null         # filled on exit
+exit_code: null        # filled on exit
+duration_ms: null
+mode: background
+host_native: claude-code   # null | claude-code | opencode
+session_id: null
+log: ./T-PLUGIN-05a-output.log
+---
+```
+
+Read the frontmatter directly OR use:
+
+```bash
+hopper-dispatch --watch T-PLUGIN-05a   # tail-follow until done
+hopper-dispatch --jobs                 # one-line summary of all in-progress
+```
+
+### Async caveats
+
+- **Concurrent dispatch protection**: trying to dispatch a task that's already `in-progress` with an alive PID → refused. Use `--watch` to follow or wait. After 24h, the job is auto-classified as `orphaned` and re-dispatch is allowed (PID-reuse mitigation).
+- **stdin-piping adapters**: not supported in background mode (would require a pipe surviving parent exit — fragile cross-platform). Codex/Kimi/OpenCode/Copilot/Agy all use argv-mode prompts, so this doesn't affect existing vendors.
+- **Heterogeneous-only**: invoking from Codex CLI host to dispatch back to codex vendor triggers a soft warning. Set `HOPPER_ALLOW_SAME_VENDOR=1` to suppress.
+- **No auto-retry**: failed jobs stay `status: failed`. User re-dispatches manually if desired. Spec §14.10 forbids any retry logic in this layer.
+
 ## Uninstall
 
 Unlink the symlinks. Nothing persists outside `.hopper/` (which lives in the consuming project, not the plugin).
