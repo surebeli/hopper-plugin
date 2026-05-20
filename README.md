@@ -2,14 +2,14 @@
 
 > Reference implementation of [llm-hopper](https://github.com/surebeli/llm-hopper) protocol as a thin plugin layer. Demo-stage; see `docs/plans/2026-05-19-hopper-plugin-demo-spec.md` in the llm-hopper repo for the full spec.
 
-**Status (2026-05-20)**: Phase 4 nearly complete. All 4 host adapters wired, all 5 vendor adapters functional, 197/206 tests pass, 8 codex audit cycles cleared.
+**Status (2026-05-20)**: Phase 4 complete. T-PLUGIN-10 Critic verdict PASS_WITH_NOTES; demo cleared for essay material with framing constraints noted below.
 
-- **Hosts**: Tier A standalone CLI + Tier B Claude Code (4 slash commands) + Tier C #1 Codex CLI wrapper + Tier C #2 OpenCode wrapper
-- **Vendors**: codex, kimi, opencode, copilot, agy (all functional)
-- **PASS materials**: see `docs/release/PASS-RATIONALE.md` (5 hard criteria self-assessment) + `docs/release/INSTALL-MATRIX.md` (install patterns)
-- **Cross-host equivalence**: `scripts/cross-host-verify.sh` runs structural checks (all PASS)
-- **Open user-action gates**: T-00 Prong 1 (Claude Code plugin install), T-05e (agy interactive OAuth) — to be exercised during demo testing
-- **Remaining**: T-PLUGIN-09 screencast (deferred), T-PLUGIN-10 Critic end-to-end acceptance
+- **Hosts (4)**: Tier A standalone CLI + Tier B Claude Code (4 slash commands) + Tier C #1 Codex CLI wrapper + Tier C #2 OpenCode wrapper. Cross-host equivalence verified structurally; live 4-host demo is a user-action exercise.
+- **Vendors (5 registered)**: codex, kimi, opencode, copilot, agy. **4 live-smoke-verified**; agy code-complete with live OAuth-gated smoke pending (T-PLUGIN-05e). Spec required ≥3 live-smoked; demo exceeds with 4.
+- **PASS materials**: see `docs/release/PASS-RATIONALE.md` (5 hard criteria self-assessment) + `docs/release/INSTALL-MATRIX.md` (install patterns) + `scripts/cross-host-verify.sh` (structural equivalence proof — all PASS).
+- **Test suite**: 197/206 passing (9 Windows skips by design). 8 codex audit cycles cleared.
+- **Open user-action gates (do not block code/test-based verdict; required for live release)**: T-PLUGIN-00 Prong 1 (Claude Code plugin install + `/hopper:smoke`), T-PLUGIN-05e (agy interactive OAuth + post-OAuth smoke).
+- **Deferred**: T-PLUGIN-09 screencast — defer per user directive 2026-05-20.
 
 **Protocol-vs-tool positioning**: hopper-plugin is a CONVENIENCE LAYER for the llm-hopper protocol, NOT a runtime. Remove the plugin and the same `.hopper/` directory remains operable via manual CLI sessions.
 
@@ -54,7 +54,21 @@ Each host route resolves to the same `cli/bin/hopper-dispatch`. Vendor selection
 
 ## Install
 
-Pending T-PLUGIN-09 (README + screencast task). Check back after 2026-05-25.
+See `docs/release/INSTALL-MATRIX.md` for the full per-host install patterns + symlink targets + verification steps.
+
+Quick start (Tier A standalone CLI):
+
+```bash
+git clone https://github.com/surebeli/hopper-plugin
+cd hopper-plugin
+node cli/bin/hopper-dispatch --smoke    # expect: hopper standalone (CLI v0.4.0-phase-3)
+```
+
+To verify the cross-host equivalence claim without installing all 4 hosts:
+
+```bash
+bash scripts/cross-host-verify.sh       # static checks; expect ALL STRUCTURAL CHECKS PASSED
+```
 
 ## License
 

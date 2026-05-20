@@ -22,12 +22,13 @@ Anchor: `docs/release/PASS-RATIONALE.md::root`
 | Host wrapper LOC (bash + cmd)      | ~280 lines    | `hosts/codex-cli/bin/` + `hosts/opencode/bin/` |
 | Slash-command prompts LOC (md)     | ~127 lines    | `commands/*.md`                                |
 | Test suite LOC                     | ~2,473 lines  | `tests/unit/` + `tests/integration/`           |
-| Test count (Phase 4 partial)       | 197 / 206     | 9 skipped on Windows by design                 |
+| Test count (after T-09 + T-10)     | 197 / 206     | 9 skipped on Windows by design                 |
 | Test : code ratio                  | ~1.0 : 1      | tests have parity with implementation           |
-| Vendor adapters (functional)       | 5             | codex, kimi, opencode, copilot, agy            |
+| Vendor adapters registered         | 5             | codex, kimi, opencode, copilot, agy            |
+| Vendor adapters live-smoke-verified| **4 of 5**    | agy code-complete; live smoke gated on OAuth   |
 | Functional host adapters           | 4             | Tier A + Tier B + Tier C #1 + Tier C #2        |
-| Codex audit cycles                 | 8             | Phase 0/1/2/3 + 4 mini-audits + Phase 4 partial |
-| Total Strategy + audit cost (est.) | ~$0.46 API    | `.hopper/COST-LOG.md`                          |
+| Codex audit cycles                 | 9             | 8 phase audits + Critic acceptance (T-10)      |
+| Total Strategy + audit cost (est.) | ~$0.50 API    | `.hopper/COST-LOG.md`                          |
 
 ---
 
@@ -72,7 +73,7 @@ Anchor: `docs/release/PASS-RATIONALE.md::root`
 - Tier B: `commands/*.md` (4 slash commands) + `.claude-plugin/plugin.json` at repo root
 - Tier C #1: `hosts/codex-cli/bin/hopper-codex` (bash wrapper invoking `codex exec`)
 - Tier C #2: `hosts/opencode/bin/hopper-opencode` (bash wrapper invoking `opencode run`)
-- Vendor coverage: all 5 functional (exceeds spec's ≥3 requirement)
+- Vendor coverage: **5 adapters registered + code-complete; 4 live-smoke-verified**; agy live smoke gated on user OAuth (T-05e). Spec required ≥3 live-smoked; demo exceeds with 4.
 
 **Evidence**:
 - `cli/src/vendors/index.js` — static registry of all 5 adapters
@@ -84,10 +85,13 @@ Anchor: `docs/release/PASS-RATIONALE.md::root`
   - `tests/integration/execute-dispatch-e2e.test.js` 4 tests — proves single-spawn at executeDispatch chain via counter-incrementing fake adapter
 - 5 vendor adapters each have a contract test suite (codex/kimi/opencode/copilot/agy)
 
-**Caveats**:
+**Caveats** (per T-10 Critic OVER-CLAIM CHECK, language tightened):
 - **Tier B Claude Code install** is functionally implemented but **not user-verified** (T-PLUGIN-00 Prong 1 still open — Strategy-as-developer cannot install plugin on self while running inside Claude Code). The manifest schema + 4 command files exist + tests assert structure, but the actual `/hopper:smoke` invocation under a fresh Claude Code session is a user-action gate.
-- **agy adapter** auth-flow is functionally implemented but its **real smoke** is gated on user OAuth (T-PLUGIN-05e). The adapter classifies silent-auth-fail correctly when tested with synthetic SubprocessResult inputs; live OAuth verification is pending user.
+- **agy adapter live smoke** is gated on user OAuth (T-PLUGIN-05e). The adapter classifies silent-auth-fail correctly when tested with synthetic SubprocessResult inputs (`tests/unit/vendors-agy-quirks.test.js` + `tests/unit/vendors-agy-edge-cases.test.js`, 16 quirks/edge-case tests passing); **the code path is functionally complete, but no live OAuth-authed `agy -p` smoke has been captured**. Spec only requires ≥3 live-smoked; demo has 4 (codex, kimi, opencode, copilot all live-smoke-verified during Phase 0; agy code-complete pending OAuth).
+- **Cross-host equivalence is structural, not live-empirical**. `scripts/cross-host-verify.sh` proves the structural invariants (same regex, same dispatcher binary, no orchestration constructs). A live 4-host demo (same task-id dispatched via Tier A + Tier B + Tier C #1 + Tier C #2, observed to spawn the same vendor) is a user-action follow-up.
 - Tier C wrappers' cross-host claim is **prompt-enforced** at the host model boundary (codex/opencode must comply with the wrapper's prompt). Mechanically the deterministic vendor resolution holds; soft-orchestration by the host model is explicitly forbidden in the prompt but the constraint is policy-level, not bytecode-level. (Codex Phase 4 audit acknowledged this as inherent to the integration boundary.)
+- **Output sidecar `-output-raw.txt`** is created for long vendor outputs (>4096 chars). It lives inside `.hopper/handoffs/` (still satisfies criterion #1) but is `.txt` not `.md` — disclosed here per T-10 Critic note.
+- **OpenCode adapter accepts `ANTHROPIC_API_KEY` as a provider env-var fallback** (`cli/src/vendors/opencode.js:39`). This is OpenCode's own multi-provider env scheme, NOT an Anthropic SDK / `claude -p` usage path. Surfaced per T-10 Critic OVER-CLAIM CHECK so the spec §1 #3 verifier grep is not misread.
 
 **Self-verdict**: PASS (with user-action gates explicitly documented).
 
@@ -176,7 +180,7 @@ Anchor: `docs/release/PASS-RATIONALE.md::root`
 
 ## Audit trail summary
 
-8 codex audit cycles spanning Phase 0 through Phase 4 partial. Every phase + every code-impl task had at least one round; major phases had a final audit with REWORK-or-PASS verdict.
+9 codex audit cycles spanning Phase 0 through T-10 Critic acceptance. Every phase + every code-impl task had at least one round; major phases had a final audit with REWORK-or-PASS verdict.
 
 | Phase  | Audit kind            | Verdict                    | Findings                          | Fix commit |
 |--------|----------------------|----------------------------|-----------------------------------|------------|
@@ -187,6 +191,7 @@ Anchor: `docs/release/PASS-RATIONALE.md::root`
 | 3      | Phase 3 final        | REWORK → PASS_WITH_CHANGES | 1 P0 + 3 P1 + 2 P2 all fixed      | `2b76c61`   |
 | 4 mini | T-08a checkpoint     | FIX_AND_RECHECK → PROCEED  | 2 P1 + 1 P2 fixed                 | `78a7842`   |
 | 4 par. | Phase 4 partial      | PASS_WITH_CHANGES          | 4 P1 + 2 P2; key P1 fixed         | `311c50b`   |
+| T-10   | Critic acceptance    | PASS_WITH_NOTES            | 3 PASS_WITH_NOTE on #1/#2/#3/#5; #4 clean PASS; over-claim language tightened | this commit |
 
 **Pattern observed**: every adversarial round produced findings that were addressable. None of the findings revealed structural defects. The most consequential fix was Phase 3 P0 F1 (plugin install topology — `.claude-plugin/` was nested under `hosts/claude-code/` instead of repo root). Caught by audit before any real install attempt.
 

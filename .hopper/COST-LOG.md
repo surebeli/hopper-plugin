@@ -93,3 +93,14 @@ Pending T-PLUGIN-10 completion. Phase 0 + Phase 1-5 budget ceiling: ≤ $6 task 
 **Phase 3 + Phase 4 partial subtotal**: ~$0.25 API (codex audit costs) + 0 marginal sub cost (Strategy work).
 
 **Cumulative**: Phase 0 (~$0.08) + Phase 1 (codex audit ~$0.05) + Phase 2 (codex audit ~$0.08) + Phase 3 (~$0.14) + Phase 4 partial (~$0.11) ≈ ~$0.46 API + sub.
+
+### T-09 + T-10 (2026-05-20 evening)
+
+| Date | Task | Task-type | Model | Tokens In/Out | Approx $ | Tier | Notes |
+|------|------|-----------|-------|---------------|----------|------|-------|
+| 2026-05-20 | T-PLUGIN-09 | spec-write | claude-opus-4-7 (Strategy) | n/a | $0 marginal | sub | PASS materials (no-screencast variant per user) |
+| 2026-05-20 | T-PLUGIN-10 Critic | code-review-acceptance | codex GPT-5.5 xhigh | ~28,000/~3,500 | ~$0.07 | sub | End-to-end Critic acceptance; PASS_WITH_NOTES; GO for essay |
+
+**T-09 + T-10 subtotal**: ~$0.07 API + 0 marginal subscription.
+
+**Cumulative (entire demo)**: Phase 0 (~$0.08) + Phase 1 codex audit (~$0.05) + Phase 2 audit (~$0.08) + Phase 3 (~$0.14) + Phase 4 partial (~$0.11) + T-09/10 (~$0.07) ≈ **~$0.53 API + sub-tier consumption**.

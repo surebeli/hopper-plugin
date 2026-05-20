@@ -8,7 +8,7 @@ This project IS hopper-plugin development. Its `.hopper/` directory is dogfooded
 
 ## Current Phase
 
-**Phase**: Phase 4 partial complete (T-08a + T-08b done; T-09 + T-10 remaining). Phase 4 partial audit verdict PASS_WITH_CHANGES — T-09 GREEN-LIGHT; T-10 gated on T-09 + open user-action gates.
+**Phase**: Phase 4 substantively complete (2026-05-20 evening). T-09 + T-10 both done; Critic verdict PASS_WITH_NOTES with GO for essay material. Screencast deferred per user; user-action gates (T-00 Prong 1, T-05e) remain open and will be exercised during demo testing.
 
 **Status**: Spec v2.0.3 final. Phase 0 (3 tasks). Phase 1 (5 tasks done). Phase 2 (5 tasks done). Phase 3 (2 tasks done). Phase 4 (2 of 4 done: T-08a Codex CLI host + T-08b OpenCode host; T-09 README/screencast + T-10 Critic acceptance pending). **197/206 tests passing** (9 Windows skips). Centralized task-id validation in `cli/src/validation.js` per Phase 4 audit P1.
 
@@ -25,9 +25,11 @@ Phase 4 (T-PLUGIN-08a Codex CLI host + T-PLUGIN-08b OpenCode host + T-PLUGIN-09 
 2. ✅ Phase 1 done (T-01/02/03/04/04.5 outputs at .hopper/handoffs/)
 3. ✅ Phase 2 done (T-05a/b/c/d/e outputs at .hopper/handoffs/); codex Phase 2 audit PASS_WITH_CHANGES → 3 P1 findings fixed (envPreflight false-negatives, agy stderr handling, E2E spawn-count test)
 4. ✅ Phase 3 done (T-06 + T-07 outputs); codex T-06 mini-audit FIX_AND_RECHECK → PROCEED_TO_T07; codex Phase 3 final audit REWORK → 6 findings (1 P0 + 3 P1 + 2 P2) all FIXED → recheck PASS_WITH_CHANGES with Phase 4 GREEN-LIGHT
-5. ✅ Phase 4 partial: T-08a + T-08b done (both Tier C wrappers functional, exceeds spec ≥1 requirement). Phase 4 partial audit PASS_WITH_CHANGES, no P0, T-09 GREEN-LIGHT yes
-6. ⏭️ Remaining Phase 4: T-PLUGIN-09 (README + 30-60s screencast showing 4-host dispatch equivalence) + T-PLUGIN-10 (Critic end-to-end acceptance of 5 hard criteria)
-7. ⏳ Pending user-action gates (block T-10 final acceptance, not T-09 prep): T-PLUGIN-00 Prong 1 (Claude Code plugin install + /hopper:smoke); T-PLUGIN-05e (agy interactive OAuth)
+5. ✅ Phase 4 substantively complete (2026-05-20 evening):
+   - T-08a + T-08b: both Tier C wrappers functional (exceeds spec ≥1 requirement). Phase 4 partial audit PASS_WITH_CHANGES.
+   - T-09: PASS materials (no-screencast variant per user directive) — `docs/release/PASS-RATIONALE.md` + `docs/release/INSTALL-MATRIX.md` + `scripts/cross-host-verify.sh`. Screencast deferred as TODO.
+   - T-10: Critic acceptance verdict **PASS_WITH_NOTES** with GO for essay material. Per-criterion: #4 PASS clean; #1/#2/#3/#5 PASS_WITH_NOTE. Top-3 Critic concerns all remediated in same commit cycle.
+6. ⏳ Pending (deferred / user-action; do not block essay material): T-PLUGIN-09 screencast (deferred TODO); T-PLUGIN-00 Prong 1 (Claude Code plugin install verify); T-PLUGIN-05e (agy interactive OAuth + post-OAuth live smoke).
 
 **Escalation contract**: 8 carry-over from myWriteAssistant + 3 P1 + 6 spike-specific (Phase 0 v2.0):
 - #9 T-PLUGIN-00 prong fail → ping
@@ -76,3 +78,4 @@ Phase 4 (T-PLUGIN-08a Codex CLI host + T-PLUGIN-08b OpenCode host + T-PLUGIN-09 
 | 2026-05-20 | Phase 2 complete (T-05a/b/c/d/e); codex audit PASS_WITH_CHANGES; 3 P1 fixes (F1 envPreflight broadening across 4 adapters, F2 agy stderr+missing-log handling, F3 E2E spawn-count test). 117 tests passing. | Strategy Advisor (claude-opus-4-7) |
 | 2026-05-20 | Phase 3 complete (T-06 output writer + T-07 Tier B slash wiring); codex mini-audit checkpoint after T-06 (FIX_AND_RECHECK → PROCEED_TO_T07, 4 P1 fixes); final Phase 3 audit REWORK → 6 findings (1 P0 + 3 P1 + 2 P2) ALL FIXED in commit 2b76c61 (plugin root hoisted to repo root, arg validation in slash commands, symlink-safe writes, MANIFEST cursor refresh, anti-persona phrasing, version drift); recheck PASS_WITH_CHANGES Phase 4 GREEN-LIGHT. 161/163 tests passing. | Strategy Advisor (claude-opus-4-7) |
 | 2026-05-20 | Phase 4 partial (T-08a Codex CLI host + T-08b OpenCode host); T-08a mini-audit FIX_AND_RECHECK → PROCEED_TO_T08B (3 P1 fixes: '..' rejection, symlink-safe SCRIPT_DIR, no-soft-orchestration prompt clause); Phase 4 partial audit PASS_WITH_CHANGES with 4 P1 + 2 P2 findings, addressed: validation centralized in `cli/src/validation.js`, dispatcher CLI now validates task-id + flags at entry, T-08a/b output.md handoffs written, root README refreshed, MANIFEST cursor advanced. T-09 + T-10 remain. 197/206 tests passing. | Strategy Advisor (claude-opus-4-7) |
+| 2026-05-20 | Phase 4 close-out (T-09 PASS materials no-screencast variant + T-10 Critic acceptance PASS_WITH_NOTES). Deliverables: docs/release/PASS-RATIONALE.md (5-criteria self-assessment), docs/release/INSTALL-MATRIX.md (4-host install patterns), scripts/cross-host-verify.sh (structural equivalence proof — all PASS), root README quick-start. Critic verdict: #4 PASS clean; #1/#2/#3/#5 PASS_WITH_NOTE with over-claim language tightened. Top-3 Critic concerns remediated: 5 registered + 4 live-smoked (not "all 5 functional"), structural cross-host (not live 4-host), INSTALL-MATRIX pointer (not "pending T-09"). GO for essay material. Screencast + 2 user-action gates deferred per user directive. Cumulative cost ~$0.53. | Strategy Advisor (claude-opus-4-7) |
