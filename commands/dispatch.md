@@ -1,7 +1,7 @@
 ---
-description: Dispatch a task from .hopper/queue.md to its preferred vendor CLI via hopper-dispatch.
+description: Dispatch a task from .hopper/queue.md to its preferred vendor CLI via hopper-dispatch. Supports --background for long-running tasks (spec §14).
 allowed-tools: Bash, Read
-argument-hint: <task-id> [--write] [--force] [--model <name>] [--reasoning <low|medium|high|xhigh>]
+argument-hint: <task-id> [--background] [--write] [--force] [--model <name>] [--reasoning <low|medium|high|xhigh>]
 ---
 
 This command runs inside a Claude Code session and invokes the host-agnostic `hopper-dispatch` CLI to dispatch one task.
@@ -22,7 +22,7 @@ This command runs inside a Claude Code session and invokes the host-agnostic `ho
 1. Split `$ARGUMENTS` on whitespace into tokens.
 2. The **first** token MUST be a task ID matching this exact regex: `^[A-Za-z][A-Za-z0-9._-]{0,99}$`. Reject anything containing `/`, `\`, `..`, shell metacharacters (`;`, `|`, `&`, `` ` ``, `$`, `(`, `)`, `<`, `>`, quotes), or newlines.
 3. The **remaining** tokens are one of these forms:
-   - Bare flag: `--write` or `--force` (no value follows)
+   - Bare flag: `--write`, `--force`, or `--background` (no value follows)
    - Value flag: `--model <name>` (consumes next token) — `<name>` must match `^[A-Za-z][A-Za-z0-9._/:-]{0,99}$`
    - Value flag: `--reasoning <level>` (consumes next token) — `<level>` must be exactly one of `low`, `medium`, `high`, `xhigh`
    - Reject anything else.
@@ -32,9 +32,13 @@ This command runs inside a Claude Code session and invokes the host-agnostic `ho
 - `--model` honored by: kimi, opencode, copilot (becomes `-m / --model <name>` to the vendor CLI)
 - `--reasoning` honored by: codex (becomes `model_reasoning_effort=<level>`); other adapters ignore it harmlessly
 
-## Invocation (only after validation passes)
+## Invocation modes — pick ONE based on arguments
 
-Build an explicit, properly-quoted command. Do not splat raw `$ARGUMENTS`. Examples:
+### Mode A: SYNC dispatch (default — no `--background` flag)
+
+The Bash tool blocks until the dispatcher returns. Best for fast tasks (<30s) or when you want immediate result inline.
+
+Build an explicit, properly-quoted command. Do not splat raw `$ARGUMENTS`:
 
 ```bash
 # Plain dispatch + write
@@ -42,6 +46,53 @@ node "$CLAUDE_PLUGIN_ROOT/cli/bin/hopper-dispatch" "T-PLUGIN-05a" --write
 
 # With adapter opts
 node "$CLAUDE_PLUGIN_ROOT/cli/bin/hopper-dispatch" "T-PLUGIN-05a" --write --model "kimi-thinking" --reasoning "high"
+```
+
+### Mode B: BACKGROUND dispatch (`--background` flag present)
+
+**Per spec §14**: the dispatcher returns immediately (<100ms) with a PID. The vendor subprocess runs detached, writes result to `.hopper/handoffs/<task-id>-output.md` (frontmatter + sidecar `.log`). Use this mode for long-running tasks (>1 min, kimi-thinking / codex xhigh / agy long reasoning).
+
+**You MUST use Claude Code's native background-Bash mechanism** to avoid freezing this session:
+
+```bash
+# Invoke the dispatcher as a background Bash tool call
+# Set run_in_background=true on the Bash tool invocation
+node "$CLAUDE_PLUGIN_ROOT/cli/bin/hopper-dispatch" "T-PLUGIN-05a" --background
+```
+
+When you call the Bash tool, use `{ "run_in_background": true }` — this returns immediately with a shell-id but does NOT block your turn.
+
+**After dispatch returns** (the dispatcher's own output, NOT the vendor's):
+- Note the task ID, runner PID, output paths from the dispatcher's stdout
+- Tell the user: "Background dispatch started for `T-PLUGIN-XX`. Vendor: `<X>`. I'll check progress periodically; you can also follow with `/hopper:dispatch --watch T-PLUGIN-XX` in another session."
+
+**Polling progress** (when user asks "how's it going?" OR every ~30s if they're waiting):
+
+Use the Monitor tool on the background Bash shell (if it's still alive), OR poll the output.md frontmatter via:
+
+```bash
+# Read frontmatter only (cheap)
+head -20 "<repo-root>/.hopper/handoffs/T-PLUGIN-XX-output.md"
+```
+
+Look for `status:` line. While `status: in-progress`, report ongoing. When status flips to `done`, `failed`, or `orphaned`, surface the final state and the sidecar `.log` excerpt to the user.
+
+**Do NOT poll faster than ~10s intervals** — wastes Bash tool budget. The user can manually invoke `/hopper:dispatch --watch T-X` in a separate session for real-time tail.
+
+### Mode C: Fallback path resolution (if `$CLAUDE_PLUGIN_ROOT` unset)
+
+Both sync and background modes need to locate the dispatcher binary. If `$CLAUDE_PLUGIN_ROOT` is unset:
+
+```bash
+for root in \
+  "$HOME/.claude/plugins/hopper" \
+  "$HOME/.claude/plugins/hopper-plugin" \
+  "./"; do
+  if [ -f "$root/cli/bin/hopper-dispatch" ]; then
+    node "$root/cli/bin/hopper-dispatch" "<validated-task-id>" <validated-flags>
+    break
+  fi
+done
 ```
 
 If `$CLAUDE_PLUGIN_ROOT` is unset (older Claude Code or non-plugin invocation), fall back to a path search:
@@ -58,7 +109,7 @@ for root in \
 done
 ```
 
-## After dispatch returns
+## After dispatch returns (sync mode only)
 
 Show the user:
 - Task ID, resolved vendor, status, duration
@@ -77,8 +128,10 @@ Per codex final strict audit (Category C): Tier B's previous prompt suggested st
 
 ## What this command MUST NOT do
 
-- Do NOT re-invoke `hopper-dispatch` on failure (single-spawn invariant per spec §3 #4)
+- Do NOT re-invoke `hopper-dispatch` on failure (single-spawn invariant per spec §3 #4 + §14.10)
 - Do NOT modify `.hopper/queue.md`, `.hopper/AGENTS.md`, or `.hopper/COST-LOG.md` without explicit user approval
 - Do NOT batch-dispatch multiple tasks in one slash invocation (one slash = one task)
 - Do NOT swallow errors silently — always surface vendor stderr / exit code if available
 - Do NOT splat unvalidated `$ARGUMENTS` directly into a Bash command line
+- Do NOT poll background tasks faster than ~10s — wastes Bash tool budget
+- Do NOT use sync mode for tasks known to exceed 1 min — use `--background` instead to keep the user's session responsive
