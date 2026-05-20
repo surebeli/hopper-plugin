@@ -2,7 +2,14 @@
 
 > Reference implementation of [llm-hopper](https://github.com/surebeli/llm-hopper) protocol as a thin plugin layer. Demo-stage; see `docs/plans/2026-05-19-hopper-plugin-demo-spec.md` in the llm-hopper repo for the full spec.
 
-**Status (2026-05-20)**: Phase 4 functional. Tier A (standalone CLI) + Tier B (Claude Code plugin, 4 slash commands) + Tier C #1 (Codex CLI wrapper) + Tier C #2 (OpenCode wrapper) all wired. 5 vendor adapters (codex, kimi, opencode, copilot, agy). 197/206 tests pass. T-09 (README + screencast) + T-10 (Critic acceptance) next. User-action gates open: T-00 Prong 1 (Claude Code plugin install verification) + T-05e (agy interactive OAuth).
+**Status (2026-05-20)**: Phase 4 nearly complete. All 4 host adapters wired, all 5 vendor adapters functional, 197/206 tests pass, 8 codex audit cycles cleared.
+
+- **Hosts**: Tier A standalone CLI + Tier B Claude Code (4 slash commands) + Tier C #1 Codex CLI wrapper + Tier C #2 OpenCode wrapper
+- **Vendors**: codex, kimi, opencode, copilot, agy (all functional)
+- **PASS materials**: see `docs/release/PASS-RATIONALE.md` (5 hard criteria self-assessment) + `docs/release/INSTALL-MATRIX.md` (install patterns)
+- **Cross-host equivalence**: `scripts/cross-host-verify.sh` runs structural checks (all PASS)
+- **Open user-action gates**: T-00 Prong 1 (Claude Code plugin install), T-05e (agy interactive OAuth) — to be exercised during demo testing
+- **Remaining**: T-PLUGIN-09 screencast (deferred), T-PLUGIN-10 Critic end-to-end acceptance
 
 **Protocol-vs-tool positioning**: hopper-plugin is a CONVENIENCE LAYER for the llm-hopper protocol, NOT a runtime. Remove the plugin and the same `.hopper/` directory remains operable via manual CLI sessions.
 
