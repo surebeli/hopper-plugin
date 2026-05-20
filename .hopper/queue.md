@@ -24,11 +24,11 @@ Anchor: `.hopper/queue.md::root`
 | T-PLUGIN-03 | code-impl | done | T-PLUGIN-01 | normal | Tasks library loader + anti-persona verifier. 11 unit tests pass. |
 | T-PLUGIN-04 | code-impl | done | T-PLUGIN-02, T-PLUGIN-03 | normal | AGENTS.md parser + deterministic vendor router (4-step resolution: row override → preference → agent pref array → throw). 7 unit tests including 10-call determinism check. |
 | T-PLUGIN-04.5 | spec-write | done | T-PLUGIN-00b | high | VendorAdapter JSDoc contract + runSubprocessOnce shared wrapper with Windows taskkill /T /F + Unix detached-group SIGKILL + makeUniqueLogPath for codex F2 stale-log prevention. 11 unit tests pass. |
-| T-PLUGIN-05a | code-impl | pending | T-PLUGIN-04, T-PLUGIN-04.5 | normal | Codex vendor adapter (cli/src/vendors/codex.ts, ~50-80 lines on top of shared wrapper). |
-| T-PLUGIN-05b | code-impl | pending | T-PLUGIN-04, T-PLUGIN-00b | normal | Kimi vendor adapter (kimi -p --print --afk, ~40 lines). |
-| T-PLUGIN-05c | code-impl | pending | T-PLUGIN-04, T-PLUGIN-00b | normal | OpenCode vendor adapter (opencode run, pin 0.14.7 per #3213, ~50 lines). |
-| T-PLUGIN-05d | code-impl | pending | T-PLUGIN-04, T-PLUGIN-00b | normal | Copilot vendor adapter (copilot -p, GH_TOKEN auth, quota-aware, ~40 lines). |
-| T-PLUGIN-05e | code-impl | pending | T-PLUGIN-04, T-PLUGIN-04.5, T-PLUGIN-00b | normal | **Antigravity (agy) adapter** (swapped per user 2026-05-20; cli/src/vendors/agy.ts, ~60-80 lines). 5th functional vendor; agy is Google's 6/18 Gemini successor. Adapter must handle silent auth-fail (exit 0 + empty stdout = not OAuth-authed). Gemini optionally doc-only post-essay. |
+| T-PLUGIN-05a | code-impl | done | T-PLUGIN-04, T-PLUGIN-04.5 | normal | Codex vendor adapter (cli/src/vendors/codex.js, ~55 lines on shared wrapper). 9 contract tests pass. |
+| T-PLUGIN-05b | code-impl | done | T-PLUGIN-04, T-PLUGIN-00b | normal | Kimi vendor adapter with HTTP 402 detection (~55 lines). 9 contract tests pass. |
+| T-PLUGIN-05c | code-impl | done | T-PLUGIN-04, T-PLUGIN-00b | normal | OpenCode vendor adapter with ANSI strip + run subcommand (~60 lines). Pin 0.14.7 advisory only. 9 tests pass. |
+| T-PLUGIN-05d | code-impl | done | T-PLUGIN-04, T-PLUGIN-00b | normal | Copilot vendor adapter with GH_TOKEN preflight + quota detection (~60 lines). 9 tests pass. |
+| T-PLUGIN-05e | code-impl | done | T-PLUGIN-04, T-PLUGIN-04.5, T-PLUGIN-00b | normal | **Antigravity (agy) adapter** (~115 lines). Silent auth-fail detection via unique --log-file per codex F2. 22 tests pass (10 contract + 12 quirks). Real smoke gated on user OAuth per spec §11 unified user-action gate. |
 | T-PLUGIN-06 | code-impl | pending | T-PLUGIN-05a | normal | Output.md writer + queue/cost-row suggested-edit prompts. |
 | T-PLUGIN-07 | code-impl | pending | T-PLUGIN-06 | normal | Claude Code slash command wiring (Tier B full). |
 | T-PLUGIN-08a | code-impl | pending | T-PLUGIN-07 | normal | Codex CLI host adapter (Tier C #1, custom prompt wrapper). |
