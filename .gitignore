@@ -50,3 +50,6 @@ yarn-debug.log*
 
 # Catch-all for obsidian translate plugin variants
 [[]*[]]?*.md
+
+# agy CLI project metadata
+.antigravitycli/
