@@ -309,7 +309,11 @@ agy -p "..."  # Then headless works indefinitely
 
 ### Acceptance check per spec §6 T-PLUGIN-00b (FINAL, Path A resolved 2026-05-20)
 
-Spec said "≥3 of 4 vendors print expected output". Path A user-unblock resolved earlier blockers; final score is **5 of 5 functional vendors smoke-verified**:
+Spec said "≥3 of 4 vendors print expected output". Path A user-unblock resolved earlier blockers.
+
+**Final public claim (per codex final strict audit 2026-05-20): 5 registered + 4 live-smoked; agy code-complete with live OAuth-gated smoke pending T-PLUGIN-05e.** The "5 of 5" framing in the legacy Phase 0 table below was optimistic about agy stability — DO NOT quote in essay copy. See `docs/release/PASS-RATIONALE.md` for the tightened public claim.
+
+Historical Phase 0 spike result table (preserved for audit trail; superseded by tightened claim above):
 
 | Vendor | Verified | Smoke output |
 |---|---|---|
@@ -323,7 +327,7 @@ Spec said "≥3 of 4 vendors print expected output". Path A user-unblock resolve
 
 Gemini is NOT in functional pool (swapped out). Optionally lands as `vendors/gemini.ts.spec.md` post-essay-only if user later wants pre-6/18 bridge.
 
-**5 functional vendor pool LOCKED: Codex / Kimi / OpenCode / Copilot / Antigravity-agy.** T-PLUGIN-04.5 + T-PLUGIN-05a-e can proceed (agy smoke verification gated on user OAuth).
+**5-adapter pool LOCKED: Codex / Kimi / OpenCode / Copilot / Antigravity-agy.** 4 live-smoked + agy code-complete (live smoke OAuth-gated per spec §11). T-PLUGIN-04.5 + T-PLUGIN-05a-e proceeded under unified user-action gate.
 
 ### Next recommendation (cursor-aware)
 

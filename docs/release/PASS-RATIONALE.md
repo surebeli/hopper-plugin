@@ -7,7 +7,7 @@ Anchor: `docs/release/PASS-RATIONALE.md::root`
 > **Sources of truth**:
 > - Spec: `F:\workspace\ai\llm-hopper\docs\plans\2026-05-19-hopper-plugin-demo-spec.md` (v2.0.3)
 > - Codebase: this repo at HEAD (see `.hopper/MANIFEST.md` for current phase cursor)
-> - Test suite: `tests/unit/*.test.js` + `tests/integration/*.test.js` (197/206 passing, 9 Windows skips by design)
+> - Test suite: `tests/unit/*.test.js` + `tests/integration/*.test.js` (207/216 passing, 9 Windows skips by design)
 
 > **Scope of this document**: each criterion gets (a) the spec wording, (b) what was actually built, (c) where the evidence lives (file paths + test names), and (d) any honest caveats. No screencast — verification is code + tests + this document.
 
@@ -22,12 +22,12 @@ Anchor: `docs/release/PASS-RATIONALE.md::root`
 | Host wrapper LOC (bash + cmd)      | ~280 lines    | `hosts/codex-cli/bin/` + `hosts/opencode/bin/` |
 | Slash-command prompts LOC (md)     | ~127 lines    | `commands/*.md`                                |
 | Test suite LOC                     | ~2,473 lines  | `tests/unit/` + `tests/integration/`           |
-| Test count (after T-09 + T-10)     | 197 / 206     | 9 skipped on Windows by design                 |
+| Test count (after final strict)    | 207 / 216     | 9 skipped on Windows by design                 |
 | Test : code ratio                  | ~1.0 : 1      | tests have parity with implementation           |
 | Vendor adapters registered         | 5             | codex, kimi, opencode, copilot, agy            |
 | Vendor adapters live-smoke-verified| **4 of 5**    | agy code-complete; live smoke gated on OAuth   |
 | Functional host adapters           | 4             | Tier A + Tier B + Tier C #1 + Tier C #2        |
-| Codex audit cycles                 | 9             | 8 phase audits + Critic acceptance (T-10)      |
+| Codex audit cycles                 | 10            | 8 phase audits + Critic (T-10) + final strict   |
 | Total Strategy + audit cost (est.) | ~$0.50 API    | `.hopper/COST-LOG.md`                          |
 
 ---
@@ -208,7 +208,7 @@ Per user directive 2026-05-20: these gates will be exercised during the demo tes
 All 5 hard criteria self-rated PASS (subject to user-action gates as documented). The codebase is essay-ready as evidence for:
 
 - "Multi-LLM coordination via file-based protocol is feasible with ~2,500 LOC core + ~2,500 LOC tests."
-- "8 codex audit cycles caught real issues; the discipline of 'every phase audited adversarially before next phase' worked."
+- "10 codex audit cycles caught real issues; the discipline of 'every phase audited adversarially before next phase' worked — including a final strict cycle that found queue-status schema bugs and a path-traversal gap that all 9 prior local-scope audits missed."
 - "Same task-id → same vendor across 4 hosts is mechanically true through deterministic vendor resolution; cross-host claim is structurally enforced."
 - "Single-spawn invariant proven by counter-tests at 3 layers (runSubprocessOnce, executeDispatch, executeWithAdapter)."
 

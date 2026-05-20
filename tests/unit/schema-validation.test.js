@@ -99,6 +99,60 @@ test('loadTaskFrame: rejects path-traversal taskType BEFORE any file read', asyn
   }
 });
 
+// ─── queue parser regression: unknown statuses must NOT silently become eligible
+
+test('queue parser regression: illegal status is preserved + rejected by findEligibleTask', async () => {
+  // Per codex final strict audit P1 (Category A): previously the parser
+  // mapped unknown statuses to 'pending' silently. This test exercises the
+  // full chain: parseQueue → findEligibleTask, with a queue row that has
+  // an ILLEGAL status. Must NOT be eligible.
+  const { parseQueue, findEligibleTask } = await import('../../cli/src/queue.js');
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-queue-regression-'));
+  try {
+    const queuePath = join(tmp, 'queue.md');
+    writeFileSync(queuePath, [
+      '# Queue',
+      '',
+      '| Task ID | Task-type | Status | Depends | Priority | Brief |',
+      '|---------|-----------|--------|---------|----------|-------|',
+      '| T-evil-1 | code-impl | failure-detected | | normal | illegal status used to silently → pending |',
+      '| T-evil-2 | code-impl | done-screencast-deferred | | normal | another illegal status |',
+      '| T-okay | code-impl | pending | | normal | legitimate pending task |',
+      '',
+    ].join('\n'), 'utf-8');
+
+    const tasks = await parseQueue(queuePath);
+
+    // Parser must preserve illegal statuses (not silently rewrite to 'pending')
+    const evil1 = tasks.find((t) => t.id === 'T-evil-1');
+    const evil2 = tasks.find((t) => t.id === 'T-evil-2');
+    const okay = tasks.find((t) => t.id === 'T-okay');
+
+    assert.ok(evil1, 'T-evil-1 row parsed');
+    assert.ok(evil2, 'T-evil-2 row parsed');
+    assert.ok(okay, 'T-okay row parsed');
+
+    assert.match(evil1.status, /^unknown:/,
+      `illegal status must be preserved as "unknown:X" (got "${evil1.status}")`);
+    assert.match(evil2.status, /^unknown:/,
+      `illegal status must be preserved as "unknown:X" (got "${evil2.status}")`);
+    assert.equal(okay.status, 'pending', 'legitimate pending stays pending');
+
+    // findEligibleTask MUST reject the illegal-status rows
+    const evilResult = findEligibleTask(tasks, 'T-evil-1');
+    assert.equal(evilResult.task, null, 'illegal-status task must NOT be eligible');
+    assert.match(evilResult.reason, /unknown|expected 'pending'/i,
+      'rejection reason must reference the unknown/non-pending status');
+
+    // findEligibleTask MUST accept the legitimate one
+    const okayResult = findEligibleTask(tasks, 'T-okay');
+    assert.ok(okayResult.task, 'legitimate pending task must be eligible');
+    assert.equal(okayResult.reason, null);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('loadTaskFrame: accepts canonical task-type', async () => {
   const tmp = mkdtempSync(join(tmpdir(), 'hopper-tasktype-ok-'));
   try {

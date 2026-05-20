@@ -7,7 +7,7 @@
 - **Hosts (4)**: Tier A standalone CLI + Tier B Claude Code (4 slash commands) + Tier C #1 Codex CLI wrapper + Tier C #2 OpenCode wrapper. Cross-host equivalence verified structurally; live 4-host demo is a user-action exercise.
 - **Vendors (5 registered)**: codex, kimi, opencode, copilot, agy. **4 live-smoke-verified**; agy code-complete with live OAuth-gated smoke pending (T-PLUGIN-05e). Spec required ≥3 live-smoked; demo exceeds with 4.
 - **PASS materials**: see `docs/release/PASS-RATIONALE.md` (5 hard criteria self-assessment) + `docs/release/INSTALL-MATRIX.md` (install patterns) + `scripts/cross-host-verify.sh` (structural equivalence proof — all PASS).
-- **Test suite**: 197/206 passing (9 Windows skips by design). 8 codex audit cycles cleared.
+- **Test suite**: 207/216 passing (9 Windows skips by design). **10 codex audit cycles** cleared (8 phase audits + T-10 Critic + 1 final strict).
 - **Open user-action gates (do not block code/test-based verdict; required for live release)**: T-PLUGIN-00 Prong 1 (Claude Code plugin install + `/hopper:smoke`), T-PLUGIN-05e (agy interactive OAuth + post-OAuth smoke).
 - **Deferred**: T-PLUGIN-09 screencast — defer per user directive 2026-05-20.
 
@@ -45,7 +45,7 @@ hopper-plugin/                  ← repo root = plugin install root
 │   ├── claude-code/README.md   ← Tier B documentation
 │   ├── codex-cli/bin/hopper-codex   ← Tier C #1 wrapper
 │   └── opencode/bin/hopper-opencode ← Tier C #2 wrapper
-├── tests/                      ← unit + integration tests (197/206 passing)
+├── tests/                      ← unit + integration tests (207/216 passing)
 ├── docs/                       ← spec, spikes, audit trail
 └── .hopper/                    ← THIS repo's own dogfood protocol state
 ```
