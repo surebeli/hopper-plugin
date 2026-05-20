@@ -133,7 +133,11 @@ function extractAgentRow(cells, map) {
   const nickname = stripBackticks(cells[map.nicknameIdx]);
   if (!nickname) return null;
   const uuid = map.uuidIdx != null ? stripBackticks(cells[map.uuidIdx]) : '';
-  const vendor = stripBackticks(cells[map.vendorIdx]).split(/\s+/)[0]; // first token = CLI name
+  // First token = CLI name; normalize to adapter ID (strip -cli/-CLI suffix
+  // so "codex-cli (gpt-5.5-xhigh)" → "codex" matching cli/src/vendors/codex.js)
+  // Per codex Phase 1 audit F2 fix.
+  let vendor = stripBackticks(cells[map.vendorIdx]).split(/\s+/)[0];
+  vendor = vendor.replace(/-cli$/i, '').replace(/_cli$/i, '');
   const prefRaw = map.prefIdx != null ? cells[map.prefIdx] : '';
   const taskTypePref = prefRaw
     .split(',')
@@ -145,10 +149,14 @@ function extractAgentRow(cells, map) {
 function extractPreferenceRow(cells, map) {
   const taskType = stripBackticks(cells[map.taskTypeIdx]);
   if (!taskType) return null;
-  // vendor cell may have annotations like "kimi-builder *(static default — codex F1 fix)*"
-  // Extract first nickname-shaped token
   const vendorCell = cells[map.vendorIdx];
-  const match = vendorCell.match(/`?([a-z][\w-]+)`?/i);
+  // Skip OOB markers: cells that START with parens are notes, not bindings.
+  // e.g. "(Strategy invokes OOB /codex)" means this task-type is handled
+  // out-of-band, NOT dispatched through queue.md to a vendor.
+  if (/^\s*\(/.test(vendorCell)) return null;
+  // Vendor cell may have annotations: "kimi-builder *(static default — codex F1)*"
+  // Match first nickname-shaped token (lowercase-starting alphanumeric + hyphens)
+  const match = vendorCell.match(/`?([a-z][\w-]+)`?/);
   if (!match) return null;
   return { taskType, vendor: stripBackticks(match[1]) };
 }

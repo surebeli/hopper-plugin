@@ -8,20 +8,26 @@ This project IS hopper-plugin development. Its `.hopper/` directory is dogfooded
 
 ## Current Phase
 
-**Phase**: Phase 0 spikes (T-00 + T-00b) + Phase 0.5 tasks library bootstrap (Day 1, 2026-05-20). v2.0 schema after user pivot to task-based + no-harness-core + 5-vendor.
+**Phase**: Phase 1 complete (2026-05-20). Ready for Phase 2 (vendor adapter implementations T-PLUGIN-05a-e).
 
-**Status**: Repo initialized 2026-05-20. Spec migrated v1.1.1 → v2.0 (codex audit pending). queue.md migrated to v2 schema (Task-type column, 18 tasks). AGENTS.md migrated to vendor-binding (no role). Dispatch v2.0 supersedes earlier v1.1.1 same file. No tasks complete yet.
+**Status**: Spec v2.0.3 final after Gemini→agy swap + 6 codex audit cycles. Phase 0: 3 tasks (T-00 in-progress per user-action gate; T-00b done with 4/5 vendors verified + agy pending OAuth; T-00.5 done). Phase 1: 5 tasks all done (T-01/02/03/04/04.5). 52 tests passing (42 unit + 7 integration + 3 spawn-count).
 
-**Current cursor**: Leader pops dispatch v2.0 + completes §12 recipient gate + runs Phase 0 = three tasks: T-PLUGIN-00 (3-prong host-lifecycle), T-PLUGIN-00b (4-vendor invocation), T-PLUGIN-00.5 (6 task-type frames). Total 9h focused work; can run parallel.
+**Current cursor**: All Phase 1 plumbing wired:
+- VendorAdapter contract + runSubprocessOnce shared wrapper (T-04.5)
+- queue.md v2 parser (T-02)
+- tasks library loader + anti-persona verifier (T-03)
+- AGENTS parser + deterministic vendor router (T-04)
+- bin/hopper-dispatch orchestrator (T-01)
+
+Phase 2 (T-PLUGIN-05a-e) ready to start. Adapter implementations: codex, kimi, opencode, copilot, agy. Agy smoke gated on user OAuth per unified user-action gate (spec §11). T-PLUGIN-00 Prong 1 user-install also gated separately.
 
 **Next action**:
 
-1. Leader pops `.hopper/handoffs/strategy-2026-05-20-T-PLUGIN-00-dispatch.md` v2.0 and completes §12 gate.
-2. Ack per §8 (chat OR HOPPER-FEEDBACK entry).
-3. Execute T-PLUGIN-00 (4h cap), T-PLUGIN-00b (2h cap, parallel-OK), T-PLUGIN-00.5 (3h, depends on both).
-4. Writes 3 deliverables: `docs/spikes/T-PLUGIN-00-resolved.md`, `docs/spikes/T-PLUGIN-00b-vendors.md`, 6 `.hopper/tasks/*.md` frames.
-5. Signal "Phase 0 complete, ready for codex pass" in final output.md Next.
-6. Strategy auto-invokes /codex cross-audit (goal-condition #2 — phase completion) on combined Phase 0 outputs before T-PLUGIN-01 dispatch.
+1. ✅ Phase 0 done (T-00/T-00b/T-00.5 outputs at .hopper/handoffs/)
+2. ✅ Phase 1 done (T-01/02/03/04/04.5 outputs at .hopper/handoffs/)
+3. ✅ Codex Phase 1 audit PASS_WITH_CHANGES → 4 findings fixed (F1 spawn-count test, F2 vendor name normalization, F3 MANIFEST cursor, F4 integration tests)
+4. ⏭️ Phase 2 ready: T-PLUGIN-05a (Codex adapter), T-05b (Kimi), T-05c (OpenCode), T-05d (Copilot), T-05e (agy with silent-auth-fail handling)
+5. ⏳ Pending user-action: T-PLUGIN-00 Prong 1 (Claude Code plugin install + /hopper:smoke verify); T-PLUGIN-05e (agy interactive OAuth login)
 
 **Escalation contract**: 8 carry-over from myWriteAssistant + 3 P1 + 6 spike-specific (Phase 0 v2.0):
 - #9 T-PLUGIN-00 prong fail → ping
