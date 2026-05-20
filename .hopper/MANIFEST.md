@@ -8,22 +8,28 @@ This project IS hopper-plugin development. Its `.hopper/` directory is dogfooded
 
 ## Current Phase
 
-**Phase**: Phase 0 host-lifecycle spike (Day 1 morning, 2026-05-20)
+**Phase**: Phase 0 spikes (T-00 + T-00b) + Phase 0.5 tasks library bootstrap (Day 1, 2026-05-20). v2.0 schema after user pivot to task-based + no-harness-core + 5-vendor.
 
-**Status**: Repo initialized 2026-05-20. T-PLUGIN-00 dispatched per `.hopper/handoffs/strategy-2026-05-20-T-PLUGIN-00-dispatch.md`. No tasks complete yet.
+**Status**: Repo initialized 2026-05-20. Spec migrated v1.1.1 → v2.0 (codex audit pending). queue.md migrated to v2 schema (Task-type column, 18 tasks). AGENTS.md migrated to vendor-binding (no role). Dispatch v2.0 supersedes earlier v1.1.1 same file. No tasks complete yet.
 
-**Current cursor**: Leader pops T-PLUGIN-00 from queue.md and runs the 3-prong host-lifecycle spike (Claude Code plugin registration / Codex CLI noninteractive invocation / standalone CLI baseline). Hard cap 4 hours. If any of 3 fails → escalate to Strategy before proceeding.
+**Current cursor**: Leader pops dispatch v2.0 + completes §12 recipient gate + runs Phase 0 = three tasks: T-PLUGIN-00 (3-prong host-lifecycle), T-PLUGIN-00b (4-vendor invocation), T-PLUGIN-00.5 (6 task-type frames). Total 9h focused work; can run parallel.
 
 **Next action**:
 
-1. Leader pops `.hopper/handoffs/strategy-2026-05-20-T-PLUGIN-00-dispatch.md` and completes §12 Recipient pre-execution gate per llm-hopper template discipline (commit `20c2df5`).
-2. After §12 ack, Leader pops T-PLUGIN-00 from queue, runs the 3 prongs.
-3. Writes `docs/spikes/T-PLUGIN-00-resolved.md` documenting actual values (manifest schema/path/pkg-mgr/codex flags/etc.) for T-PLUGIN-01..10 to reference.
-4. If pass: per goal-condition #2 (phase completion), Strategy auto-invokes `/codex` cross-audit on the spike result before T-PLUGIN-01 dispatch.
-5. If fail or >4h: escalate via `leader-ping-strategy-<dated>-T00-fail.md`.
+1. Leader pops `.hopper/handoffs/strategy-2026-05-20-T-PLUGIN-00-dispatch.md` v2.0 and completes §12 gate.
+2. Ack per §8 (chat OR HOPPER-FEEDBACK entry).
+3. Execute T-PLUGIN-00 (4h cap), T-PLUGIN-00b (2h cap, parallel-OK), T-PLUGIN-00.5 (3h, depends on both).
+4. Writes 3 deliverables: `docs/spikes/T-PLUGIN-00-resolved.md`, `docs/spikes/T-PLUGIN-00b-vendors.md`, 6 `.hopper/tasks/*.md` frames.
+5. Signal "Phase 0 complete, ready for codex pass" in final output.md Next.
+6. Strategy auto-invokes /codex cross-audit (goal-condition #2 — phase completion) on combined Phase 0 outputs before T-PLUGIN-01 dispatch.
 
-**Escalation contract**: Inherits all 8 triggers from llm-hopper dogfood + 2 P1 dispatch additions + 1 NEW spike-specific trigger:
-- #11 T-PLUGIN-00 prong failure or 4h time-cap → STOP, escalate. Possible outcomes: downgrade cross-host claim further (Claude Code-only); extend timeline to 6-7 days; abandon plugin demo and remove §8 from essay v3.
+**Escalation contract**: 8 carry-over from myWriteAssistant + 3 P1 + 6 spike-specific (Phase 0 v2.0):
+- #9 T-PLUGIN-00 prong fail → ping
+- #10 4h time-cap → STOP + progress digest
+- #11 spike reveals spec inaccuracy → ping
+- #12 T-PLUGIN-00b ≥2 of 4 vendors blocked → ping for scope downgrade
+- #13 Antigravity OAuth proves possible headless → ping to upgrade adapter spec
+- #14 T-PLUGIN-00.5 task-type boundary confusion → ping for boundary clarification
 
 **Recently completed**: None (repo init only).
 
@@ -59,4 +65,5 @@ This project IS hopper-plugin development. Its `.hopper/` directory is dogfooded
 
 | 日期 | Cursor 变化 | 由 |
 |------|------------|---|
-| 2026-05-20 | Repo initialized; .hopper/ skeleton populated; T-PLUGIN-00 spike queued per strategy-2026-05-20 dispatch; cross-audit protocol active per goal directive (codex on new proposals + phase completion) | Strategy Advisor (claude-opus-4-7) |
+| 2026-05-20 | Repo initialized; .hopper/ skeleton populated; T-PLUGIN-00 spike queued per strategy-2026-05-20 dispatch v1.1.1; cross-audit protocol active per goal directive | Strategy Advisor (claude-opus-4-7) |
+| 2026-05-20 | v2.0 migration: queue → v2 schema (Task-type col, 18 tasks); AGENTS.md → vendor binding; dispatch v2.0 supersedes v1.1.1 same-day; Phase 0 expanded to 3 tasks (T-00 + T-00b + T-00.5); per user goal directive (task-based, no-harness-core, 5-vendor) | Strategy Advisor (claude-opus-4-7) |
