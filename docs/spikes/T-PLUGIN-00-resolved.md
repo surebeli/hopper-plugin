@@ -123,9 +123,12 @@ const CODEX_ADAPTER: VendorAdapter = {
 
 ### Decision: scaffold manifest, defer install verification
 
-- Manifest written at `hosts/claude-code/.claude-plugin/plugin.json`
-- 3 slash commands declared: `/hopper:dispatch`, `/hopper:status`, `/hopper:smoke`
-- Manifest schema **tentative** — based on best-guess Claude Code plugin convention; actual schema needs user verification (Strategy-as-developer is running INSIDE Claude Code, cannot test plugin install on self)
+- _Initial Phase 0 scaffold_ wrote manifest at `hosts/claude-code/.claude-plugin/plugin.json`
+- _Phase 3 P0 fix (codex audit 2026-05-20)_: manifest hoisted to **repo root** at `.claude-plugin/plugin.json`; commands hoisted to repo root `commands/`. Required so `$CLAUDE_PLUGIN_ROOT/cli/bin/hopper-dispatch` resolves correctly.
+- 4 slash commands now declared via `commands/*.md`: `/hopper:dispatch`, `/hopper:status`, `/hopper:smoke`, `/hopper:vendors`
+- Plugin install topology: symlink the **repo root** to `~/.claude/plugins/hopper`
+- Manifest schema fields (name, version, description, author, license, keywords, homepage) standardized per Claude Code plugin convention; commands array embedded in manifest **removed** in favor of `commands/*.md` discovery
+- Actual install/invoke verification still needs user (Strategy-as-developer running INSIDE Claude Code cannot self-install)
 
 ### Why PARTIAL not FAIL
 
