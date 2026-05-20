@@ -8,24 +8,27 @@
 import { resolveDispatch, getStatus, executeDispatch } from '../src/dispatch.js';
 import { listTaskTypes } from '../src/tasks.js';
 import { listAdapters } from '../src/vendors/index.js';
+import { writeOutput } from '../src/output.js';
 import { resolve, join } from 'node:path';
 import { existsSync } from 'node:fs';
 
 const args = process.argv.slice(2);
-const VERSION = '0.3.0-phase-2';
+const VERSION = '0.4.0-phase-3';
 
 function printUsage() {
   console.log(`hopper-dispatch v${VERSION}`);
   console.log('');
   console.log('Usage:');
-  console.log('  hopper-dispatch <task-id>       Dispatch a task to its vendor (Phase 2: real subprocess)');
-  console.log('  hopper-dispatch --resolve <id>   Resolve dispatch without spawning (Phase 1 behavior)');
-  console.log('  hopper-dispatch --status         Show queue summary');
-  console.log('  hopper-dispatch --smoke          Standalone CLI smoke test');
-  console.log('  hopper-dispatch --task-types     List available task-type frames');
-  console.log('  hopper-dispatch --vendors        List registered vendor adapters');
-  console.log('  hopper-dispatch --help           Show this message');
-  console.log('  hopper-dispatch --version        Print version');
+  console.log('  hopper-dispatch <task-id>           Dispatch + spawn; print result (no output.md write)');
+  console.log('  hopper-dispatch <task-id> --write   Dispatch + spawn + write .hopper/handoffs/<id>-output.md');
+  console.log('  hopper-dispatch <task-id> --write --force   Overwrite existing output.md');
+  console.log('  hopper-dispatch --resolve <id>      Resolve dispatch without spawning (Phase 1 behavior)');
+  console.log('  hopper-dispatch --status            Show queue summary');
+  console.log('  hopper-dispatch --smoke             Standalone CLI smoke test');
+  console.log('  hopper-dispatch --task-types        List available task-type frames');
+  console.log('  hopper-dispatch --vendors           List registered vendor adapters');
+  console.log('  hopper-dispatch --help              Show this message');
+  console.log('  hopper-dispatch --version           Print version');
   console.log('');
   console.log('Env: HOPPER_DIR overrides .hopper/ location');
   console.log('     HOPPER_DEBUG=1 prints composed prompt + raw subprocess result');
@@ -121,7 +124,9 @@ async function main() {
     console.error('Error: no task-id provided. Use --help for usage.');
     process.exit(1);
   }
-  await runDispatch(hopperDir, taskId);
+  const writeFlag = args.includes('--write');
+  const forceFlag = args.includes('--force');
+  await runDispatch(hopperDir, taskId, { write: writeFlag, force: forceFlag });
 }
 
 async function runResolve(hopperDir, taskId) {
@@ -144,7 +149,7 @@ async function runResolve(hopperDir, taskId) {
   }
 }
 
-async function runDispatch(hopperDir, taskId) {
+async function runDispatch(hopperDir, taskId, { write = false, force = false } = {}) {
   try {
     console.error(`hopper-dispatch v${VERSION} — dispatching ${taskId}...`);
     const startedAt = Date.now();
@@ -187,6 +192,26 @@ async function runDispatch(hopperDir, taskId) {
         stderrLen: result.raw.stderr.length,
         logFileLen: result.raw.logFileContent ? result.raw.logFileContent.length : null,
       }, null, 2));
+    }
+
+    if (write) {
+      try {
+        const written = await writeOutput({ hopperDir, dispatchResult: result, force });
+        console.log('');
+        console.log('=== OUTPUT.MD WRITTEN ===');
+        console.log(`Wrote: ${written.path}${written.overwritten ? ' (overwritten)' : ''}`);
+        console.log('');
+        console.log('--- Suggested queue.md edit ---');
+        console.log(written.queueEdit);
+        console.log('');
+        console.log('--- Suggested COST-LOG.md row ---');
+        console.log(written.costEdit);
+        console.log('');
+        console.log('Per spec §11 unified user-action gate: apply suggested edits only after manual review.');
+      } catch (writeErr) {
+        console.error(`Error writing output.md: ${writeErr.message}`);
+        if (result.output.status === 'success') process.exit(2);  // distinct exit code for write failure
+      }
     }
 
     if (result.output.status !== 'success') process.exit(1);
