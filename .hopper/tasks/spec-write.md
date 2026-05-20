@@ -44,4 +44,4 @@ Acceptable alternatives: kimi-builder (cheaper, for low-novelty specs).
 
 ## Anti-persona note
 
-This frame describes TASK SHAPE, not AGENT IDENTITY. Do NOT prefix dispatched work with "you are a spec writer" / "act as an architect" / "think like a PM." The vendor invocation includes only the task spec + the input data; the vendor brings its own behavior.
+This frame describes TASK SHAPE, not AGENT IDENTITY. Avoid identity-claiming language and role-impersonation phrases in any dispatched prompt; the vendor invocation includes only the task spec + the input data, and the vendor brings its own behavior. Banned-phrase enumeration intentionally omitted here to keep the anti-persona grep verifier clean — see `llm-hopper/.hopper/USAGE-GUIDE.md` §3.4 for the full forbidden patterns list. (Per codex Phase 0 audit F3 fix.)

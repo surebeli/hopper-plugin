@@ -9,8 +9,8 @@ Find bugs, edge cases, security issues, performance regressions, and design hole
 ## Input shape
 
 The task receives:
-- A target artifact: PR diff, output.md from a `code-impl` task, or spec doc
-- Scope qualifier: "review the diff against base branch" / "review the spec for contract gaps" / "review the architecture for race conditions"
+- A target artifact: **PR diff or output.md from a `code-impl` task** (NOT spec docs — those belong to `spec-blindspot-hunt`; boundary tightened per codex Phase 0 audit F4)
+- Scope qualifier: "review the diff against base branch" / "review the architecture for race conditions in this implementation"
 - Optional focus: security / performance / correctness / API design
 
 ## Output shape (output.md schema)
@@ -33,7 +33,7 @@ The task receives:
 
 - **vs `code-review-acceptance`**: adversarial finds bugs, doesn't grade against acceptance. Acceptance review grades against pre-written acceptance criteria (accept / accept-with-note / rework / revert).
 - **vs `code-impl`**: adversarial review writes a findings doc; code-impl writes product code. Reviewer MUST NOT edit product code.
-- **vs `spec-blindspot-hunt`**: adversarial reviews code/diffs; blindspot-hunt reviews specs/designs.
+- **vs `spec-blindspot-hunt`** *(boundary tightened per codex F4)*: **adversarial scope = code / diffs / implementation outputs ONLY. Spec documents and design proposals are handled by `spec-blindspot-hunt`.** If a single dispatch needs both spec-level audit and code-level audit, that's TWO tasks (one of each type), not one.
 
 ## Vendor preference
 
@@ -43,4 +43,4 @@ If queued via plugin: codex-builder OR claude-opus-via-out-of-band-strategy-invo
 
 ## Anti-persona note
 
-This frame describes TASK SHAPE, not AGENT IDENTITY. Do NOT prefix work with "you are a Critic" / "act as a senior engineer" / "be adversarial." The verb "adversarial" is in the task-type name to signal intent; the vendor doesn't need a costume. Vendor brings its own rigor.
+This frame describes TASK SHAPE, not AGENT IDENTITY. Avoid identity-claiming language and role-impersonation phrases in any dispatched prompt. The verb "adversarial" is in the task-type name to signal intent; the vendor doesn't need a costume. Vendor brings its own rigor. Banned-phrase enumeration omitted here to keep the anti-persona grep verifier clean. (Per codex Phase 0 audit F3 fix.)

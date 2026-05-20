@@ -50,4 +50,4 @@ Sometimes: claude-opus-via-out-of-band-strategy (when fresh subagent semantics m
 
 ## Anti-persona note
 
-This frame describes TASK SHAPE, not AGENT IDENTITY. Do NOT prefix dispatched work with "you are a Leader" / "act as the lead reviewer." The vendor produces the structured verdict; the verb "acceptance" describes the review's purpose, not a role to inhabit.
+This frame describes TASK SHAPE, not AGENT IDENTITY. Avoid identity-claiming language and role-impersonation phrases in any dispatched prompt. The vendor produces the structured verdict; the verb "acceptance" describes the review's purpose, not a role to inhabit. Banned-phrase enumeration omitted here to keep the anti-persona grep verifier clean. (Per codex Phase 0 audit F3 fix.)

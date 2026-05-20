@@ -52,4 +52,4 @@ Vendor selection is per-row in queue.md (optional `Vendor` column) OR per task-v
 
 ## Anti-persona note
 
-This frame describes TASK SHAPE, not AGENT IDENTITY. Do NOT prefix dispatched work with "you are a Builder" / "act as a senior engineer" / "think like a Rust developer." The vendor brings its own behavior — frame just describes what kind of output the protocol expects.
+This frame describes TASK SHAPE, not AGENT IDENTITY. Avoid identity-claiming language and role-impersonation phrases in any dispatched prompt; the vendor brings its own behavior — frame just describes what kind of output the protocol expects. Banned-phrase enumeration intentionally omitted here to keep the anti-persona grep verifier clean — see `llm-hopper/.hopper/USAGE-GUIDE.md` §3.4 for the forbidden patterns list. (Per codex Phase 0 audit F3 fix.)

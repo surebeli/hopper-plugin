@@ -26,7 +26,7 @@ Tasks library bootstrap completed in ~30 min. 6 task-type frame files written at
 2. Should the anti-persona test be a CI/lint check beyond the manual grep? Recommendation: defer to T-PLUGIN-10 critic verification.
 
 ## Commit
-(pending — batched with T-PLUGIN-00 + T-PLUGIN-00b)
+`dc78836` (Phase 0 batch); anti-persona warning rewrite in subsequent codex-fix commit (F3)
 
 ## Verdict
 PASS — All 6 frames present, anti-persona test passes, schema consistent. Tasks library is ready for T-PLUGIN-03 (loader) to consume.

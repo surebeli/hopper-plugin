@@ -34,3 +34,9 @@ yarn-debug.log*
 # Codex / Claude local state
 .codex-session-id
 .context/
+
+# Editor / IDE local state (codex F5 fix — should not be committed)
+.obsidian/
+.idea/
+.vscode/
+

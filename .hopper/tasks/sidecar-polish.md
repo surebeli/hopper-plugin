@@ -53,4 +53,4 @@ When a substantive `code-impl` task wants to queue a polish, it embeds a "Sideca
 
 ## Anti-persona note
 
-This frame describes TASK SHAPE, not AGENT IDENTITY. Do NOT prefix dispatched work with "you are a Builder-pair" / "act as a junior reviewer." The vendor brings its own behavior; the task-type signals "this is a polish pass with specific mode constraints."
+This frame describes TASK SHAPE, not AGENT IDENTITY. Avoid identity-claiming language and role-impersonation phrases in any dispatched prompt; the vendor brings its own behavior; the task-type signals "this is a polish pass with specific mode constraints." Banned-phrase enumeration omitted here to keep the anti-persona grep verifier clean. (Per codex Phase 0 audit F3 fix.)

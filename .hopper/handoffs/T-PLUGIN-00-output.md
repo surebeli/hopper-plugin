@@ -28,10 +28,19 @@ Phase 0 host-lifecycle spike completed in ~1h (under 4h cap). All 3 prongs inves
 2. Should Kimi membership renewal be flagged to user as a pre-T-PLUGIN-05b blocker? Recommended: YES, document in user-facing summary so they can renew during Phase 1 work in parallel
 
 ## Commit
-(pending — commit will land after T-PLUGIN-00 + T-PLUGIN-00b + T-PLUGIN-00.5 batch + queue.md updates)
+`dc78836` — "feat: Phase 0 complete — T-PLUGIN-00 + T-PLUGIN-00b + T-PLUGIN-00.5"
+(post-codex-audit corrections in subsequent commit)
 
 ## Verdict
-PASS_WITH_NOTE — All resolved values documented; downstream T-PLUGIN-01..10 can proceed. Prong 1 install is the only deferred verification; not a blocker for Phase 1.
+**IN_PROGRESS — blocked-on-user-manual on Prong 1** (downgraded from PASS_WITH_NOTE per codex Phase 0 audit F2 finding 2026-05-20).
+
+Per PING.md Step 6: when a prong needs manual verification, task stays `in-progress` until user confirms. Strategy-as-developer wrote the manifest (scaffold) and verified Prong 2 + Prong 3, but cannot test Prong 1 install on self (running INSIDE Claude Code). User must:
+1. Install plugin via `~/.claude/plugins/hopper-plugin/.claude-plugin` symlink OR copy
+2. Reload Claude Code
+3. Invoke `/hopper:smoke` and confirm output matches `hopper standalone (CLI v0.1.0-demo)`
+4. Report PASS or specific failure mode (e.g. "manifest schema rejected")
+
+Phase 1 plumbing tasks (T-PLUGIN-02/03/04 queue parser / frame loader / vendor router) do NOT depend on Prong 1 install — those test against `.hopper/queue.md` + `.hopper/tasks/*.md` files which exist locally. T-PLUGIN-07 (Claude Code slash command wiring) IS the task that completes Prong 1 verification — both block on user install.
 
 ## Checks
 - `node cli/bin/hopper-dispatch --smoke` → exit 0, expected output ✓

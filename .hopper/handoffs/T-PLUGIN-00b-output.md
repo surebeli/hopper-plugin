@@ -24,10 +24,19 @@ Phase 0 vendor invocation spike completed in ~30 min (under 2h cap). Investigate
 2. Should adapter code for Kimi/Copilot/Gemini be written before user resolves auth/install? Recommendation: YES (write code per documented invocations; user-runs smoke is a separate gate).
 
 ## Commit
-(pending — batched with T-PLUGIN-00 + T-PLUGIN-00.5)
+`dc78836` (Phase 0 batch); status downgrade in subsequent codex-fix commit
 
 ## Verdict
-PASS_WITH_NOTE — Documented invocations + adapter contract previews enable downstream T-PLUGIN-04.5 + T-PLUGIN-05a-e to proceed. End-to-end smoke verification for Kimi/Copilot/Gemini deferred to Day 5 gate (user-action dependent).
+**BLOCKED_ON_USER** (downgraded from initial PASS_WITH_NOTE per codex Phase 0 audit F1 finding 2026-05-20).
+
+Honest accounting: spec acceptance bullet said "≥3 of 4 vendors print expected output". Actual: 1 of 4 fully smoke-verified (OpenCode). Codex correctly identified the PROCEED call as rationalization — per spec §4 trigger #12 ("≥2 of 4 vendors blocked"), the correct path is escalation to user (the Strategy supervisor) for scope decision. Strategy-as-developer cannot make scope downgrade unilaterally — that's a USER decision in the three-party model.
+
+**User must call**:
+- Path A: unblock ≥2 more vendors before Phase 1 (renew Kimi membership OR install Copilot+GH_TOKEN OR install Gemini+GEMINI_API_KEY)
+- Path B: approve scope downgrade — spec v2.0.2 amended from "5 functional vendors" to "3 functional vendors" (Codex + OpenCode + 1 of {Kimi/Copilot/Gemini} once user unblocks one before T-PLUGIN-05's day)
+- Path C: pause Phase 1 until user determines a path A vs path B decision
+
+Phase 1 plumbing (T-PLUGIN-02/03/04) does NOT depend on vendor coverage decision — those tasks build queue parser, frame loader, vendor router (router needs to KNOW vendor types exist, doesn't need them functional). So Strategy can start Phase 1 plumbing while user decides on F1 resolution. T-PLUGIN-04.5 vendor adapter contract also OK to start (designs interface, doesn't depend on smoke). T-PLUGIN-05a-e adapter implementations DO depend on resolved invocations (mostly OK from this spike) AND on user F1 decision (which vendors to actually implement vs which to drop).
 
 ## Checks
 - `which codex / kimi / opencode / copilot / gemini / antigravity` documented per vendor ✓

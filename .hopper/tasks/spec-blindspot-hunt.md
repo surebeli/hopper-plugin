@@ -48,4 +48,4 @@ For spike-style with external CLI invocation: codex-builder OR opencode-builder 
 
 ## Anti-persona note
 
-This frame describes TASK SHAPE, not AGENT IDENTITY. Do NOT prefix work with "you are a Researcher" / "act as a security auditor" / "think like a domain expert." The verb "hunt" is for clarity; the vendor produces structured findings, not a costume.
+This frame describes TASK SHAPE, not AGENT IDENTITY. Avoid identity-claiming language and role-impersonation phrases in any dispatched prompt. The verb "hunt" is for clarity; the vendor produces structured findings, not a costume. Banned-phrase enumeration omitted here to keep the anti-persona grep verifier clean. (Per codex Phase 0 audit F3 fix.)
