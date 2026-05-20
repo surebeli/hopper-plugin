@@ -92,6 +92,12 @@ export function validateDispatchFlags(flags) {
 
 /**
  * Validate a model name. Throws on rejection.
+ *
+ * Note: model strings are passed as argv to vendor CLIs, not used as file
+ * paths, so the regex enforces shell-safety (no metachars, no spaces) rather
+ * than path-safety. The character class intentionally permits `/` and `:`
+ * because real model names like `deepseek/v4-flash` and `org/model:tag` use
+ * them; these are not interpreted as path separators by the receiving CLI.
  */
 export function validateModelName(model) {
   if (typeof model !== 'string') throw new Error(`--model value must be string, got ${typeof model}`);

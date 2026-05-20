@@ -149,3 +149,42 @@ test('CLI help mentions both --model and --reasoning', () => {
   assert.match(r.stdout, /--reasoning/);
   assert.match(r.stdout, /low \| medium \| high \| xhigh/);
 });
+
+// ─── Edge cases per codex flags-audit P2 ──────────────────────────────
+
+test('CLI rejects empty --model value', () => {
+  const r = runCli(['T-PLUGIN-05a', '--model', '']);
+  assert.equal(r.exitCode, 2);
+  // Empty arg is detected as "--model requires a value" (next-token is empty/starts with -)
+  // OR as "must not be empty" depending on shell behavior. Both legitimate.
+  assert.match(r.stderr, /--model.*(value|empty)/i);
+});
+
+test('CLI accepts --model + --write in either order (flag ordering)', () => {
+  // Order 1: --write first
+  const r1 = runCli(['T-MISSING', '--write', '--model', 'gpt-5.5']);
+  // Order 2: --model first
+  const r2 = runCli(['T-MISSING', '--model', 'gpt-5.5', '--write']);
+
+  // Both should fail at task resolution (not flag parsing)
+  for (const r of [r1, r2]) {
+    assert.ok(r.exitCode === 1 || r.exitCode === 2);
+    assert.ok(!/Unknown flag/i.test(r.stderr), 'no parser error');
+    assert.ok(!/unsafe characters/i.test(r.stderr));
+  }
+});
+
+test('CLI handles mixed bare + value flag interleaving', () => {
+  // --reasoning xhigh interleaved with --write --force
+  const r = runCli(['T-MISSING', '--write', '--reasoning', 'xhigh', '--force', '--model', 'kimi-thinking']);
+  // Should reach dispatch banner with all 4 opts visible
+  assert.match(r.stderr, /opts.*model=kimi-thinking/);
+  assert.match(r.stderr, /reasoning=xhigh/);
+});
+
+test('CLI flag value must not start with dash (consumes-next-arg detection)', () => {
+  // If user writes "--model --write", we want to detect that --model didn't get a value
+  const r = runCli(['T-PLUGIN-05a', '--model', '--write']);
+  assert.equal(r.exitCode, 2);
+  assert.match(r.stderr, /--model requires a value/i);
+});

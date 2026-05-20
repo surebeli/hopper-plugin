@@ -59,7 +59,7 @@ New-Item -ItemType SymbolicLink `
 ## Usage
 
 ```bash
-hopper-opencode <task-id> [--write] [--force]
+hopper-opencode <task-id> [--write] [--force] [--model <name>] [--reasoning <level>]
 ```
 
 Examples:
@@ -68,7 +68,20 @@ Examples:
 hopper-opencode T-PLUGIN-05a
 hopper-opencode T-PLUGIN-05a --write
 hopper-opencode T-PLUGIN-05a --write --force
+
+# Force a specific model
+hopper-opencode T-PLUGIN-05a --write --model "deepseek/v4-flash"
+
+# Force reasoning effort (honored by codex adapter; others ignore)
+hopper-opencode T-PLUGIN-05a --write --reasoning xhigh
+
+# Combine
+hopper-opencode T-PLUGIN-05a --write --model "claude-opus-4-7" --reasoning high
 ```
+
+**`--model` accepts**: `^[A-Za-z][A-Za-z0-9._/:-]{0,99}$` (e.g. `gpt-5.5`, `claude-opus-4-7`, `deepseek/v4-flash`). No spaces, no shell metachars.
+
+**`--reasoning` accepts**: `low | medium | high | xhigh`. Adapters that don't honor reasoning ignore it harmlessly.
 
 ## Environment variables
 

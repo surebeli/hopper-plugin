@@ -61,13 +61,13 @@ New-Item -ItemType SymbolicLink `
 ## Usage
 
 ```bash
-hopper-codex <task-id> [--write] [--force]
+hopper-codex <task-id> [--write] [--force] [--model <name>] [--reasoning <level>]
 ```
 
 Examples:
 
 ```bash
-# Dispatch task without writing output.md
+# Plain dispatch
 hopper-codex T-PLUGIN-05a
 
 # Dispatch + write output.md
@@ -75,7 +75,20 @@ hopper-codex T-PLUGIN-05a --write
 
 # Overwrite existing output.md
 hopper-codex T-PLUGIN-05a --write --force
+
+# Force a specific model (honored by kimi/opencode/copilot adapters)
+hopper-codex T-PLUGIN-05a --write --model "deepseek/v4-flash"
+
+# Force reasoning effort (honored by codex adapter)
+hopper-codex T-PLUGIN-05a --write --reasoning xhigh
+
+# Combine
+hopper-codex T-PLUGIN-05a --write --model "claude-opus-4-7" --reasoning high
 ```
+
+**`--model` accepts**: `^[A-Za-z][A-Za-z0-9._/:-]{0,99}$` (e.g. `gpt-5.5`, `claude-opus-4-7`, `deepseek/v4-flash`, `org/model:tag`). No spaces, no shell metachars.
+
+**`--reasoning` accepts**: `low | medium | high | xhigh`. Adapters that don't honor reasoning ignore it harmlessly.
 
 ## Environment variables
 

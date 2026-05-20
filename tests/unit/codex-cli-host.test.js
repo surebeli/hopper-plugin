@@ -78,6 +78,14 @@ test('wrapper validates flags against explicit whitelist', () => {
     'wrapper must reject unknown flags');
 });
 
+test('wrapper supports --model + --reasoning value flags (gap-fix 2026-05-21)', () => {
+  const content = readFileSync(WRAPPER, 'utf-8');
+  assert.match(content, /--model\)/, 'wrapper must handle --model case');
+  assert.match(content, /--reasoning\)/, 'wrapper must handle --reasoning case');
+  assert.match(content, /low\|medium\|high\|xhigh/, 'wrapper must enforce reasoning whitelist');
+  assert.match(content, /\^\[A-Za-z\]\[A-Za-z0-9\._\/:-\]\{0,99\}\$/, 'wrapper must validate model name regex');
+});
+
 test('wrapper invokes codex exec exactly once (single-spawn invariant)', () => {
   const content = readFileSync(WRAPPER, 'utf-8');
   // Count occurrences of `codex exec` invocations
@@ -166,6 +174,54 @@ test('wrapper rejects task-id containing "..": dot-dot dry-run (T-08a audit F1)'
   assert.equal(exitCode, 2, "'T..evil' must be rejected with code 2");
   assert.match(stderr, /\.\./,
     'stderr must mention the dot-dot rejection');
+});
+
+test('wrapper rejects --model with shell-metachar value (dry-run)', { skip: platform() === 'win32' ? 'bash not standardly available on Windows CI' : false }, () => {
+  let stderr = '';
+  let exitCode = 0;
+  try {
+    execFileSync('bash', [WRAPPER, 'T-OK', '--model', 'evil; rm -rf /'], {
+      env: { ...process.env, HOPPER_PLUGIN_ROOT: REPO_ROOT, PATH: process.env.PATH },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    stderr = err.stderr ? err.stderr.toString() : '';
+    exitCode = err.status;
+  }
+  assert.equal(exitCode, 2);
+  assert.match(stderr, /unsafe characters/i);
+});
+
+test('wrapper rejects --reasoning with invalid level (dry-run)', { skip: platform() === 'win32' ? 'bash not standardly available on Windows CI' : false }, () => {
+  let stderr = '';
+  let exitCode = 0;
+  try {
+    execFileSync('bash', [WRAPPER, 'T-OK', '--reasoning', 'ultra'], {
+      env: { ...process.env, HOPPER_PLUGIN_ROOT: REPO_ROOT, PATH: process.env.PATH },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    stderr = err.stderr ? err.stderr.toString() : '';
+    exitCode = err.status;
+  }
+  assert.equal(exitCode, 2);
+  assert.match(stderr, /reasoning.*low\|medium\|high\|xhigh/i);
+});
+
+test('wrapper rejects --model with no value (dry-run)', { skip: platform() === 'win32' ? 'bash not standardly available on Windows CI' : false }, () => {
+  let stderr = '';
+  let exitCode = 0;
+  try {
+    execFileSync('bash', [WRAPPER, 'T-OK', '--model'], {
+      env: { ...process.env, HOPPER_PLUGIN_ROOT: REPO_ROOT, PATH: process.env.PATH },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    stderr = err.stderr ? err.stderr.toString() : '';
+    exitCode = err.status;
+  }
+  assert.equal(exitCode, 2);
+  assert.match(stderr, /requires a value/i);
 });
 
 test('wrapper rejects bad task-id without invoking codex', { skip: platform() === 'win32' ? 'bash not standardly available on Windows CI' : false }, () => {
