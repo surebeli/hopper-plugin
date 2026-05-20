@@ -9,6 +9,7 @@ import {
   suggestQueueEdit,
   suggestCostEdit,
   mapDispatchStatusToQueueStatus,
+  validateTaskId,
 } from '../../cli/src/output.js';
 import { mkdtempSync, readFileSync, existsSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -43,32 +44,45 @@ function makeDispatchResult(overrides = {}) {
   };
 }
 
-test('renderOutputMarkdown: success case has all required sections', () => {
+test('renderOutputMarkdown: success case includes Phase 2 schema sections in correct order', () => {
   const result = makeDispatchResult();
   const md = renderOutputMarkdown(result);
-  assert.match(md, /^# T-PLUGIN-XX — code-impl Output \(codex\)$/m);
-  assert.match(md, /## Summary/);
-  assert.match(md, /## Vendor execution metadata/);
-  assert.match(md, /## Output text/);
-  assert.match(md, /## Acceptance verification/);
-  assert.match(md, /## Suggested protocol edits/);
-  assert.match(md, /## Open questions/);
-  assert.match(md, /## Commit/);
-  assert.match(md, /Status: \*\*success\*\* \[OK\]/);
-  assert.match(md, /Duration: 1234ms/);
-  assert.match(md, /Exit: 0/);
+  assert.match(md, /^# T-PLUGIN-XX — code-impl Output \(vendor: codex\)$/m);
+
+  // Per codex F1: section ORDER must match Phase 2 outputs
+  const expected = [
+    '## Summary',
+    '## Files touched',
+    '## Acceptance verification',
+    '## Decisions / deviations from spec',
+    '## Open questions for Leader',
+    '## Commit',
+    '## Verdict',
+    '## Checks',
+    '## Next recommendation',
+    '## Dispatcher execution metadata',
+    '## Vendor output text',
+    '## Suggested protocol edits',
+  ];
+  let lastIdx = -1;
+  for (const heading of expected) {
+    const idx = md.indexOf(heading);
+    assert.notEqual(idx, -1, `missing section: ${heading}`);
+    assert.ok(idx > lastIdx, `section ${heading} appears out of order (idx=${idx}, lastIdx=${lastIdx})`);
+    lastIdx = idx;
+  }
 });
 
-test('renderOutputMarkdown: failure case includes Error context section', () => {
+test('renderOutputMarkdown: failure case includes Vendor error context section', () => {
   const result = makeDispatchResult({
     output: { text: '', status: 'auth-fail', error: 'kimi: HTTP 402 membership' },
     raw: { exitCode: 0, stdout: '', stderr: 'auth error from server', timedOut: false, durationMs: 500 },
   });
   const md = renderOutputMarkdown(result);
-  assert.match(md, /Status: \*\*auth-fail\*\* \[FAIL\]/);
-  assert.match(md, /## Error context/);
+  assert.match(md, /Vendor dispatch status: `auth-fail` \[FAIL\]/);
+  assert.match(md, /## Vendor error context/);
   assert.match(md, /kimi: HTTP 402 membership/);
-  assert.match(md, /Stderr excerpt:/);
+  assert.match(md, /Stderr excerpt/);
   assert.match(md, /auth error from server/);
 });
 
@@ -78,14 +92,17 @@ test('renderOutputMarkdown: timed-out case is annotated', () => {
     raw: { exitCode: -1, stdout: '', stderr: '', timedOut: true, durationMs: 300000 },
   });
   const md = renderOutputMarkdown(result);
-  assert.match(md, /\(TIMED OUT\)/);
+  assert.match(md, /\(timed out\)/i);
 });
 
-test('renderOutputMarkdown: long output text is truncated with notice', () => {
+test('renderOutputMarkdown: long output text is truncated with notice + sidecar reference', () => {
   const longText = 'A'.repeat(5000);  // > 4096 truncation threshold
   const result = makeDispatchResult({ output: { text: longText, status: 'success' } });
-  const md = renderOutputMarkdown(result);
+  const rawPath = '/fake/handoffs/T-PLUGIN-XX-output-raw.txt';
+  const md = renderOutputMarkdown({ ...result, rawPath });
   assert.match(md, /\[truncated, \d+ chars omitted\]/);
+  assert.match(md, /Full vendor output exceeds 4096-char preview limit/);
+  assert.match(md, /output-raw\.txt/);
   // First 4096 chars should be present
   assert.ok(md.includes('A'.repeat(4096)));
   // Full 5000 chars should NOT be present
@@ -248,4 +265,151 @@ test('writeOutput: creates handoffs/ dir if missing', async () => {
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// ─── codex T-06 mini-audit F2: raw sidecar for long outputs ────────────
+
+test('writeOutput: writes sidecar -output-raw.txt when output exceeds preview limit', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-out-sidecar-'));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    mkdirSync(hopperDir, { recursive: true });
+
+    const longText = 'X'.repeat(8000);  // > 4096 limit
+    const result = makeDispatchResult({ output: { text: longText, status: 'success' } });
+    const written = await writeOutput({ hopperDir, dispatchResult: result });
+
+    assert.ok(written.rawPath, 'rawPath must be set when output exceeds preview limit');
+    assert.ok(existsSync(written.rawPath), 'sidecar raw file must exist on disk');
+    const rawContent = readFileSync(written.rawPath, 'utf-8');
+    assert.equal(rawContent.length, 8000, 'sidecar must contain FULL output, not truncated');
+    assert.equal(rawContent, longText, 'sidecar content must equal output.text exactly');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('writeOutput: short outputs do NOT generate sidecar', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-out-nosidecar-'));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    mkdirSync(hopperDir, { recursive: true });
+    const result = makeDispatchResult();  // default 'hello world' (short)
+    const written = await writeOutput({ hopperDir, dispatchResult: result });
+    assert.equal(written.rawPath, null, 'short output → no sidecar');
+    assert.ok(!existsSync(join(hopperDir, 'handoffs', 'T-PLUGIN-XX-output-raw.txt')));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ─── codex T-06 mini-audit F3: task.id path safety ─────────────────────
+
+test('validateTaskId: accepts well-formed task IDs', () => {
+  for (const id of ['T-PLUGIN-05a', 'T01', 'Task.v2', 'A_B', 'X-y.z-1.2.3']) {
+    assert.doesNotThrow(() => validateTaskId(id), `should accept "${id}"`);
+  }
+});
+
+test('validateTaskId: rejects path-traversal attempts', () => {
+  for (const id of ['../etc/passwd', '..\\..\\foo', 'foo/bar', 'foo\\bar', '.hidden', '', 'a..b']) {
+    assert.throws(() => validateTaskId(id), `should reject "${id}"`);
+  }
+});
+
+test('validateTaskId: rejects oversize IDs', () => {
+  const longId = 'T-' + 'a'.repeat(200);
+  assert.throws(() => validateTaskId(longId), /exceeds 100 chars/);
+});
+
+test('validateTaskId: rejects non-string types', () => {
+  assert.throws(() => validateTaskId(null), /must be string/);
+  assert.throws(() => validateTaskId(123), /must be string/);
+  assert.throws(() => validateTaskId(undefined), /must be string/);
+});
+
+test('writeOutput: rejects task with path-traversal ID', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-out-traversal-'));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    mkdirSync(hopperDir, { recursive: true });
+    const result = makeDispatchResult({ task: { id: '../escape', taskType: 'code-impl', status: 'pending', vendor: null } });
+    await assert.rejects(
+      writeOutput({ hopperDir, dispatchResult: result }),
+      /unsafe characters|escapes handoffs/,
+    );
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ─── codex T-06 mini-audit F4: markdown/control-char edge cases ────────
+
+test('renderOutputMarkdown: output containing triple-backticks does NOT break the fence', () => {
+  const result = makeDispatchResult({
+    output: { text: 'before\n```js\ninnerCode\n```\nafter', status: 'success' },
+  });
+  const md = renderOutputMarkdown(result);
+  // Find the fences in the "Vendor output text" section
+  const outputSection = md.split('## Vendor output text')[1];
+  // The opening fence must be longer than any internal ``` run (3 chars)
+  // so the fence is ≥4 backticks
+  assert.match(outputSection, /````+/,
+    'fence must be longer than 3 backticks when content contains ```');
+  // And the inner ```js content should be preserved literally
+  assert.match(md, /```js/);
+});
+
+test('renderOutputMarkdown: backticks in task.brief sanitized in H1/metadata', () => {
+  const result = makeDispatchResult({
+    task: { id: 'T-OK', taskType: 'code-impl', status: 'pending', depends: [], priority: 'normal',
+      brief: 'install `kimi-cli` and run',  // contains backticks
+      vendor: null },
+  });
+  const md = renderOutputMarkdown(result);
+  // Brief is in Summary block — backticks should be converted to apostrophes (or otherwise neutralized)
+  // The H1 and metadata blocks must not include unescaped backticks from user input
+  // For brief specifically, we sanitize via sanitizeInline which converts ` → '
+  assert.match(md, /install 'kimi-cli' and run/);
+});
+
+test('renderOutputMarkdown: NUL and control bytes in output replaced with U+FFFD', () => {
+  const result = makeDispatchResult({
+    output: { text: 'before\x00middle\x07after', status: 'success' },
+  });
+  const md = renderOutputMarkdown(result);
+  assert.ok(!md.includes('\x00'), 'NUL byte must be stripped from markdown');
+  assert.ok(!md.includes('\x07'), 'BEL byte must be stripped from markdown');
+  assert.match(md, /�/, 'replacement char must appear');
+});
+
+test('renderOutputMarkdown: preserves \\n, \\t, \\r in output text (not stripped)', () => {
+  const result = makeDispatchResult({
+    output: { text: 'line1\nline2\tcol2\rline3', status: 'success' },
+  });
+  const md = renderOutputMarkdown(result);
+  assert.match(md, /line1\nline2/);  // \n preserved
+  assert.ok(md.includes('\t'), 'tab character preserved');
+});
+
+test('renderOutputMarkdown: vendor name with control chars sanitized in H1', () => {
+  const result = makeDispatchResult({ vendor: 'kimi\x00\n```evil' });
+  const md = renderOutputMarkdown(result);
+  const h1 = md.split('\n')[0];
+  // H1 must not contain NUL, newline (after sanitizeInline → space), or backticks
+  assert.ok(!h1.includes('\x00'));
+  assert.ok(!h1.includes('```'), 'backticks in vendor name must be neutralized in H1');
+  assert.equal(h1.split('\n').length, 1, 'H1 must be single line');
+});
+
+test('renderOutputMarkdown: error message with embedded fences does not break ', () => {
+  const result = makeDispatchResult({
+    output: { text: '', status: 'unknown-fail', error: 'failed at ```bash\nrm -rf /\n``` line 42' },
+    raw: { exitCode: 1, stdout: '', stderr: '', timedOut: false, durationMs: 100 },
+  });
+  const md = renderOutputMarkdown(result);
+  assert.match(md, /## Vendor error context/);
+  // The error fence should be longer than 3 backticks since error contains ```
+  const errorSection = md.split('## Vendor error context')[1];
+  assert.match(errorSection, /````+/, 'error fence must be ≥4 backticks');
 });

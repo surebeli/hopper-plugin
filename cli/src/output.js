@@ -9,12 +9,25 @@
 // It does NOT auto-apply queue/cost edits — only suggests them. User remains
 // the actuator. Per spec §11 unified user-action gate: any "task done" claim
 // requires user verification, which the dispatcher cannot do unilaterally.
+//
+// Per codex T-06 mini-audit (2026-05-20):
+//   F1 — Format MUST match Phase 2 output.md schema (Strategy-as-developer wrote
+//        outputs in this order; Recipient sessions expect it).
+//   F2 — Long vendor outputs also persisted to <task-id>-output-raw.txt sidecar.
+//   F3 — task.id validated as path-safe before file write.
+//   F4 — Markdown fence length adapts to embedded backticks; control bytes
+//        normalized; metadata fields quoted/sanitized.
 
 import { mkdir, writeFile, access } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
+
+const TASK_ID_PATTERN = /^[A-Za-z][A-Za-z0-9._-]*$/;
+const PREVIEW_CHAR_LIMIT = 4096;
 
 /**
  * Write the .hopper/handoffs/<task-id>-output.md file based on a dispatch result.
+ * Also writes a sidecar <task-id>-output-raw.txt when the vendor output exceeds
+ * PREVIEW_CHAR_LIMIT (per codex F2: no information loss).
  *
  * @param {object} args
  * @param {string} args.hopperDir         Path to .hopper/ directory
@@ -22,6 +35,7 @@ import { join } from 'node:path';
  * @param {boolean} [args.force]          Overwrite existing output.md
  * @returns {Promise<{
  *   path: string,
+ *   rawPath: string | null,
  *   content: string,
  *   queueEdit: string,
  *   costEdit: string,
@@ -32,8 +46,20 @@ export async function writeOutput({ hopperDir, dispatchResult, force = false }) 
   const { task, vendor, output, raw } = dispatchResult;
   if (!task || !task.id) throw new Error('writeOutput: dispatchResult.task.id is required');
 
+  // Per codex F3: validate task ID is safe for file path.
+  validateTaskId(task.id);
+
   const handoffDir = join(hopperDir, 'handoffs');
   const path = join(handoffDir, `${task.id}-output.md`);
+
+  // Per codex F3: also enforce containment under handoffs/ after path resolution
+  // (belt-and-braces: even if the regex allows something pathological, the
+  // resolved path must still live inside handoffs/).
+  const resolvedPath = resolve(path);
+  const resolvedHandoffs = resolve(handoffDir);
+  if (!resolvedPath.startsWith(resolvedHandoffs + sep) && resolvedPath !== resolvedHandoffs) {
+    throw new Error(`writeOutput: resolved path "${resolvedPath}" escapes handoffs/ — refusing.`);
+  }
 
   let exists = false;
   try {
@@ -47,11 +73,21 @@ export async function writeOutput({ hopperDir, dispatchResult, force = false }) 
   }
 
   await mkdir(handoffDir, { recursive: true });
-  const content = renderOutputMarkdown({ task, vendor, output, raw });
+
+  // Per codex F2: persist full output to sidecar raw file when truncation would happen.
+  const fullText = output.text || '';
+  let rawPath = null;
+  if (fullText.length > PREVIEW_CHAR_LIMIT) {
+    rawPath = join(handoffDir, `${task.id}-output-raw.txt`);
+    await writeFile(rawPath, fullText, 'utf-8');
+  }
+
+  const content = renderOutputMarkdown({ task, vendor, output, raw, rawPath });
   await writeFile(path, content, 'utf-8');
 
   return {
     path,
+    rawPath,
     content,
     queueEdit: suggestQueueEdit(task, output),
     costEdit: suggestCostEdit(task, vendor, output, raw),
@@ -60,78 +96,128 @@ export async function writeOutput({ hopperDir, dispatchResult, force = false }) 
 }
 
 /**
- * Render the output.md content (pure function — exported for testability).
+ * Per codex F3: strict allowlist for task IDs that become file paths.
+ * Forbids: path separators, '..', leading dot, special chars.
  */
-export function renderOutputMarkdown({ task, vendor, output, raw }) {
+export function validateTaskId(id) {
+  if (typeof id !== 'string') throw new Error(`task.id must be string, got ${typeof id}`);
+  if (id.length === 0) throw new Error('task.id must not be empty');
+  if (id.length > 100) throw new Error(`task.id exceeds 100 chars (got ${id.length})`);
+  if (!TASK_ID_PATTERN.test(id)) {
+    throw new Error(`task.id "${id}" contains unsafe characters. ` +
+      `Allowed: ^[A-Za-z][A-Za-z0-9._-]*$ (no slashes, no leading dot, no '..').`);
+  }
+  if (id.includes('..')) throw new Error(`task.id "${id}" contains '..' (path traversal).`);
+}
+
+/**
+ * Render the output.md content (pure function — exported for testability).
+ *
+ * Per codex F1: section order MATCHES Phase 2 outputs:
+ *   Summary → Files touched → Acceptance verification → Decisions / deviations
+ *   → Open questions → Commit → Verdict → Checks → Next recommendation
+ *
+ * Dispatcher-specific sections (vendor execution metadata, output text, error
+ * context, suggested protocol edits) land AFTER the schema, so Recipient
+ * sessions see the familiar structure first.
+ */
+export function renderOutputMarkdown({ task, vendor, output, raw, rawPath = null }) {
   const today = todayDate();
   const statusBadge = output.status === 'success' ? '[OK]' : '[FAIL]';
-  const textPreview = truncate(output.text || '', 4096);
-  const errorSection = output.error
-    ? `## Error context
+  const safeVendor = sanitizeInline(vendor);
+  const safeTaskId = sanitizeInline(task.id);
+  const safeTaskType = sanitizeInline(task.taskType);
+  const safeBrief = task.brief ? sanitizeInline(task.brief) : '(no brief in queue.md)';
+  const previewText = truncate(output.text || '', PREVIEW_CHAR_LIMIT);
+  const fullTextLen = (output.text || '').length;
 
-\`\`\`
-${truncate(output.error, 2000)}
-\`\`\`
-${raw.stderr ? `\nStderr excerpt:\n\`\`\`\n${truncate(raw.stderr, 1000)}\n\`\`\`\n` : ''}`
-    : '';
-
-  return `# ${task.id} — ${task.taskType} Output (${vendor})
+  return `# ${safeTaskId} — ${safeTaskType} Output (vendor: ${safeVendor})
 
 ## Summary
 
-Vendor: \`${vendor}\` | Status: **${output.status}** ${statusBadge} | Duration: ${raw.durationMs}ms | Exit: ${raw.exitCode}${raw.timedOut ? ' (TIMED OUT)' : ''}
+${safeBrief}
 
-${task.brief || '(no brief in queue.md)'}
+_Recipient to fill: 2-4 sentences describing what was actually delivered._
 
-## Vendor execution metadata
+## Files touched
 
-- Task ID: \`${task.id}\`
-- Task-type: \`${task.taskType}\`
-- Vendor: \`${vendor}\`
-- Status: \`${output.status}\`
+_Recipient to fill — list created/modified files with one-line rationale each._
+
+- (none recorded by dispatcher; Leader/Recipient updates this section after review)
+
+## Acceptance verification (N/N)
+
+_Recipient to verify each acceptance criterion from \`.hopper/handoffs/leader-tasklist.md\` for this task._
+
+1. ⏳ Criterion 1: ...
+2. ⏳ Criterion 2: ...
+
+## Decisions / deviations from spec
+
+_Recipient to fill — any judgment calls or scope changes vs leader-tasklist._
+
+- none
+
+## Open questions for Leader
+
+_(Recipient fills in any questions for Leader, or "none")_
+
+- none
+
+## Commit
+
+_(Leader fills in after commit lands; format: \`<sha> <subject>\`)_
+
+## Verdict
+
+_(Recipient: PASS | PASS_WITH_NOTE | REWORK | FAIL — fill after verifying acceptance criteria)_
+
+## Checks
+
+- Vendor dispatch status: \`${output.status}\` ${statusBadge}
+- Subprocess exit code: ${raw.exitCode}${raw.timedOut ? ' (timed out)' : ''}
+- Subprocess duration: ${raw.durationMs}ms
+- Single-spawn invariant: per executeDispatch spec §3 #4, one dispatch = one subprocess (E2E counter-tested)
+- (Recipient to add task-specific checks: tests pass, grep guards, build clean, etc.)
+
+## Next recommendation
+
+_(Recipient fills in after verdict; e.g. "proceed to T-XX" or "REWORK before T-XX")_
+
+---
+
+## Dispatcher execution metadata _(auto-generated)_
+
+- Task ID: \`${safeTaskId}\`
+- Task-type: \`${safeTaskType}\`
+- Resolved vendor: \`${safeVendor}\`
+- Output status: \`${output.status}\`
+- Subprocess exit: ${raw.exitCode}
 - Duration: ${raw.durationMs}ms
-- Exit code: ${raw.exitCode}
 - Timed out: ${raw.timedOut}
+- Stdout bytes: ${(raw.stdout || '').length}
+- Stderr bytes: ${(raw.stderr || '').length}
+- Log file bytes: ${raw.logFileContent === undefined ? 'n/a (no log file)' : (raw.logFileContent || '').length}
+- Output text length: ${fullTextLen} chars${rawPath ? ` (full text in sidecar: \`${posixify(rawPath)}\`)` : ''}
 - Dispatched: ${today}
 
-## Output text
+## Vendor output text _(preview, ${previewText.length}/${fullTextLen} chars)_
 
-\`\`\`
-${textPreview || '(empty)'}
-\`\`\`
+${fence(previewText || '(empty)')}
+${rawPath ? `\n_Full vendor output exceeds ${PREVIEW_CHAR_LIMIT}-char preview limit; complete text written to \`${posixify(rawPath)}\`._\n` : ''}
+${output.error ? `## Vendor error context\n\n${fence(truncate(output.error, 2000))}\n${raw.stderr ? `\n**Stderr excerpt** (${(raw.stderr || '').length} bytes total):\n\n${fence(truncate(raw.stderr, 1000))}\n` : ''}` : ''}
 
-${errorSection}
-
-## Acceptance verification
-
-_Recipient (Leader or Strategy) to fill in by reviewing leader-tasklist.md acceptance criteria._
-
-- [ ] Criterion 1: ...
-- [ ] Criterion 2: ...
-
-## Suggested protocol edits
+## Suggested protocol edits _(auto-generated)_
 
 The dispatcher proposes the following edits. **Per spec §11 unified user-action gate: apply only after manual review.** The dispatcher cannot mark this task done unilaterally.
 
 ### Suggested queue.md row edit
 
-\`\`\`
-${suggestQueueEdit(task, output)}
-\`\`\`
+${fence(suggestQueueEdit(task, output))}
 
 ### Suggested COST-LOG.md row (append under current Phase section)
 
-\`\`\`
-${suggestCostEdit(task, vendor, output, raw)}
-\`\`\`
-
-## Open questions
-
-_(Recipient fills in any questions for Leader, or "none")_
-
-## Commit
-
-_(Leader fills in after commit lands; format: \`<sha> <subject>\`)_
+${fence(suggestCostEdit(task, vendor, output, raw))}
 `;
 }
 
@@ -170,8 +256,47 @@ export function suggestCostEdit(task, vendor, output, raw) {
   const durationSec = (raw.durationMs / 1000).toFixed(1);
   const notes = output.status === 'success'
     ? `${output.status}; duration ${durationSec}s`
-    : `${output.status}; duration ${durationSec}s; error="${truncate((output.error || '').replace(/\n/g, ' '), 80)}"`;
+    : `${output.status}; duration ${durationSec}s; error="${truncate((output.error || '').replace(/[\r\n]+/g, ' '), 80)}"`;
   return `| ${date} | ${task.id} | ${task.taskType} | ${vendor} | ${tokenStr} | n/a | n/a | ${notes} |`;
+}
+
+// ─── helpers ──────────────────────────────────────────────────────────────
+
+/**
+ * Per codex F4: dynamic-length fence. If content contains ``` runs, use a
+ * longer fence so the embedded fence cannot terminate ours early.
+ */
+function fence(content) {
+  const safe = stripControl(String(content == null ? '' : content));
+  // Find the longest run of backticks in the content
+  const matches = safe.match(/`+/g);
+  const longest = matches ? Math.max(...matches.map((s) => s.length)) : 0;
+  const fenceLen = Math.max(3, longest + 1);
+  const f = '`'.repeat(fenceLen);
+  return `${f}\n${safe}\n${f}`;
+}
+
+/**
+ * Per codex F4: replace NUL and other unprintable control bytes with U+FFFD.
+ * Preserve \t, \n, \r since they are valid in vendor output transcripts.
+ */
+function stripControl(s) {
+  // Strip control characters that would confuse markdown / terminals
+  return s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '�');
+}
+
+/**
+ * Sanitize a value going into a single-line markdown context (heading,
+ * metadata list). Strips newlines + control chars, escapes backticks so they
+ * don't break the H1, and clips length.
+ */
+function sanitizeInline(v) {
+  let s = String(v == null ? '' : v);
+  s = stripControl(s);
+  s = s.replace(/[\r\n]+/g, ' ');
+  s = s.replace(/`/g, "'");  // backticks in headings/metadata corrupt the .md
+  if (s.length > 200) s = s.slice(0, 197) + '...';
+  return s;
 }
 
 function truncate(s, n) {
@@ -182,4 +307,8 @@ function truncate(s, n) {
 
 function todayDate() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function posixify(p) {
+  return p.split(sep).join('/');
 }
