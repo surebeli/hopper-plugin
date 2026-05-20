@@ -9,7 +9,7 @@ This command runs inside a Claude Code session and invokes the host-agnostic `ho
 ## What this command does
 
 1. Read `.hopper/queue.md` to find the task and validate eligibility (pending + deps done)
-2. Resolve the vendor via `.hopper/AGENTS.md` (task-vendor-preference > task.vendor > taskType default)
+2. Resolve the vendor via `.hopper/AGENTS.md` (lookup order: queue.md row override > task-vendor-preference table > taskType default > `Active Agent Instances` table)
 3. Load the task-type frame from `.hopper/tasks/<task-type>.md`
 4. Spawn the vendor CLI subprocess **once** (no retry, no fallback — per llm-hopper spec §3 #4)
 5. Parse the result and classify (success / auth-fail / timeout / permission-fail / unknown-fail)
@@ -58,12 +58,10 @@ Show the user:
 - **Do NOT auto-apply** these edits. Per spec §11 (unified user-action gate), only the user can mark a task done. Ask the user: "Apply the suggested edits?" before touching `.hopper/queue.md` or `.hopper/COST-LOG.md`.
 
 **If dispatch failed** (status != success):
-- Surface the error block verbatim
-- Suggest concrete next steps based on the status:
-  - `auth-fail` — vendor needs auth setup (point at the specific env var / config path the adapter mentions)
-  - `timeout` — consider retrying with `--write` after fixing root cause; do NOT auto-retry
-  - `permission-fail` — vendor binary missing or sandbox blocking
-  - `unknown-fail` — escalate to user; do not guess at fixes
+- Surface the error block verbatim. Do NOT auto-retry.
+- Do NOT propose fixes, retries, or vendor-switches as soft-orchestration. If the user explicitly asks for diagnosis, you may then explain the failure mode (auth-fail / timeout / permission-fail / unknown-fail) and what the adapter's error message means. Otherwise, dispatch + surface is the full scope.
+
+Per codex final strict audit (Category C): Tier B's previous prompt suggested status-specific next steps, inconsistent with Tier C's "no soft-orchestration" stance. Now aligned across all 4 hosts: surface only, diagnose only if user explicitly asks.
 
 ## What this command MUST NOT do
 

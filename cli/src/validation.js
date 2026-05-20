@@ -21,6 +21,29 @@ export const TASK_ID_PATTERN = /^[A-Za-z][A-Za-z0-9._-]{0,99}$/;
 export const ALLOWED_DISPATCH_FLAGS = Object.freeze(['--write', '--force']);
 
 /**
+ * Legal queue status values per .hopper/queue.md schema convention.
+ * Per codex final strict audit P1 (Category A): the parser previously mapped
+ * unknown statuses to 'pending' silently, which meant a "failure-detected"
+ * task would be re-eligibilized. Statuses are now validated explicitly.
+ */
+export const LEGAL_QUEUE_STATUSES = Object.freeze([
+  'pending',
+  'in-progress',
+  'done',
+  'failed',
+  'removed',
+]);
+
+/**
+ * Task-type pattern. Names a .hopper/tasks/<type>.md file directly, so it
+ * needs the same path-safety guarantees as task-id.
+ * Per codex final strict audit P1 (Category E): tasks.js previously did
+ * `join(hopperDir, 'tasks', `${taskType}.md`)` without validation; a
+ * malicious queue row could escape via '../' or absolute path.
+ */
+export const TASK_TYPE_PATTERN = /^[a-z][a-z0-9-]{0,49}$/;
+
+/**
  * Validate a task ID. Throws on rejection.
  * Per codex Phase 3 F3 + Phase 4 P1: regex + explicit '..' rejection.
  */
@@ -47,4 +70,29 @@ export function validateDispatchFlags(flags) {
       throw new Error(`Invalid flag "${f}". Allowed: ${ALLOWED_DISPATCH_FLAGS.join(', ')}.`);
     }
   }
+}
+
+/**
+ * Validate a task-type string. Per codex final strict audit P1 (Category E):
+ * task-type names a `.hopper/tasks/<type>.md` file path, so it must be
+ * lowercase, kebab-case, no path separators, no '..'.
+ */
+export function validateTaskType(taskType) {
+  if (typeof taskType !== 'string') throw new Error(`task-type must be string, got ${typeof taskType}`);
+  if (taskType.length === 0) throw new Error('task-type must not be empty');
+  if (!TASK_TYPE_PATTERN.test(taskType)) {
+    throw new Error(`task-type "${taskType}" contains unsafe characters. ` +
+      `Allowed: ^[a-z][a-z0-9-]{0,49}$ (lowercase kebab-case, no slashes, no '..').`);
+  }
+  if (taskType.includes('..')) {
+    throw new Error(`task-type "${taskType}" contains '..' (path traversal).`);
+  }
+}
+
+/**
+ * Returns true if status is a legal queue status, false otherwise.
+ * Caller decides whether to throw or just warn.
+ */
+export function isLegalQueueStatus(status) {
+  return LEGAL_QUEUE_STATUSES.includes(status);
 }

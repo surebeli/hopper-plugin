@@ -138,6 +138,7 @@ Anchor: `docs/release/PASS-RATIONALE.md::root`
   - `tests/integration/execute-dispatch-e2e.test.js` "executeWithAdapter spawns subprocess EXACTLY ONCE on failure path" (counter still = 1 on exit code 1)
   - `tests/integration/execute-dispatch-e2e.test.js` "executeWithAdapter aborts BEFORE spawn when envPreflight returns ok=false" (counter = 0)
   - `tests/integration/execute-dispatch-e2e.test.js` "multiple executeWithAdapter calls each spawn independently (no cross-call state)" (counter = N after N calls)
+  - Scope note (per codex final strict audit Category B): these tests cover `executeWithAdapter → runSubprocessOnce → parseResult`. The upstream `resolveDispatch` chain (queue + AGENTS + frame loading) is covered separately by `tests/integration/real-fixtures.test.js`. Together they cover the full pipeline but no single test runs all 4 stages with a real subprocess.
 - Codex Phase 2 audit Q1/Q2 explicitly verified: "no retry/fallback/circuit-breaker orchestration in the five adapters or a respawn path after `runSubprocessOnce`; the core shape is thin and one-shot."
 - Codex Phase 3 audit Q3: "single-spawn invariant ... E2E counter-tested."
 - Codex Phase 4 partial audit Q3: "single-spawn ladder ... no breaks at the 4 layers."

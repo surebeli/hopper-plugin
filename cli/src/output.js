@@ -260,13 +260,21 @@ export function suggestQueueEdit(task, output) {
 
 /**
  * Map dispatch output.status to queue.md status column value.
+ * Per codex final strict audit P1 (Category A): output must be a LEGAL
+ * queue status per the .hopper/queue.md schema {pending, in-progress, done,
+ * failed, removed}. Previously suggested 'failure-detected' which is not
+ * legal — parser would silently re-eligibilize the task.
+ *
  * - success → done
- * - all other statuses → failure-detected (per spec §3 #4: dispatcher does not
- *   distinguish retry-worthy from terminal failures; that's user's call)
+ * - any failure (auth-fail / timeout / permission-fail / unknown-fail) → failed
+ *   (Per spec §3 #4: dispatcher does not distinguish retry-worthy from
+ *   terminal failures; that's user's call. The user reviews the output.md
+ *   error context and decides whether to re-flip from 'failed' back to
+ *   'pending' or leave it terminally failed.)
  */
 export function mapDispatchStatusToQueueStatus(dispatchStatus) {
   if (dispatchStatus === 'success') return 'done';
-  return 'failure-detected';
+  return 'failed';
 }
 
 /**

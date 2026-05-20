@@ -1,10 +1,15 @@
-// E2E executeDispatch single-spawn proof (codex Phase 2 audit F3 fix)
+// executeWithAdapter single-spawn proof (codex Phase 2 audit F3 fix)
 // Anchor: tests/integration/execute-dispatch-e2e.test.js
 //
-// F3 finding: previous tests proved runSubprocessOnce single-spawn in isolation,
-// but no test exercised the full chain (resolveDispatch → executeWithAdapter →
-// runSubprocessOnce → parseResult). This test fills that gap using a fake
-// counter-incrementing adapter that demonstrates end-to-end single-spawn.
+// SCOPE (per codex final strict audit P1 Category B correction):
+// This test exercises executeWithAdapter → runSubprocessOnce → parseResult
+// — the subset of the dispatch chain AFTER resolveDispatch returns. It does
+// NOT exercise the full resolveDispatch resolution (queue parsing + AGENTS.md
+// lookup + frame loading); those are covered by tests/integration/real-fixtures.test.js.
+//
+// Why partial: the prior wording over-claimed full E2E. The single-spawn
+// invariant we actually need to prove is "one executeWithAdapter call = one
+// subprocess spawn", which IS this test's strict scope.
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';

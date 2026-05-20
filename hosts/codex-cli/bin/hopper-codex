@@ -137,6 +137,11 @@ After the command returns, do this:
 
 4. Do NOT diagnose the failure, propose fixes, or suggest next steps. Your role is dispatch + surface, not orchestrate. If the user wants diagnosis they will ask explicitly. Per spec §3 #4, advice that nudges the user toward retries or vendor-switches is soft-orchestration and is forbidden in this host adapter."
 
-# Invoke codex once; sandbox is read-only by default — user must opt into
-# workspace-write only if their codex install requires it for the shell tool.
+# Sandbox: default workspace-write because codex's shell tool needs to spawn
+# hopper-dispatch (which writes inside `.hopper/handoffs/`). The workspace-write
+# sandbox restricts writes to $CWD only; codex cannot touch files outside.
+# Per codex final strict audit P1: this is intentional and disclosed — codex
+# has write access to the workspace, but the prompt explicitly constrains its
+# behavior to "dispatch + surface only". The sandbox is the second line of
+# defense; the prompt is the first. User can override via CODEX_SANDBOX env.
 exec codex exec -s "${CODEX_SANDBOX:-workspace-write}" -c "model_reasoning_effort=\"$REASONING\"" "$PROMPT"

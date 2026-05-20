@@ -117,9 +117,14 @@ function extractRow(cells, map) {
   // Role is decorative (legacy). If both present, Task-type wins.
   const effectiveType = taskType || role || 'unknown';
 
-  const status = map.statusIdx != null ? cells[map.statusIdx].toLowerCase() : 'pending';
+  // Per codex final strict audit P1 (Category A): previously unknown statuses
+  // silently mapped to 'pending', which re-eligibilizes failed tasks. We now
+  // preserve unknown status verbatim and surface it as 'unknown' for the
+  // caller; findEligibleTask only treats 'pending' as eligible. A row with
+  // illegal status will fail eligibility check rather than silently re-run.
+  const rawStatus = map.statusIdx != null ? cells[map.statusIdx].toLowerCase() : 'pending';
   const validStatuses = ['pending', 'in-progress', 'done', 'failed', 'removed'];
-  const finalStatus = validStatuses.includes(status) ? status : 'pending';
+  const finalStatus = validStatuses.includes(rawStatus) ? rawStatus : `unknown:${rawStatus}`;
 
   const dependsRaw = map.dependsIdx != null ? cells[map.dependsIdx] : '';
   const depends = dependsRaw

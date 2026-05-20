@@ -143,7 +143,7 @@ hopper-codex T-PLUGIN-05a                            # Tier C #1: codex tool-use
 hopper-opencode T-PLUGIN-05a                         # Tier C #2: opencode tool-use → same dispatcher
 ```
 
-All 4 spawn the kimi CLI subprocess. Vendor selection lives in `.hopper/AGENTS.md`, not in the host adapter — this is the structural cross-host claim.
+**Structurally** all 4 routes resolve to the same vendor (kimi) and would spawn the same subprocess. Vendor selection lives in `.hopper/AGENTS.md`, not in the host adapter — this is the structural cross-host claim, mechanically asserted by the validation parity tests. A live empirical 4-host demonstration is a user-action follow-up (it requires Claude Code + codex CLI + opencode CLI all installed + authenticated simultaneously).
 
 The equivalence is mechanically asserted by `tests/unit/validation.test.js` "cross-host parity" test, which reads all 3 host entry points (Tier B + Tier C #1 + Tier C #2) and verifies they cite the same canonical task-id regex literal.
 

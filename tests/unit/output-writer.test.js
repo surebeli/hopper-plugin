@@ -119,10 +119,10 @@ test('mapDispatchStatusToQueueStatus: success → done', () => {
   assert.equal(mapDispatchStatusToQueueStatus('success'), 'done');
 });
 
-test('mapDispatchStatusToQueueStatus: every other status → failure-detected', () => {
+test('mapDispatchStatusToQueueStatus: every other status → failed', () => {
   for (const status of ['auth-fail', 'timeout', 'permission-fail', 'unknown-fail']) {
-    assert.equal(mapDispatchStatusToQueueStatus(status), 'failure-detected',
-      `${status} should map to failure-detected`);
+    assert.equal(mapDispatchStatusToQueueStatus(status), 'failed',
+      `${status} should map to failed`);
   }
 });
 
@@ -134,10 +134,10 @@ test('suggestQueueEdit: includes task ID, both statuses, and handoff path', () =
   assert.match(edit, /\.hopper\/handoffs\/T-99-output\.md/);
 });
 
-test('suggestQueueEdit: on failure maps to failure-detected', () => {
+test('suggestQueueEdit: on failure maps to failed', () => {
   const task = { id: 'T-99', status: 'pending', vendor: null };
   const edit = suggestQueueEdit(task, { status: 'auth-fail' });
-  assert.match(edit, /'pending' -> 'failure-detected'/);
+  assert.match(edit, /'pending' -> 'failed'/);
   assert.match(edit, /AGENTS\.md/, 'mentions AGENTS.md when task.vendor is null (resolved from)');
 });
 

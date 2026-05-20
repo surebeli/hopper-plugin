@@ -9,7 +9,8 @@
 // (see verifyFrameAntiPersona).
 
 import { readFile, readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
+import { validateTaskType } from './validation.js';
 
 /**
  * Load a task-type frame from .hopper/tasks/<task-type>.md.
@@ -20,7 +21,20 @@ import { join } from 'node:path';
  * @throws {Error} If frame file missing or empty
  */
 export async function loadTaskFrame(hopperDir, taskType) {
+  // Per codex final strict audit P1 (Category E security): taskType flows from
+  // queue.md into a file path. Validate first to prevent ../escape attacks.
+  validateTaskType(taskType);
+
   const framePath = join(hopperDir, 'tasks', `${taskType}.md`);
+
+  // Belt-and-braces: also verify resolved path stays inside <hopperDir>/tasks/
+  const tasksDir = join(hopperDir, 'tasks');
+  const resolvedPath = resolve(framePath);
+  const resolvedTasksDir = resolve(tasksDir);
+  if (!resolvedPath.startsWith(resolvedTasksDir + sep) && resolvedPath !== resolvedTasksDir) {
+    throw new Error(`loadTaskFrame: resolved path "${resolvedPath}" escapes tasks/ — refusing.`);
+  }
+
   let content;
   try {
     content = await readFile(framePath, 'utf-8');

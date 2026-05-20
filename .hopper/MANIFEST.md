@@ -8,9 +8,9 @@ This project IS hopper-plugin development. Its `.hopper/` directory is dogfooded
 
 ## Current Phase
 
-**Phase**: Phase 4 substantively complete (2026-05-20 evening). T-09 + T-10 both done; Critic verdict PASS_WITH_NOTES with GO for essay material. Screencast deferred per user; user-action gates (T-00 Prong 1, T-05e) remain open and will be exercised during demo testing.
+**Phase**: Phase 4 substantively complete + final strict audit applied (2026-05-20 evening). T-09 + T-10 both done; Critic verdict PASS_WITH_NOTES. Final strict audit (codex 10th cycle) returned REWORK on residual P1s; all addressed in same-day commit cycle. Screencast deferred per user; user-action gates (T-00 Prong 1, T-05e) remain open and will be exercised during demo testing.
 
-**Status**: Spec v2.0.3 final. Phase 0 (3 tasks). Phase 1 (5 tasks done). Phase 2 (5 tasks done). Phase 3 (2 tasks done). Phase 4 (2 of 4 done: T-08a Codex CLI host + T-08b OpenCode host; T-09 README/screencast + T-10 Critic acceptance pending). **197/206 tests passing** (9 Windows skips). Centralized task-id validation in `cli/src/validation.js` per Phase 4 audit P1.
+**Status**: Spec v2.0.3 final. Phase 0 (3 tasks done). Phase 1 (5 tasks done). Phase 2 (5 tasks done). Phase 3 (2 tasks done). Phase 4 (4 of 4 done: T-08a + T-08b + T-09 + T-10). Final strict audit applied: queue status schema fixed (legal statuses only), taskType validation added (security), Tier B prompt aligned with Tier C (no soft-orchestration), INSTALL-MATRIX language tightened. Centralized validation in `cli/src/validation.js` (task-id + task-type + queue status + flag whitelist).
 
 **Current cursor**: Phase 3 deliverables landed:
 - T-06 output.md writer (cli/src/output.js, ~250L) — codex mini-audit FIX_AND_RECHECK → PROCEED_TO_T07 (4 P1 findings fixed: format fidelity, lossy long outputs, task.id path safety, markdown injection)
