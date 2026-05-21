@@ -19,12 +19,20 @@ export const kimiAdapter = {
     modelArg: {
       accepted: 'freeform',
       knownGood: ['default'],
-      sourceNote: 'kimi -m <name>. Empirical: invalid model causes "LLM not set" error from kimi-cli. Per Phase 0 smoke + T-AUDIT-PH5 attempt. UNCONFIRMED: precise list of kimi-cli-accepted model identifiers.',
+      // Phase 6a dogfood 2026-05-21: kimi help confirms `--model, -m <TEXT>`.
+      // Default model comes from `~/.kimi/config.{toml,json}`. Smoke test
+      // with default succeeded (HOPPER_OK_KIMI). UNCONFIRMED: explicit list
+      // of accepted model identifiers (no `kimi models` subcommand exists).
+      sourceNote: 'kimi -m <name>, default from config. Verified default works 2026-05-21. UNCONFIRMED: full list of accepted model identifiers; `--model kimi-thinking` previously failed with "LLM not set" per T-AUDIT-PH5 attempt. Best practice: omit -m and let config decide.',
     },
     reasoningArg: {
       accepted: 'ignored',
       knownGood: [],
-      sourceNote: 'kimi has its own thinking mechanism; no --reasoning equivalent. docs/research/async-execution/03-other-ai-clis.md',
+      // Phase 6a dogfood 2026-05-21: kimi has `--thinking / --no-thinking`
+      // binary toggle (NOT enumerated level like codex). Our adapter does
+      // not forward opts.reasoning. Phase 6b candidate: wire opts.reasoning
+      // truthy → --thinking.
+      sourceNote: 'kimi has `--thinking / --no-thinking` binary toggle (verified 2026-05-21). Our adapter does NOT forward opts.reasoning. Adapter-ignored, not CLI-unsupported.',
     },
     features: {
       sessionResume: { supported: true, mechanism: '`kimi --session <id>` / `--resume <id>` / `-C` (continue most recent in cwd)' },

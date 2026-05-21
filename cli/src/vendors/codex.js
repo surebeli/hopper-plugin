@@ -21,7 +21,11 @@ export const codexAdapter = {
     modelArg: {
       accepted: 'ignored',
       knownGood: [],
-      sourceNote: 'codex adapter uses opts.reasoning, not opts.model. See args() below.',
+      // Phase 6a dogfood 2026-05-21: codex CLI supports `-m, --model <MODEL>`
+      // (verified via live `codex exec --help`). Our adapter currently uses
+      // `model_reasoning_effort` config flag only, NOT --model. Mark as
+      // adapter-ignored. Phase 6b candidate: wire opts.model → -m.
+      sourceNote: 'codex CLI supports `-m <MODEL>` (verified 2026-05-21). Our adapter uses opts.reasoning via config flag only — does NOT forward opts.model. Adapter-ignored, not CLI-unsupported.',
     },
     reasoningArg: {
       accepted: 'enumerated',

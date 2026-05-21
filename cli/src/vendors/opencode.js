@@ -19,8 +19,26 @@ export const opencodeAdapter = {
   capabilities: {
     modelArg: {
       accepted: 'freeform',
-      knownGood: ['deepseek/v4-flash', 'anthropic/claude-sonnet-4-6'],
-      sourceNote: 'opencode --model <provider/model>. Provider prefix required. Run `opencode models` for live list.',
+      // Phase 6a dogfood 2026-05-21: real `opencode models` list captured
+      // from this machine. Available models depend on user's opencode auth
+      // configuration; this is the snapshot at first dogfood. Run
+      // `opencode models` for live list on any other machine.
+      knownGood: [
+        'opencode/big-pickle',
+        'opencode/deepseek-v4-flash-free',
+        'opencode/nemotron-3-super-free',
+        'opencode/qwen3.6-plus-free',
+        'deepseek/deepseek-chat',
+        'deepseek/deepseek-reasoner',
+        'deepseek/deepseek-v4-flash',
+        'deepseek/deepseek-v4-pro',
+        'xiaomi/mimo-v2-flash',
+        'xiaomi/mimo-v2-omni',
+        'xiaomi/mimo-v2-pro',
+        'xiaomi/mimo-v2.5',
+        'xiaomi/mimo-v2.5-pro',
+      ],
+      sourceNote: 'opencode --model <provider/model>. Provider prefix required. List depends on user opencode auth; verified via live `opencode models` 2026-05-21. Run `opencode models` on your machine for current list.',
     },
     reasoningArg: {
       accepted: 'ignored',

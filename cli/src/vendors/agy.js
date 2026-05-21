@@ -40,7 +40,19 @@ export const agyAdapter = {
       fileOutput: { supported: false, mechanism: '`--log-file <path>` writes diagnostic log (NOT answer text). Answer text is stdout-only.' },
       streaming: { supported: true, mechanism: '`agy -p` streams; first-run blocked by OAuth (interactive once).' },
     },
+    // Phase 6a dogfood 2026-05-21 CRITICAL FINDING: this adapter targets
+    // the AGENTIC `agy` CLI (Google Antigravity 2.0, successor to Gemini CLI).
+    // On many "Antigravity" installs (incl. this dev machine), the binary
+    // installed under $HOME/AppData/Local/Programs/Antigravity/bin/antigravity
+    // is the VS-Code-fork EDITOR LAUNCHER (`--diff`, `--merge`, `--goto`,
+    // `--extensions-dir`, `--install-extension`), NOT the agentic CLI.
+    // Our `--check` correctly reports NOT_INSTALLED in that case because
+    // `agy` is not on PATH. Users wanting the agentic CLI must install it
+    // separately (it has its own distribution channel; details UNCONFIRMED
+    // as of dogfood date). DO NOT alias `agy → antigravity` — they are
+    // different binaries.
     staleAfter: '2026-08-21',
+    installDistinction: 'agy (agentic CLI; this adapter targets) ≠ antigravity (VS-Code-fork editor launcher; commonly pre-installed). Verified 2026-05-21 dogfood: this machine has antigravity editor at ~/AppData/Local/Programs/Antigravity/bin/antigravity.cmd but no agentic agy binary.',
   },
 
   args(input, opts) {
