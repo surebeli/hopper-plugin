@@ -239,6 +239,102 @@ hopper-dispatch --jobs                 # one-line summary of all in-progress
 - **Heterogeneous-only**: invoking from Codex CLI host to dispatch back to codex vendor triggers a soft warning. Set `HOPPER_ALLOW_SAME_VENDOR=1` to suppress.
 - **No auto-retry**: failed jobs stay `status: failed`. User re-dispatches manually if desired. Spec §14.10 forbids any retry logic in this layer.
 
+## Self-diagnostics (Phase 6a discovery API)
+
+Two CLI commands answer "is vendor X usable from this machine right now?" and "what does vendor X actually accept?" without spawning any vendor subprocess.
+
+### `hopper-dispatch --check [<vendor>]` — install + auth probe
+
+Walks PATH (with Windows PATHEXT semantics) for each adapter's command, runs the adapter's `envPreflight()` to detect auth state, and prints a status table. **Zero subprocess spawns** — pure `fs.statSync` + config-file reads.
+
+```bash
+$ hopper-dispatch --check
+
+hopper-dispatch v0.5.0-phase-5a — vendor install + auth check
+
+| Vendor    | Command resolution                                 | Auth | Status         |
+|-----------|----------------------------------------------------|------|----------------|
+| codex     | C:\Users\you\bin\codex.CMD (cmd.exe /c wrap)       | OK   | READY          |
+| kimi      | C:\Users\you\.local\bin\kimi.EXE                   | OK   | READY          |
+| opencode  | C:\Users\you\.bun\bin\opencode.EXE                 | OK   | READY          |
+| copilot   | C:\nvm4w\nodejs\copilot.CMD (cmd.exe /c wrap)      | note | READY          |
+| agy       | (not on PATH)                                      | OK   | NOT_INSTALLED  |
+```
+
+Status values:
+
+| Status | Meaning |
+|---|---|
+| `READY` | Binary on PATH + auth detected (or soft-warn note only) |
+| `AUTH_NEEDED` | Binary found but envPreflight hard-failed (e.g. missing required env var) |
+| `NOT_INSTALLED` | Binary not findable via PATH walk |
+| `UNKNOWN` | Detection error (rare; check adapter source) |
+
+Single-vendor form (`hopper-dispatch --check kimi`) prints just one row + detailed auth notes for that vendor.
+
+**What to do per status**:
+
+- `NOT_INSTALLED` → install the vendor CLI per its official docs (see the auth table in the install sections above for hints)
+- `AUTH_NEEDED` → run the auth flow the vendor's notes mention (e.g. `codex login`, `kimi /connect`, `agy` interactive once)
+- `READY` with `note` auth → vendor MAY work, MAY fail at dispatch with auth error; the soft-warn note explains what to set if it fails
+
+### `hopper-dispatch --capabilities <vendor>` — model + reasoning + features
+
+Prints the static capability hint that the adapter declares about itself. Sourced from `docs/research/` notes — **NOT live introspection** (that would spawn a subprocess).
+
+```bash
+$ hopper-dispatch --capabilities codex
+
+  --model      ignored
+               Note: codex adapter uses opts.reasoning, not opts.model.
+
+  --reasoning  enumerated
+               Values: low | medium | high | xhigh
+               Note: docs/research/async-execution/01-openai-hosts.md
+
+  Features:
+    sessionResume    YES  `codex exec resume <SESSION_ID>` — hopper does not currently auto-capture session_id
+    fileOutput       YES  `--output-last-message <path>` exists (NOT currently used by adapter)
+    streaming        YES  codex exec streams progress to stderr; final message to stdout
+
+  Capability data stale after: 2026-08-21
+```
+
+### Capability summary across all 5 vendors
+
+For quick reference (re-verify quarterly per each adapter's `staleAfter` date):
+
+| Vendor | `--model` | `--reasoning` | Session resume | File output | Streaming |
+|---|---|---|---|---|---|
+| **codex** | IGNORED | `low \| medium \| high \| xhigh` | ✓ | ✓ (`--output-last-message`, unused by adapter) | ✓ |
+| **kimi** | freeform (e.g. `default`) | IGNORED | ✓ (`--session <id>` / `--continue`) | ✗ | ✓ |
+| **opencode** | freeform (`<provider>/<model>`) | IGNORED | ✓ (per-machine session IDs; NOT cross-OS) | ✗ | ✓ |
+| **copilot** | freeform | IGNORED | partial (`--resume` picker; UNCONFIRMED ID arg) | ✗ | ✓ |
+| **agy** | IGNORED | IGNORED | UNCONFIRMED | ✗ (`--log-file` is diagnostic, not answer) | ✓ |
+
+**Honest gotchas surfaced by the capability data**:
+
+- Only **codex** honors `--reasoning`. Passing `--reasoning xhigh` to kimi/opencode/copilot/agy is silently ignored by their adapters.
+- Only **kimi / opencode / copilot** accept `--model`. Passing `--model X` to codex or agy is silently ignored.
+- No vendor accepts BOTH `--model` and `--reasoning` in the current adapter set.
+- Hopper does NOT validate model names against `knownGood` — it stays freeform (validation regex is shell-safety only). Invalid models surface as vendor-side errors at dispatch.
+
+### Typical pre-dispatch workflow
+
+Before launching a long-running task on a new machine:
+
+```bash
+hopper-dispatch --check                   # any NOT_INSTALLED or AUTH_NEEDED?
+hopper-dispatch --capabilities <vendor>   # does this vendor honor my intended flags?
+hopper-dispatch <task-id> --background    # only after both above look good
+```
+
+### Maintenance: capability data freshness
+
+Each adapter's `capabilities` block declares a `staleAfter` date. After that date, the data should be re-verified against the vendor's official docs (vendors change rapidly). The summary table above is sourced from `docs/research/async-execution/` notes as of the linked dates — re-verify before quoting in essay or release docs.
+
+If a vendor adds a new capability (e.g. agy adds `--resume`), update the adapter's `capabilities.features.sessionResume` block and bump `staleAfter`. Single-file edit per change.
+
 ## Uninstall
 
 Unlink the symlinks. Nothing persists outside `.hopper/` (which lives in the consuming project, not the plugin).
