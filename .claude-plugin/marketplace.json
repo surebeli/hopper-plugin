@@ -1,0 +1,22 @@
+{
+  "name": "agent-hopper",
+  "owner": {
+    "name": "surebeli (litianyi)",
+    "email": "surebeli@gmail.com"
+  },
+  "description": "Thin multi-LLM coordination protocol — dispatches task-typed work to vendor CLIs (codex, kimi, opencode, copilot, agy) without a harness reaction core. State lives in plain markdown under .hopper/.",
+  "plugins": [
+    {
+      "name": "hopper",
+      "source": ".",
+      "description": "Thin plugin layer over the llm-hopper file-based protocol. Dispatches task-typed work to vendor CLI subprocesses. No harness core; vendor CLIs bring their own runtime.",
+      "version": "0.5.0-phase-5a",
+      "author": {
+        "name": "surebeli (litianyi)"
+      },
+      "homepage": "https://github.com/surebeli/hopper-plugin",
+      "license": "Apache-2.0",
+      "keywords": ["llm", "multi-llm", "hopper", "protocol", "vendor-neutral"]
+    }
+  ]
+}

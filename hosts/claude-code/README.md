@@ -70,12 +70,14 @@ New-Item -ItemType SymbolicLink `
 
 After symlinking, **restart Claude Code** for the plugin to register.
 
-### Option B — npm/marketplace (post-essay; not yet shipped)
+### Option B — marketplace install
 
 ```
 /plugin marketplace add surebeli/hopper-plugin
-/plugin install hopper@surebeli-hopper
+/plugin install hopper@agent-hopper
 ```
+
+The repo doubles as a single-plugin marketplace via `.claude-plugin/marketplace.json` (marketplace name: `agent-hopper`; plugin name: `hopper`).
 
 ## Verify install (T-PLUGIN-00 Prong 1)
 
