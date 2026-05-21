@@ -1,0 +1,123 @@
+T-WEB-06 verification log
+Date: 2026-05-22T03:48:03+08:00
+Commit under test: d42fc1c [T-WEB-06] implement vendor inventory
+
+1) Targeted unit tests
+
+Command:
+  node --test tests/unit/dashboard-vendors.test.js
+
+Result:
+  # tests 3
+  # pass 3
+  # fail 0
+  # skipped 0
+  # duration_ms 371.0662
+
+Covered:
+  - vendor inventory merges adapter list with cache diagnostics
+  - spawnProbe allowlists vendors and spawns only hopper-dispatch --probe
+  - probe action returns 409 while same vendor is already running
+
+2) Clean full test + build
+
+Command:
+  git -c core.autocrlf=false worktree add --detach %TEMP%/hopper-tweb06-lf-* HEAD
+  git -C <worktree> config core.autocrlf false
+  git -C <worktree> reset --hard HEAD
+  npm ci --ignore-scripts
+  npm test
+  npm run dashboard:build
+  git worktree remove <worktree>
+
+Result:
+  npm test:
+    # tests 364
+    # pass 349
+    # fail 0
+    # skipped 15
+    # duration_ms 11936.1329
+
+  npm run dashboard:build:
+    dist/index.html                         gzip:   0.27 kB
+    dist/assets/index-CsN72WXC.css          gzip:   4.60 kB
+    dist/assets/TaskDetailRoute-B64v5o-p.js gzip:  65.12 kB
+    dist/assets/index-cL-_2Qoo.js           gzip: 116.86 kB
+    total gzip: 186.85 kB
+
+Note:
+  A default Windows temp worktree with CRLF checkout failed two existing
+  commands/dispatch.md frontmatter tests; LF checkout passed all tests at the
+  exact T-WEB-06 commit.
+
+3) Vendor stale compare
+
+Command:
+  HOPPER_CACHE_DIR=<temp fixture> node cli/bin/hopper-dispatch --models codex
+  HOPPER_CACHE_DIR=<temp fixture> node --input-type=module -e "readVendorInventory()..."
+
+Output excerpts:
+  codex (full, 50.8d ago) [STALE]
+    - gpt-test
+  {"name":"codex","stale":true,"staleness":"50.8d ago","models":["gpt-test"]}
+
+4) Browser/CDP proof
+
+Target:
+  http://127.0.0.1:7809/vendors
+
+Injected probe:
+  createActionsRouter({ spawnProbeImpl: fake delayed child_process EventEmitter })
+
+Result:
+  {
+    "before": { "staleCount": 5, "cardCount": 5 },
+    "during": { "disabledLoading": true },
+    "after": { "staleCount": 4, "hasFresh": true, "hasModel": true },
+    "requestCount": 1,
+    "screenshot": "docs/sidequests/web-dashboard/handoffs/T-WEB-06-screenshot.png"
+  }
+
+5) Hard checks
+
+Package scan:
+  {
+    "bannedHits": [],
+    "radix": [
+      "@radix-ui/react-alert-dialog",
+      "@radix-ui/react-dialog",
+      "@radix-ui/react-tabs",
+      "@radix-ui/react-tooltip"
+    ],
+    "badRadix": []
+  }
+
+Dashboard source scan:
+  rg "executeDispatch|refetchInterval|0\\.0\\.0\\.0" dashboard/server dashboard/client/src cli/bin/hopper-dashboard package.json
+  => no executeDispatch/refetchInterval/non-loopback hits
+
+Forbidden flag literal scan:
+  rg "\"--background\"|'--background'|\"--dispatch\"|'--dispatch'" dashboard/server dashboard/client/src
+  => no forbidden spawn flag literals in dashboard source
+
+Emoji scan:
+  no emoji pictographs in changed UI files
+
+Design token hashes:
+  globals.css SHA256 789046FC976A7FC387D77BD64AC6EADA56014AEBF3EC9E31CC621454C423462C
+  tailwind.config.ts SHA256 D0E34ECFADDF4F035C3AA551530A57C41DFB36530F5AC5295D24FA34E299704C
+
+Line counts:
+  dashboard/client/src/components/ui/alert-dialog.tsx:107
+  dashboard/client/src/components/VendorCard.tsx:88
+  dashboard/client/src/routes/VendorsRoute.tsx:36
+  dashboard/client/src/lib/api.ts:33
+  dashboard/client/src/lib/types.ts:49
+  dashboard/server/lib/spawn-cli.js:19
+  dashboard/server/routes/actions.js:61
+  dashboard/server/routes/vendors.js:57
+  tests/unit/dashboard-vendors.test.js:99
+
+Audit:
+  npm audit --omit=dev --json
+  prod vulnerabilities: total 0
