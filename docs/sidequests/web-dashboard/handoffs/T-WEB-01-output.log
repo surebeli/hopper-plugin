@@ -1,0 +1,136 @@
+T-WEB-01 raw verification log (selected command output)
+
+cwd: F:\workspace\ai\hopper-plugin
+date: 2026-05-22 Asia/Shanghai
+
+---
+npm install
+
+up to date, audited 267 packages in 1s
+
+53 packages are looking for funding
+  run `npm fund` for details
+
+2 moderate severity vulnerabilities
+
+To address all issues (including breaking changes), run:
+  npm audit fix --force
+
+Run `npm audit` for details.
+
+Audit note:
+- esbuild <=0.24.2 via Vite
+- vite <=6.4.1
+- fixAvailable: vite 8.0.14, outside §B.3 Vite ^5.4.0 range
+
+---
+npm run dashboard:build
+
+> hopper-plugin@0.6.0-phase-6c dashboard:build
+> cd dashboard/client && tsc -p tsconfig.json --noEmit && vite build
+
+vite v5.4.21 building for production...
+transforming...
+1576 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                 0.40 kB │ gzip:  0.27 kB
+dist/assets/index-DP_zCKmp.css  9.18 kB │ gzip:  2.60 kB
+dist/assets/index-CFOfAOZL.js 222.18 kB │ gzip: 71.16 kB
+built in 2.99s
+
+Total gzip: 74.03 KB
+
+---
+npm test
+
+> hopper-plugin@0.6.0-phase-6c test
+> node --test tests/unit/*.test.js
+
+1..347
+# tests 347
+# suites 0
+# pass 332
+# fail 0
+# cancelled 0
+# skipped 15
+# todo 0
+# duration_ms 5217.6035
+
+---
+npm run dashboard:dev
+
+> hopper-plugin@0.6.0-phase-6c dashboard:dev
+> node cli/bin/hopper-dashboard --dev
+
+hopper-dashboard listening on http://127.0.0.1:7777
+
+VITE v5.4.21 ready in 392 ms
+Local: http://127.0.0.1:5173/
+press h + enter to show help
+
+HMR:
+12:14:49 AM [vite] hmr update /src/components/QueueTable.tsx, /src/styles/globals.css
+12:15:03 AM [vite] hmr update /src/components/QueueTable.tsx, /src/styles/globals.css
+
+Chrome headless dev check:
+budget100=12:14:34 AM
+budget2200=12:14:39 AM
+clockChanged=True
+hasHello=True
+hasRuntime=True
+
+---
+node cli/bin/hopper-dashboard
+
+hopper-dashboard listening on http://127.0.0.1:7777
+
+Get-NetTCPConnection -LocalPort 7777 -State Listen:
+LocalAddress LocalPort OwningProcess
+127.0.0.1    7777      41160
+
+Invoke-WebRequest http://127.0.0.1:7777/:
+StatusCode 200
+Length 401
+
+Chrome headless prod check:
+prodBudget100=12:16:10 AM
+prodBudget2200=12:16:15 AM
+prodClockChanged=True
+prodHasHello=True
+screenshot=F:\workspace\ai\hopper-plugin\docs\sidequests\web-dashboard\handoffs\T-WEB-01-screenshot.png bytes=10662
+
+---
+node cli/bin/hopper-dashboard --port 9090
+
+hopper-dashboard listening on http://127.0.0.1:9090
+
+Get-NetTCPConnection -LocalPort 9090 -State Listen:
+LocalAddress LocalPort OwningProcess
+127.0.0.1    9090      26476
+
+Invoke-WebRequest http://127.0.0.1:9090/:
+StatusCode 200
+Length 401
+
+---
+Hard-constraint greps
+
+rg -n "executeDispatch" dashboard
+<empty>
+
+rg -n "0\.0\.0\.0|listen\(.*'::'\)|'\*'" dashboard/server
+<empty>
+
+rg -n '"(next|remix|gatsby|astro|vue|svelte|@angular|preact|solid-js|redux|@reduxjs/toolkit|zustand|mobx|jotai|recoil|recharts|chart\.js|d3|echarts|visx|victory|plotly|sqlite|better-sqlite3|prisma|@prisma/client|drizzle-orm|typeorm|sequelize|mongoose|passport|jsonwebtoken|express-session|next-auth|framer-motion|@react-spring/web|gsap|lottie-react)"\s*:' package.json
+<empty>
+
+rg -n '"(@mui/|antd|@chakra-ui|@mantine|@nextui-org|daisyui)' package.json
+<empty>
+
+rg -nP '[\x{1F300}-\x{1FAFF}\x{1F000}-\x{1F2FF}\x{2600}-\x{27BF}]' dashboard/client/src
+<empty>
+
+Design token compare:
+globals.css byte-match=True
+tailwind.config.ts byte-match=True

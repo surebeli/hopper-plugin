@@ -1,0 +1,34 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* 全部 HSL 分量（shadcn 约定 — space-separated，没有逗号、没有 hsl()） */
+    --background:           0 0% 4%;        /* #0A0A0A page background */
+    --foreground:           0 0% 92%;       /* #ECECEC primary text */
+    --card:                 0 0% 6.7%;      /* #111111 surface */
+    --card-foreground:      0 0% 92%;
+    --popover:              0 0% 8.6%;      /* #161616 elevated */
+    --popover-foreground:   0 0% 92%;
+    --primary:              158 71% 55%;    /* #3DDC97 electric mint */
+    --primary-foreground:   0 0% 4%;
+    --secondary:            0 0% 10%;
+    --secondary-foreground: 0 0% 92%;
+    --muted:                0 0% 10%;
+    --muted-foreground:     0 0% 66%;       /* #A8A8A8 */
+    --accent:               158 71% 55%;
+    --accent-foreground:    0 0% 4%;
+    --destructive:          0 100% 68%;     /* #FF5C5C coral */
+    --destructive-foreground: 0 0% 92%;
+    --warning:              44 100% 47%;    /* #F0B400 amber — staleness/retry */
+    --warning-foreground:   0 0% 4%;
+    --border:               0 0% 100%;      /* applied with /6 opacity via Tailwind */
+    --input:                0 0% 100%;
+    --ring:                 158 71% 55%;
+    --radius:               2px;            /* sharp — overrides shadcn default 0.5rem */
+  }
+}
+
+html, body, #root { height: 100%; background: hsl(var(--background)); color: hsl(var(--foreground)); }
+body { font-family: theme('fontFamily.sans'); font-size: 13px; line-height: 1.5; }
