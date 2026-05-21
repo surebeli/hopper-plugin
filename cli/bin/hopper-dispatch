@@ -606,35 +606,56 @@ async function runCheck(target) {
     process.exit(1);
   }
 
+  // Per codex Phase 6a strict audit P2 #6: probe each vendor ONCE; reuse
+  // for both table row + notes section. Halves filesystem probes and
+  // eliminates row/notes inconsistency under mid-command env/file changes.
+  const results = [];
+  for (const v of vendors) {
+    try {
+      results.push({ name: v, r: await installCheckForAdapter(v), err: null });
+    } catch (err) {
+      results.push({ name: v, r: null, err });
+    }
+  }
+
+  // Per codex Phase 6a strict audit P2 #2: redact home-dir in resolved
+  // paths to avoid leaking username + install-layout into pasted logs.
+  // Original path still discoverable via `--check <vendor> --verbose`
+  // (not implemented now; documented as Phase 6b enhancement).
+  const { homedir } = await import('node:os');
+  const home = homedir();
+  const redact = (p) => {
+    if (!p) return p;
+    if (home && p.startsWith(home)) return '~' + p.slice(home.length);
+    return p;
+  };
+
   console.log(`hopper-dispatch v${VERSION} — vendor install + auth check`);
   console.log('');
   console.log('| Vendor    | Command resolution                                 | Auth      | Status         |');
   console.log('|-----------|----------------------------------------------------|-----------|----------------|');
-  for (const v of vendors) {
-    try {
-      const r = await installCheckForAdapter(v);
-      const cmd = r.binaryFound
-        ? `${r.resolvedPath || r.command}${r.needsShellWrap ? ' (cmd.exe /c wrap)' : ''}`
-        : '(not on PATH)';
-      const auth = r.authOk ? 'OK' : (r.authNotes.length > 0 ? 'note' : 'missing');
-      console.log(`| ${v.padEnd(9)} | ${cmd.slice(0, 50).padEnd(50)} | ${auth.padEnd(9)} | ${r.overallStatus.padEnd(14)} |`);
-    } catch (err) {
+  for (const { name: v, r, err } of results) {
+    if (err) {
       console.log(`| ${v.padEnd(9)} | ERROR: ${err.message.slice(0, 40).padEnd(40)} |           | ERROR          |`);
+      continue;
     }
+    const cmd = r.binaryFound
+      ? `${redact(r.resolvedPath) || r.command}${r.needsShellWrap ? ' (cmd.exe /c wrap)' : ''}`
+      : '(not on PATH)';
+    const auth = r.authOk ? 'OK' : (r.authNotes.length > 0 ? 'note' : 'missing');
+    console.log(`| ${v.padEnd(9)} | ${cmd.slice(0, 50).padEnd(50)} | ${auth.padEnd(9)} | ${r.overallStatus.padEnd(14)} |`);
   }
   console.log('');
   console.log('Notes (auth):');
-  for (const v of vendors) {
-    try {
-      const r = await installCheckForAdapter(v);
-      if (r.authNotes.length > 0) {
-        console.log(`  ${v}:`);
-        for (const note of r.authNotes) console.log(`    - ${note}`);
-      }
-    } catch (_) {}
+  for (const { name: v, r } of results) {
+    if (r && r.authNotes.length > 0) {
+      console.log(`  ${v}:`);
+      for (const note of r.authNotes) console.log(`    - ${note}`);
+    }
   }
   console.log('');
   console.log('No vendor subprocess is spawned for this check (spec §3 #4 single-spawn proof preserved).');
+  console.log('Paths shown with `~` home-dir redaction. PATH is trusted input — review your $PATH if unsure.');
 }
 
 function runCapabilities(vendor) {

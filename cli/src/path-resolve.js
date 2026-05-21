@@ -7,7 +7,13 @@
 //
 // Extracted from hopper-runner's inline resolveWindowsCommand per the
 // Phase 6a discovery-API addition so both code paths share one implementation.
-// Per spec §3 #4: no subprocess in this resolver. statSync only.
+// Per spec §3 #4: no subprocess in this resolver. statSync + accessSync only.
+//
+// Per codex Phase 6a strict audit P2 #1 (trust boundary): PATH is treated
+// as TRUSTED INPUT. A hostile PATH entry (UNC path, Windows junction,
+// relative `..`) can cause statSync probes outside the cwd, but cannot
+// execute code — discovery is read-only. Users with untrusted PATH should
+// audit `echo $PATH` (POSIX) or `$env:Path` (Windows) before running --check.
 
 import { statSync, accessSync, constants } from 'node:fs';
 import { join, delimiter } from 'node:path';

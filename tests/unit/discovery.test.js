@@ -174,25 +174,46 @@ test('installCheckForAdapter returns expected shape for each registered vendor',
 
 test('installCheckForAdapter does NOT spawn vendor subprocess (single-spawn proof)', async () => {
   // Per spec §3 #4: discovery must not break the single-spawn proof.
-  // We can verify by reading path-resolve.js source for any spawn/exec calls
-  // (after stripping comments — doc references like "spawn()" in JSDoc are OK).
+  // Per codex Phase 6a strict audit P2 #5: previously this scan only checked
+  // path-resolve.js. Discovery actually pulls in vendors/index.js + every
+  // adapter file + their transitive imports. Now we scan the FULL discovery
+  // surface for top-level spawn/exec calls.
   const { readFileSync } = await import('node:fs');
   const { fileURLToPath } = await import('node:url');
   const { dirname, resolve, join } = await import('node:path');
   const __dirname = dirname(fileURLToPath(import.meta.url));
   const REPO_ROOT = resolve(__dirname, '..', '..');
-  const pathResolveSrc = readFileSync(join(REPO_ROOT, 'cli', 'src', 'path-resolve.js'), 'utf-8');
-  // Strip /* */ and // comments + string literals before pattern-matching
-  const code = pathResolveSrc
+
+  // All files reachable from --check / --capabilities WITHOUT a dispatch.
+  const filesToScan = [
+    join(REPO_ROOT, 'cli', 'src', 'path-resolve.js'),
+    join(REPO_ROOT, 'cli', 'src', 'vendors', 'index.js'),
+    join(REPO_ROOT, 'cli', 'src', 'vendors', 'codex.js'),
+    join(REPO_ROOT, 'cli', 'src', 'vendors', 'kimi.js'),
+    join(REPO_ROOT, 'cli', 'src', 'vendors', 'opencode.js'),
+    join(REPO_ROOT, 'cli', 'src', 'vendors', 'copilot.js'),
+    join(REPO_ROOT, 'cli', 'src', 'vendors', 'agy.js'),
+  ];
+
+  const stripCodeOnly = (src) => src
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/\/\/[^\n]*/g, '')
     .replace(/'[^']*'/g, "''")
     .replace(/"[^"]*"/g, '""')
     .replace(/`[^`]*`/g, '``');
-  assert.ok(!/\bspawn\s*\(/.test(code),
-    'path-resolve.js code must not contain spawn() — would break single-spawn proof');
-  assert.ok(!/\bexec(Sync|FileSync|File)?\s*\(/.test(code),
-    'path-resolve.js code must not contain exec/execSync — would break single-spawn proof');
+
+  for (const f of filesToScan) {
+    const src = readFileSync(f, 'utf-8');
+    const code = stripCodeOnly(src);
+    // Allow import {...} statements (those are static-imports, not calls).
+    // Forbid actual call sites: `spawn(...)`, `exec(...)`, `execSync(...)`, `execFile(...)`.
+    // We strip the import lines first so 'spawn' inside a destructured import doesn't trip the check.
+    const codeNoImports = code.replace(/^\s*import\s*\{[^}]*\}\s*from[^;\n]+;?/gm, '');
+    assert.ok(!/\bspawn\s*\(/.test(codeNoImports),
+      `${f.split(/[/\\]/).pop()}: contains spawn() call site (would break single-spawn proof)`);
+    assert.ok(!/\bexec(Sync|FileSync|File)?\s*\(/.test(codeNoImports),
+      `${f.split(/[/\\]/).pop()}: contains exec/execSync/execFile call site (would break single-spawn proof)`);
+  }
 });
 
 // ─── capabilitiesForAdapter ───────────────────────────────────────────

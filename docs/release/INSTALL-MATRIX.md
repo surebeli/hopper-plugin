@@ -329,18 +329,18 @@ hopper-dispatch --capabilities <vendor>   # does this vendor honor my intended f
 hopper-dispatch <task-id> --background    # only after both above look good
 ```
 
-### Cross-platform compatibility (Windows + macOS + Linux)
+### Cross-platform compatibility (Windows live; macOS + Linux POSIX-tested, no live hardware verification)
 
-`--check` and `--capabilities` work on all three platforms with platform-aware path resolution. Verification status as of 2026-05-21:
+**Verification honesty disclaimer** (per codex Phase 6a strict audit P2 #3): Windows side is **live-tested on Win11 + Node 22**. macOS and Linux sides are covered by **POSIX-semantics tests** (chmod-controlled exec-bit fixtures + PATH-order fixtures) that auto-skip on Windows and would run on Linux/macOS CI — but as of 2026-05-21 **no live macOS hardware smoke has been captured**. Treat Mac/Linux status as "code paths verified by test fixtures, awaiting first live smoke."
 
 | Component | Windows | macOS | Linux | Notes |
 |---|---|---|---|---|
-| `resolveCommandOnPath` PATH walk | ✓ (live-verified on Win11) | ✓ (POSIX exec-bit test) | ✓ (POSIX exec-bit test) | Windows: PATHEXT-aware (`.exe`/`.com` direct, `.cmd`/`.bat` cmd.exe-wrapped). POSIX: `accessSync(X_OK)` exec-permission check (rejects file-without-exec-bit). |
-| `--check` install probe | ✓ live-tested | covered by POSIX path tests | covered by POSIX path tests | adapter `envPreflight()` uses `homedir()` + platform-conditional opencode path (`~/.local/share/...` on Linux, `~/AppData/Roaming/...` on Win, `~/Library/Application Support/...` on macOS). |
+| `resolveCommandOnPath` PATH walk | ✓ live-Win11 | code-path verified (POSIX tests) | code-path verified (POSIX tests) | Win: PATHEXT-aware (`.exe`/`.com` direct, `.cmd`/`.bat` cmd.exe-wrapped). POSIX: `accessSync(X_OK)` exec-permission check (rejects file-without-exec-bit). |
+| `--check` install probe | ✓ live | code-path | code-path | adapter `envPreflight()` uses `homedir()` + platform-conditional opencode path (`~/.local/share/...` Linux, `~/AppData/Roaming/...` Win, `~/Library/Application Support/...` macOS). |
 | `--check` status classifier | ✓ | ✓ | ✓ | pure JS logic; platform-agnostic. |
 | `--capabilities` output | ✓ | ✓ | ✓ | static-data lookup; platform-agnostic. |
 | `installCheckForAdapter()` API | ✓ | ✓ | ✓ | composes PATH walk + envPreflight. |
-| Single-spawn invariant in discovery | ✓ verified | ✓ source-grep test | ✓ source-grep test | `path-resolve.js` source contains no `spawn`/`exec`/`execSync` calls (verified by `tests/unit/discovery.test.js`). |
+| Single-spawn invariant in discovery | ✓ source-grep test | ✓ source-grep test | ✓ source-grep test | `path-resolve.js` + `vendors/index.js` + all 5 adapter source files contain no `spawn`/`exec`/`execSync` top-level calls (verified by `tests/unit/discovery.test.js`). |
 
 **Known POSIX-specific behavior the resolver handles**:
 
@@ -375,11 +375,13 @@ The resolver walks all of `$PATH` in order — whichever bin dir is first on PAT
 
 The resolver tries `.exe`/`.com` first (CreateProcessW can spawn directly), then `.cmd`/`.bat` (wraps with `cmd.exe /c` automatically). PATHEXT env-var order is honored.
 
-**Known non-issues** (validated by code-inspection):
+**Behaviors to know about** (per codex Phase 6a strict audit P2 #4):
 
-- macOS APFS case-insensitivity: resolver does literal `cmd` lookup — no case conversion. Behavior is the same as on case-sensitive filesystems.
-- WSL on Windows: if `node` is the Windows-native node spawned from WSL, PATH may mix Windows + WSL paths. The resolver respects whatever PATH is set in the runner's env.
-- Network drives / slow `statSync`: each candidate is a single `statSync` call (~ sub-ms on local FS, may be slower over SMB/NFS). Discovery cost is small per vendor count × PATH dir count.
+- **macOS APFS case-insensitivity**: the resolver does literal `cmd` lookup with no case conversion in code, BUT macOS APFS default config IS case-insensitive at the filesystem layer. Effect: on default macOS, a binary named `Codex` (capital C) **will** satisfy a lookup for `codex` (lowercase) — the underlying `statSync` succeeds because APFS treats them as the same file. PATH-order semantics still hold; only intra-dir case-matching differs from Linux. If your machine uses case-sensitive APFS (opt-in), behavior matches Linux exactly.
+- **WSL on Windows**: if `node` is the Windows-native node spawned from WSL, PATH may mix Windows + WSL paths. The resolver respects whatever PATH is set in the runner's env.
+- **PATH as trusted input** (per audit P2 #1): the resolver `statSync`s every PATH entry. A hostile PATH (e.g. injected UNC path on Windows like `\\\\evil-server\\share`, or a `..` traversal) can cause filesystem-metadata probing outside intended directories. The probe is read-only — no code execution from these entries — but users on shared/CI systems should audit `echo $PATH` (POSIX) or `$env:Path` (Windows) before running `--check` if PATH trust is in question.
+- **Network drives / slow `statSync`**: each candidate is a single `statSync` call (~ sub-ms on local FS, may be slower over SMB/NFS). Discovery cost is small per vendor count × PATH dir count.
+- **Path redaction in --check output** (per audit P2 #2): `--check` table redacts `$HOME` to `~` in resolved paths to avoid leaking username + install layout into pasted logs. Full path can be obtained via `--check <vendor>` (single-vendor mode prints unredacted notes if needed) or by inspecting `r.resolvedPath` programmatically.
 
 ### Maintenance: capability data freshness
 
