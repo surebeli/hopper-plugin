@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import actionsRouter from './routes/actions.js';
 import costRouter from './routes/cost.js';
-import queueRouter from './routes/queue.js';
+import { createQueueRouter } from './routes/queue.js';
 import taskRouter from './routes/task.js';
 import vendorsRouter from './routes/vendors.js';
 
@@ -41,7 +41,7 @@ export function parseServerArgs(argv = process.argv.slice(2)) {
   return opts;
 }
 
-export function createApp({ dev = false, distDir = DEFAULT_DIST } = {}) {
+export function createApp({ dev = false, distDir = DEFAULT_DIST, hopperDir = null } = {}) {
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json());
@@ -49,7 +49,7 @@ export function createApp({ dev = false, distDir = DEFAULT_DIST } = {}) {
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true, mode: dev ? 'dev' : 'prod' });
   });
-  app.use('/api', queueRouter);
+  app.use('/api', createQueueRouter({ hopperDir }));
   app.use('/api/task', taskRouter);
   app.use('/api/vendors', vendorsRouter);
   app.use('/api/cost', costRouter);
@@ -71,6 +71,7 @@ export function createApp({ dev = false, distDir = DEFAULT_DIST } = {}) {
 export function startServer({
   dev = false,
   distDir = DEFAULT_DIST,
+  hopperDir = null,
   host = '127.0.0.1',
   port = 7777,
   requireDist = !dev,
@@ -80,7 +81,7 @@ export function startServer({
     throw new Error('dashboard client dist not found; run `npm run dashboard:build` first');
   }
 
-  const app = createApp({ dev, distDir });
+  const app = createApp({ dev, distDir, hopperDir });
   return new Promise((resolveStart, rejectStart) => {
     const server = app.listen(port, host, () => {
       const address = server.address();

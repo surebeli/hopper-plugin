@@ -6,7 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import CostRoute from '@/routes/CostRoute';
 import QueueRoute from '@/routes/QueueRoute';
-import TaskDetailRoute from '@/routes/TaskDetailRoute';
 import VendorsRoute from '@/routes/VendorsRoute';
 
 const navItems = [
@@ -35,7 +34,7 @@ export default function App() {
         <section className="grid flex-1 gap-4 py-4 md:grid-cols-[1fr_280px]">
           <Routes>
             <Route path="/" element={<QueueRoute />} />
-            <Route path="/task/:id" element={<TaskDetailRoute />} />
+            <Route path="/task/:id" element={<QueueRoute />} />
             <Route path="/vendors" element={<VendorsRoute />} />
             <Route path="/cost" element={<CostRoute />} />
           </Routes>

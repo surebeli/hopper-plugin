@@ -1,11 +1,25 @@
-import { Circle } from 'lucide-react';
+import { Circle, CircleSlash2, XCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
+import { statusPresentation } from '@/lib/status';
+import type { TaskStatus } from '@/lib/types';
 
-export function StatusPill({ label = 'pending' }: { label?: string }) {
+export function StatusPill({ status = 'pending' }: { status?: TaskStatus }) {
+  const meta = statusPresentation[status] || statusPresentation.pending;
+  const Icon = meta.icon === 'x' ? XCircle : meta.icon === 'slash' ? CircleSlash2 : Circle;
+
   return (
-    <Badge variant="outline">
-      <Circle className="h-2 w-2 text-muted-foreground" />
-      {label}
-    </Badge>
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger>
+          <Badge variant="outline" className={cn('w-fit', meta.className)} data-status={status}>
+            <Icon className={cn('h-2.5 w-2.5', meta.iconClassName)} />
+            {meta.label}
+          </Badge>
+        </TooltipTrigger>
+        <TooltipContent>{meta.label}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }

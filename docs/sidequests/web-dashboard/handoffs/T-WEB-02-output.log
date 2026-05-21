@@ -1,0 +1,138 @@
+T-WEB-02 execution log
+Date: 2026-05-22 +08:00
+Executor: codex-gpt-5.5
+
+1) Pre-work review
+
+- Read SPEC.md §6 T-WEB-02 and §7.1.
+- Read T-WEB-01 review result from user: accept-with-note, F1 hard precondition.
+- Completed F1 before T-WEB-02:
+  - `npm install` generated `package-lock.json`.
+  - commit `3aa05fd [T-WEB-01.5] add package-lock.json for reviewer reproducibility`.
+- F4 acknowledgement recorded in T-WEB-02 output: route shells existed; QueueTable was filled in.
+
+2) shadcn add check
+
+Command:
+`npx shadcn@latest add table tooltip --dry-run -y -c dashboard/client`
+
+Output:
+`The path F:\workspace\ai\hopper-plugin\dashboard\client does not contain a package.json file. Would you like to start a new project?`
+
+Decision:
+No files/deps changed by the CLI. Added local shadcn-compatible `table` and `tooltip` primitives to avoid non-whitelisted `@radix-ui/react-tooltip`.
+
+3) Build
+
+Command:
+`npm run dashboard:build`
+
+Output summary:
+```
+vite v5.4.21 building for production...
+dist/index.html                 0.40 kB | gzip:  0.27 kB
+dist/assets/index-BnJMzYcQ.css 11.17 kB | gzip:  3.15 kB
+dist/assets/index-B-kzxt4g.js  288.96 kB | gzip: 89.19 kB
+built in 2.70s
+```
+
+Bundle total gzip: 92.34 KB (< 200 KB).
+
+4) Tests
+
+Command:
+`node --test tests/unit/dashboard-queue.test.js`
+
+Output summary:
+```
+ok 1 - dashboard queue route returns parsed queue rows
+ok 2 - QueueTable renders fixed-height rows and selected primary bar
+ok 3 - StatusPill maps five statuses to glyph and color classes
+# tests 3
+# pass 3
+# fail 0
+```
+
+Command:
+`npm test`
+
+Output summary:
+```
+# tests 350
+# pass 335
+# fail 0
+# skipped 15
+```
+
+5) Runtime verification
+
+Started:
+`node cli/bin/hopper-dashboard --dev`
+
+Observed:
+```
+Get-NetTCPConnection -LocalPort 7777 => 127.0.0.1 Listen
+Get-NetTCPConnection -LocalPort 5173 => 127.0.0.1 Listen
+Invoke-WebRequest http://127.0.0.1:5173/ => 200
+```
+
+API evidence:
+```
+Invoke-RestMethod http://127.0.0.1:7777/api/queue
+Count: 34
+First: T-PLUGIN-00
+Last: T-AUDIT-PH6C-V3-kimi
+Statuses: done:21, failed:2, in-progress:1, pending:10
+```
+
+Queue parser evidence:
+```
+{
+  "count": 34,
+  "first": "T-PLUGIN-00",
+  "last": "T-AUDIT-PH6C-V3-kimi",
+  "counts": {
+    "in-progress": 1,
+    "done": 21,
+    "failed": 2,
+    "pending": 10
+  }
+}
+```
+
+Screenshot:
+`docs/sidequests/web-dashboard/handoffs/T-WEB-02-screenshot.png`
+
+Stopped dev processes:
+`Stop-Process -Id 15844,31404`
+
+6) Hard checks
+
+No `executeDispatch`:
+`rg -n "executeDispatch" dashboard package.json tests/unit cli/bin/hopper-dashboard cli/bin/hopper-dashboard.cmd`
+=> `<empty>`
+
+No package banned deps:
+combined `Select-String` over SPEC §B.3 banned package list in `package.json`
+=> `<empty>`
+
+UI emoji:
+`rg -n "[\p{Emoji_Presentation}\p{Extended_Pictographic}]" dashboard/client/src`
+=> `<empty>`
+
+Design token files unchanged:
+```
+globals.css SHA256:        789046FC976A7FC387D77BD64AC6EADA56014AEBF3EC9E31CC621454C423462C
+tailwind.config.ts SHA256: D0E34ECFADDF4F035C3AA551530A57C41DFB36530F5AC5295D24FA34E299704C
+```
+
+Line counts:
+```
+152 dashboard/client/src/components/QueueTable.tsx
+124 tests/unit/dashboard-queue.test.js
+038 dashboard/client/src/lib/status.ts
+035 dashboard/client/src/components/ui/table.tsx
+026 dashboard/client/src/components/ui/tooltip.tsx
+023 dashboard/client/src/components/StatusPill.tsx
+017 dashboard/server/lib/hopper-dir.js
+```
