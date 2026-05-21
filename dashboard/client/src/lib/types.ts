@@ -20,8 +20,32 @@ export interface TaskDetail {
 
 export interface Vendor {
   name: string;
-  installed: boolean;
+  installStatus: 'installed' | 'cached' | 'unknown';
+  binaryPath: string | null;
+  cachedAt: string | null;
+  cachedModels: string[];
+  cacheError: string | null;
+  introspection: string | null;
+  modelsSource: string | null;
+  notes: string[];
+  reasoningLevels: string[];
   stale: boolean;
+  staleness: string;
+}
+
+export interface VendorsResponse {
+  vendors: Vendor[];
+  cacheError: string | null;
+  generatedAt: string;
+}
+
+export interface ProbeResponse {
+  vendor: string;
+  status: 'done';
+  exitCode: number;
+  signal: string | null;
+  stdout: string;
+  stderr: string;
 }
 
 export interface CostRow {
