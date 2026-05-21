@@ -47,7 +47,7 @@ Anchor: `.hopper/queue.md::root`
 | T-AUDIT-PH6C-opencode | code-review-adversarial | pending | | high | Phase 6c re-run. opencode with --model deepseek/deepseek-v4-flash + reasoning high. 30min floor now applies (was 180s). | opencode |
 | T-AUDIT-PH6C-copilot | code-review-adversarial | pending | | high | Phase 6c re-run. copilot with --model claude-sonnet-4.6. 30min floor (was 120s — the most aggressively misaligned). | copilot |
 | T-AUDIT-PH6C-agy | code-review-adversarial | failed | | high | Phase 6c re-run. agy resolved via knownInstallPaths (~/AppData/Local/agy/bin/agy.exe). Hit auth-fail (no OAuth token). NOTE: this row was contaminated 2026-05-21 by copilot sub-agent claiming agy completed the review — corrected here per ground-truth frontmatter in `.hopper/handoffs/T-AUDIT-PH6C-agy-output.md` (adapter_status: auth-fail). | agy |
-| T-AUDIT-PH6C-kimi-v2 | code-review-adversarial | pending | | high | Phase 6c re-run of kimi WITHOUT --model (corrected per user 2026-05-21: kimi has implicit default; -m only needed for explicit non-default alias). Dispatch: --reasoning high (adapter maps to --thinking; default model implicit). | kimi |
+| T-AUDIT-PH6C-kimi-v2 | code-review-adversarial | done | | high | Phase 6c re-run of kimi WITHOUT --model (corrected per user 2026-05-21: kimi has implicit default; -m only needed for explicit non-default alias). Dispatch: --reasoning high (adapter maps to --thinking; default model implicit). | kimi |
 
 ---
 
@@ -84,3 +84,4 @@ Anchor: `.hopper/queue.md::root`
 - Phase 2 wiring: dispatch.js gained `executeDispatch` (preflight + spawn + parseResult chain); cli/src/vendors/index.js registry; bin/hopper-dispatch v0.3.0-phase-2 with --vendors flag + real spawn entry. 107 total tests pass.
 - T-PLUGIN-00b done at 2026-05-20T23:15:00+08:00 — Verdict PASS_WITH_NOTE; 2 of 5 vendors fully smoke-verified (Codex + OpenCode); Kimi auth blocked; Copilot/Gemini not installed; documented for user-action
 - T-PLUGIN-00.5 done at 2026-05-20T23:15:00+08:00 — Verdict PASS; 6 .hopper/tasks/*.md frames written; anti-persona test passes
+- T-AUDIT-PH6C-kimi-v2 done at 2026-05-21T19:00:41+08:00 — Verdict PASS_WITH_CHANGES; 2 P1 + 5 P2 findings; 7 findings total (F1 missing background integration test, F2 mutable REVIEW_TASK_TYPES Set, F3 misleading JSDoc, F4 no runtime path validation, F5 probe/dispatch inconsistency, F6 hint gated on cache metadata, F7 kimi reasoning case-sensitivity); output: .hopper/handoffs/T-AUDIT-PH6C-kimi-v2-output.md

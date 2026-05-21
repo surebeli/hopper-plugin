@@ -47,6 +47,7 @@ function printUsage() {
   console.log('  hopper-dispatch <task-id> --model <name>        Override vendor model (e.g. gpt-5.5, claude-opus-4-7)');
   console.log('  hopper-dispatch <task-id> --reasoning <level>   Override reasoning effort (low|medium|high|xhigh)');
   console.log('  hopper-dispatch --watch <task-id>               Tail-follow a background job until exit');
+  console.log('  hopper-dispatch --result <task-id>              Print completed task result (verdict body + log tail) to stdout');
   console.log('  hopper-dispatch --jobs                          List all in-progress background jobs');
   console.log('  hopper-dispatch --reap                          Re-classify stale (>24h or dead-PID) jobs as orphaned');
   console.log('  hopper-dispatch --resolve <id>                  Resolve dispatch without spawning');
@@ -181,6 +182,16 @@ async function main() {
       process.exit(1);
     }
     await runWatch(hopperDir, taskId);
+    return;
+  }
+  const resultIdx = args.indexOf('--result');
+  if (resultIdx !== -1) {
+    const taskId = args[resultIdx + 1];
+    if (!taskId || taskId.startsWith('-')) {
+      console.error('Error: --result requires a task-id.');
+      process.exit(1);
+    }
+    runResult(hopperDir, taskId);
     return;
   }
 
@@ -563,6 +574,103 @@ function runReap(hopperDir) {
   }
   console.log(`Reaped ${reaped.length} job(s) to status=orphaned:`);
   for (const id of reaped) console.log(`  - ${id}`);
+}
+
+/**
+ * Phase 6c follow-up (user request 2026-05-21): print a completed task's
+ * result in the HOST session. Background dispatch returns immediately, so
+ * results land in `.hopper/handoffs/<task-id>-output.md` + .log — invisible
+ * to the host session without explicit retrieval. This is that retrieval.
+ *
+ * Format optimized for chat-readability:
+ *   1. One-line summary (vendor, status, duration, exit_code)
+ *   2. Output.md body (skips the auto-appended `## Status (background completion)`
+ *      tail so we don't print the same status twice)
+ *   3. Tail of the .log file (vendor's actual stdout — last ~3000 chars by default)
+ *
+ * Exit codes: 0 if status=done, 1 otherwise, 2 if task is still in-progress
+ * (caller should use --watch to tail instead).
+ */
+function runResult(hopperDir, taskId) {
+  try { validateTaskId(taskId); }
+  catch (err) { console.error(`Error: ${err.message}`); process.exit(2); }
+
+  const outputMdPath = join(hopperDir, 'handoffs', `${taskId}-output.md`);
+  if (!existsSync(outputMdPath)) {
+    console.error(`Error: no output file at ${outputMdPath}. Has this task been dispatched?`);
+    process.exit(1);
+  }
+
+  let fm;
+  try { fm = readFrontmatter(outputMdPath); }
+  catch (err) { console.error(`Error reading frontmatter: ${err.message}`); process.exit(1); }
+
+  // In-progress: tell the user explicitly and suggest --watch.
+  if (fm.status === 'in-progress') {
+    console.error(`Task ${taskId} is still in-progress (PID ${fm.pid}, started ${fm.start_time}).`);
+    console.error(`Run \`hopper-dispatch --watch ${taskId}\` to follow until done.`);
+    process.exit(2);
+  }
+
+  // Terminal: print summary + body + log tail.
+  console.log(`=== ${taskId} — ${fm.status.toUpperCase()} ===`);
+  console.log(`Vendor:    ${fm.adapter}`);
+  console.log(`Status:    ${fm.status}${fm.adapter_status ? ' (' + fm.adapter_status + ')' : ''}`);
+  if (fm.duration_ms != null) console.log(`Duration:  ${(fm.duration_ms / 1000).toFixed(1)}s (${fm.duration_ms}ms)`);
+  if (fm.exit_code != null) console.log(`Exit code: ${fm.exit_code}`);
+  if (fm.timed_out) console.log(`Timed out: yes`);
+  console.log('');
+
+  // Output.md body: read the whole file, strip frontmatter + leading auto-text,
+  // and stop at "## Status (background completion)" (runner-appended).
+  const raw = readFileSync(outputMdPath, 'utf-8');
+  let body = raw;
+  // Strip leading frontmatter
+  if (body.startsWith('---\n')) {
+    const closingFm = body.indexOf('\n---\n', 4);
+    if (closingFm !== -1) body = body.slice(closingFm + 5);
+  }
+  // Trim the runner's "Output streaming to ... .log" boilerplate
+  body = body.replace(/^# [^\n]+\n\nOutput streaming to[^\n]+\n+/, '');
+  // Stop at runner-appended status section
+  const statusIdx = body.indexOf('\n## Status (background completion)');
+  if (statusIdx !== -1) body = body.slice(0, statusIdx);
+  body = body.trim();
+
+  if (body.length > 0) {
+    console.log('--- OUTPUT.MD BODY ---');
+    console.log(body);
+    console.log('--- END BODY ---');
+    console.log('');
+  } else {
+    console.log('(output.md body is empty — vendor likely streamed to .log; printing log tail below.)');
+    console.log('');
+  }
+
+  // Log tail: useful for vendors (codex, copilot in some cases) that write
+  // their verdict to stdout rather than the output.md body.
+  const logPath = outputMdPath.replace(/\.md$/, '.log');
+  const LOG_TAIL_BYTES = 4000;
+  if (existsSync(logPath)) {
+    try {
+      const st = statSync(logPath);
+      if (st.size > 0) {
+        const log = readFileSync(logPath, 'utf-8');
+        const tail = log.length > LOG_TAIL_BYTES ? '... [truncated; full log at .log file] ...\n' + log.slice(-LOG_TAIL_BYTES) : log;
+        console.log(`--- LOG TAIL (last ${Math.min(LOG_TAIL_BYTES, st.size)} of ${st.size} bytes) ---`);
+        console.log(tail);
+        console.log('--- END LOG ---');
+      } else {
+        console.log('(log file is empty)');
+      }
+    } catch (err) {
+      console.error(`Could not read log file: ${err.message}`);
+    }
+  } else {
+    console.log('(no log file found)');
+  }
+
+  process.exit(fm.status === 'done' ? 0 : 1);
 }
 
 async function runWatch(hopperDir, taskId) {

@@ -188,6 +188,102 @@ test('P1: kimi args() includes --thinking when opts.reasoning is truthy', async 
 // 6c follow-up — superseded by the more precise 6c-followup tests above which
 // assert --no-thinking emission for explicit-disable and no flags for omitted.)
 
+test('6c-followup --result: hopper-dispatch --result prints frontmatter summary for completed task', async (t) => {
+  // Create a fake completed task output.md + log; verify `--result` prints
+  // the body + log tail with the chat-friendly summary header.
+  const { mkdtempSync, writeFileSync, rmSync, mkdirSync } = await import('node:fs');
+  const { spawnSync } = await import('node:child_process');
+  const { tmpdir } = await import('node:os');
+  const { join: pathJoin } = await import('node:path');
+
+  const tmp = mkdtempSync(pathJoin(tmpdir(), 'hopper-result-'));
+  t.after(() => rmSync(tmp, { recursive: true, force: true }));
+  const handoffs = pathJoin(tmp, 'handoffs');
+  mkdirSync(handoffs);
+
+  const taskId = 'T-RESULT-TEST-1';
+  writeFileSync(pathJoin(handoffs, `${taskId}-output.md`), [
+    '---',
+    `task_id: ${taskId}`,
+    'adapter: fakevendor',
+    'status: done',
+    'pid: 12345',
+    'start_time: "2026-05-21T00:00:00.000Z"',
+    'end_time: "2026-05-21T00:01:30.000Z"',
+    'exit_code: 0',
+    'duration_ms: 90000',
+    'mode: background',
+    'adapter_status: success',
+    '---',
+    '',
+    `# ${taskId} — Adversarial Review`,
+    '',
+    '## Verdict: PASS',
+    '',
+    'No findings worth surfacing.',
+    '',
+    '## Status (background completion)',
+    '- queue_status: done',
+  ].join('\n'));
+  writeFileSync(pathJoin(handoffs, `${taskId}-output.log`), 'vendor stdout line 1\nvendor stdout line 2\n');
+
+  const { fileURLToPath } = await import('node:url');
+  const { dirname, resolve } = await import('node:path');
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const REPO_ROOT = resolve(__dirname, '..', '..');
+  const dispatchBin = pathJoin(REPO_ROOT, 'cli', 'bin', 'hopper-dispatch');
+  const result = spawnSync(process.execPath, [dispatchBin, '--result', taskId], {
+    env: { ...process.env, HOPPER_DIR: tmp },
+    encoding: 'utf-8',
+  });
+  assert.equal(result.status, 0, `--result should exit 0 for status=done; got ${result.status}; stderr: ${result.stderr}`);
+  assert.match(result.stdout, /=== T-RESULT-TEST-1 — DONE ===/, 'must print summary header');
+  assert.match(result.stdout, /Vendor:\s+fakevendor/, 'must print vendor');
+  assert.match(result.stdout, /Duration:\s+90\.0s/, 'must print duration in seconds');
+  assert.match(result.stdout, /## Verdict: PASS/, 'must print output.md body content');
+  assert.ok(!result.stdout.includes('## Status (background completion)'),
+    `must strip runner-appended status section from body; got: ${result.stdout}`);
+  assert.match(result.stdout, /vendor stdout line 1/, 'must print log tail');
+});
+
+test('6c-followup --result: in-progress task exits 2 with watch hint', async (t) => {
+  const { mkdtempSync, writeFileSync, rmSync, mkdirSync } = await import('node:fs');
+  const { spawnSync } = await import('node:child_process');
+  const { tmpdir } = await import('node:os');
+  const { join: pathJoin } = await import('node:path');
+
+  const tmp = mkdtempSync(pathJoin(tmpdir(), 'hopper-result-inprog-'));
+  t.after(() => rmSync(tmp, { recursive: true, force: true }));
+  const handoffs = pathJoin(tmp, 'handoffs');
+  mkdirSync(handoffs);
+
+  const taskId = 'T-RESULT-INPROG';
+  writeFileSync(pathJoin(handoffs, `${taskId}-output.md`), [
+    '---',
+    `task_id: ${taskId}`,
+    'adapter: kimi',
+    'status: in-progress',
+    'pid: 99999',
+    'start_time: "2026-05-21T00:00:00.000Z"',
+    '---',
+    '',
+    '# placeholder',
+  ].join('\n'));
+
+  const { fileURLToPath } = await import('node:url');
+  const { dirname, resolve } = await import('node:path');
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const REPO_ROOT = resolve(__dirname, '..', '..');
+  const dispatchBin = pathJoin(REPO_ROOT, 'cli', 'bin', 'hopper-dispatch');
+  const result = spawnSync(process.execPath, [dispatchBin, '--result', taskId], {
+    env: { ...process.env, HOPPER_DIR: tmp },
+    encoding: 'utf-8',
+  });
+  assert.equal(result.status, 2, `in-progress must exit 2; got ${result.status}`);
+  assert.match(result.stderr, /still in-progress/, 'must say still in-progress');
+  assert.match(result.stderr, /--watch/, 'must suggest --watch');
+});
+
 test('6c-followup P2: copilot args() includes --allow-all-tools and --allow-all-paths', async () => {
   // T-AUDIT-PH6C-copilot dogfood: copilot non-interactive mode blocked every
   // write attempt and escalated to a General-purpose sub-agent that wrote to

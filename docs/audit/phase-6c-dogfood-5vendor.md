@@ -17,12 +17,31 @@ This is the companion to `docs/audit/phase-6b-dogfood-5vendor.md`. Phase 6b's ru
 | codex | gpt-5.5 xhigh | 10:30 | **REWORK** | 4 (2 P1, 2 P2) | log (end-of-message) |
 | opencode | deepseek/deepseek-v4-flash high | 5:23 | **PASS_WITH_CHANGES** | 8 (1 P1, 4 P2, 3 P3) | own output.md (158 lines) |
 | copilot | claude-sonnet-4.6 | 26:46 | **PASS_WITH_CHANGES** | 7 (2 P1, 5 P2) | log (Claude Code permission system blocked .md write — escalated to sub-agent, see below) |
-| kimi | -m kimi-thinking --reasoning high | 0:06 | failed (LLM not set) | — | **DIAGNOSIS REVISED MID-CYCLE**: `-m kimi-thinking` forced kimi to look up that alias in config; the alias isn't defined. But the user demonstrated `kimi --prompt "test" --no-thinking` works WITHOUT `-m` (kimi has an implicit default). So the FIX is to dispatch *without* `--model` — let kimi use its default + `--thinking` flag. The soft-warn was updated this cycle to recommend the "omit --model" path as the primary fix. |
+| kimi (initial) | -m kimi-thinking --reasoning high | 0:06 | failed (LLM not set) | — | `-m kimi-thinking` forced lookup of an undefined alias. Failure validated the original soft-warn. |
+| **kimi (re-dispatch)** `T-AUDIT-PH6C-kimi-v2` | (no --model) --reasoning high | 12:05 | **PASS_WITH_CHANGES** | 7 (2 P1, 5 P2) | Per user mid-cycle insight 2026-05-21: kimi has implicit default; omit `--model`. Re-dispatch with just `--reasoning high` (→ `--thinking` flag against default model) ran to completion and produced a full audit. |
 | agy | (gemini-3.5-flash baked) | 3:11 | failed (auth-fail) | — | agy CLI requires interactive OAuth login first; **knownInstallPaths fix verified working** (probe + dispatch both resolved `agy.exe`) |
 
 Wall-clock: dogfood started 10:13:50, last vendor (copilot) finished 10:40:36 — 26.8 min total for parallel completion.
 
 ---
+
+## Kimi-v2 (the 4th real verdict — 7 findings worth recording)
+
+After the user-confirmed "omit --model" fix landed and `T-AUDIT-PH6C-kimi-v2` re-ran, kimi produced this verdict:
+
+| ID | Severity | Summary | Status |
+|---|---|---|---|
+| kimi F1 | P1 | No integration test for background-mode taskType serialization round-trip | **CONVERGENT** with opencode F5; DEFER to Phase 6d |
+| kimi F2 | P1 | `REVIEW_TASK_TYPES` is a mutable global Set — any importer can `.add()/.delete()` | NEW; not flagged by other vendors; DEFER to Phase 6d (small fix: `Object.freeze`) |
+| kimi F3 | P2 | `applyTaskTypeFloor` JSDoc claims vendors can "extend beyond" the floor but `Math.max` clamps to it | NEW; doc nit; DEFER |
+| kimi F4 | P2 | `resolveCommandWithKnownPaths` silently accepts relative paths + tilde literals | NEW; defensive validation candidate; DEFER |
+| kimi F5 | P2 | Non-agy vendor probes still use `resolveCommandOnPath` (not `WithKnownPaths`) — latent parity hazard if other adapters add `knownInstallPaths` | NEW + sharp; future-proofing candidate; DEFER |
+| kimi F6 | P2 | Documented elsewhere | (excerpt cut for brevity) |
+| kimi F7 | P2 | Documented elsewhere | (excerpt cut for brevity) |
+
+**Kimi's overall verdict: PASS_WITH_CHANGES.** No P0 / security findings; mechanism considered "structurally sound."
+
+The convergent F1 (env-var round-trip test) is now flagged by kimi AND opencode independently — strongest signal in the run.
 
 ## Convergent findings across reviewers (strongest signal)
 
