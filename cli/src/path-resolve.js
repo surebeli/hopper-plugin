@@ -9,7 +9,7 @@
 // Phase 6a discovery-API addition so both code paths share one implementation.
 // Per spec §3 #4: no subprocess in this resolver. statSync only.
 
-import { statSync } from 'node:fs';
+import { statSync, accessSync, constants } from 'node:fs';
 import { join, delimiter } from 'node:path';
 
 /**
@@ -21,7 +21,10 @@ import { join, delimiter } from 'node:path';
  * returns wrapped via cmd.exe `/c` (because CreateProcessW can't execute
  * batch files directly).
  *
- * On POSIX: returns the first executable-by-name match in PATH order.
+ * On POSIX (Linux + macOS): returns the first executable-by-name match in
+ * PATH order. `accessSync(path, X_OK)` is used to verify the file is
+ * actually executable (honoring owner/group/world bits + filesystem ACLs);
+ * a non-executable same-named file is skipped.
  *
  * @param {string} cmd  Unqualified command name (e.g. "codex").
  *                      If already a path or has an extension, returned as-is.
@@ -38,15 +41,24 @@ export function resolveCommandOnPath(cmd) {
   const pathDirs = (process.env.PATH || '').split(delimiter).filter(Boolean);
 
   if (!isWindows) {
-    // POSIX: first executable-by-name match in PATH order
+    // POSIX (Linux + macOS): first executable-by-name match in PATH order.
+    // MUST check exec permission, not just file existence — a non-executable
+    // file with the same name would otherwise be falsely reported "found".
     for (const dir of pathDirs) {
       const candidate = join(dir, cmd);
       try {
-        if (statSync(candidate).isFile()) {
-          return { command: candidate, prependArgs: [], resolvedPath: candidate };
+        const st = statSync(candidate);
+        if (!st.isFile()) continue;
+        // X_OK = execute bit. accessSync throws if not executable for the
+        // current process (owner/group/world + filesystem ACLs all checked).
+        try {
+          accessSync(candidate, constants.X_OK);
+        } catch (_) {
+          continue;
         }
+        return { command: candidate, prependArgs: [], resolvedPath: candidate };
       } catch (_) {
-        // continue
+        // not found / not accessible — continue
       }
     }
     return null;

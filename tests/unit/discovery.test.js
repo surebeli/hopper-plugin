@@ -15,6 +15,9 @@ import {
 } from '../../cli/src/vendors/index.js';
 
 // ─── path-resolve.js ──────────────────────────────────────────────────
+// Cross-platform note: tests run on Windows + macOS + Linux. Mac-specific
+// exec-bit semantics are tested via a POSIX-only `chmod` test below; on
+// Windows that test is auto-skipped because exec bit doesn't apply.
 
 test('resolveCommandOnPath: node is always findable (test self-validates)', () => {
   // process.execPath is guaranteed to exist; spawn it as a basename test.
@@ -46,6 +49,100 @@ test('isCommandAvailable: returns boolean', () => {
   assert.equal(isCommandAvailable('node'), true);
   assert.equal(isCommandAvailable('this-cmd-does-not-exist-zzz'), false);
 });
+
+// ─── POSIX exec-bit check (Mac + Linux) ────────────────────────────────
+// Verifies the resolver does NOT falsely "find" a file without exec permission.
+// Skipped on Windows because Windows exec semantics are extension-based, not
+// permission-based (PATHEXT instead of chmod).
+
+test('POSIX: resolveCommandOnPath skips file without exec bit', { skip: process.platform === 'win32' ? 'Windows uses PATHEXT, not exec bit' : false }, async () => {
+  const { mkdtempSync, writeFileSync, chmodSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-pathres-'));
+  try {
+    // Plant a file named 'fake-vendor-xyz' WITHOUT exec bit
+    const nonExec = join(tmp, 'fake-vendor-xyz');
+    writeFileSync(nonExec, '#!/bin/sh\necho hello\n', 'utf-8');
+    chmodSync(nonExec, 0o644);  // rw-r--r-- — no exec
+
+    // Run resolver with this dir prepended to PATH
+    const oldPath = process.env.PATH;
+    process.env.PATH = tmp + ':' + (oldPath || '');
+    try {
+      const r = resolveCommandOnPath('fake-vendor-xyz');
+      assert.equal(r, null,
+        'POSIX resolver MUST skip non-executable file; found anyway');
+    } finally {
+      process.env.PATH = oldPath;
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('POSIX: resolveCommandOnPath finds file WITH exec bit', { skip: process.platform === 'win32' ? 'Windows uses PATHEXT, not exec bit' : false }, async () => {
+  const { mkdtempSync, writeFileSync, chmodSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-pathres-ok-'));
+  try {
+    const execScript = join(tmp, 'fake-vendor-ok');
+    writeFileSync(execScript, '#!/bin/sh\necho hello\n', 'utf-8');
+    chmodSync(execScript, 0o755);  // rwxr-xr-x — executable
+
+    const oldPath = process.env.PATH;
+    process.env.PATH = tmp + ':' + (oldPath || '');
+    try {
+      const r = resolveCommandOnPath('fake-vendor-ok');
+      assert.ok(r !== null, 'POSIX resolver must find executable file');
+      assert.equal(r.resolvedPath, execScript);
+      assert.deepEqual(r.prependArgs, []);
+    } finally {
+      process.env.PATH = oldPath;
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('POSIX: resolveCommandOnPath walks PATH dirs in order (first match wins)', { skip: process.platform === 'win32' ? 'Windows uses PATHEXT walk' : false }, async () => {
+  const { mkdtempSync, writeFileSync, chmodSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+
+  const tmp1 = mkdtempSync(join(tmpdir(), 'hopper-pathres-dir1-'));
+  const tmp2 = mkdtempSync(join(tmpdir(), 'hopper-pathres-dir2-'));
+  try {
+    // Plant 'fake-vendor-multi' in BOTH dirs
+    const f1 = join(tmp1, 'fake-vendor-multi');
+    const f2 = join(tmp2, 'fake-vendor-multi');
+    writeFileSync(f1, '#!/bin/sh\necho dir1\n', 'utf-8');
+    writeFileSync(f2, '#!/bin/sh\necho dir2\n', 'utf-8');
+    chmodSync(f1, 0o755);
+    chmodSync(f2, 0o755);
+
+    const oldPath = process.env.PATH;
+    process.env.PATH = tmp1 + ':' + tmp2 + ':' + (oldPath || '');
+    try {
+      const r = resolveCommandOnPath('fake-vendor-multi');
+      assert.equal(r.resolvedPath, f1,
+        'first PATH dir must win — got ' + r.resolvedPath);
+    } finally {
+      process.env.PATH = oldPath;
+    }
+  } finally {
+    rmSync(tmp1, { recursive: true, force: true });
+    rmSync(tmp2, { recursive: true, force: true });
+  }
+});
+
+// ─── Windows-specific PATHEXT tests are inherent to running on Windows ──
+// (No way to spoof PATHEXT semantics from POSIX. The Windows-host machine
+// running tests IS the test. Real Windows verification covered by the
+// production smoke runs the user did on this machine.)
 
 // ─── installCheckForAdapter ───────────────────────────────────────────
 

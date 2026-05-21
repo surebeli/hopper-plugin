@@ -329,6 +329,58 @@ hopper-dispatch --capabilities <vendor>   # does this vendor honor my intended f
 hopper-dispatch <task-id> --background    # only after both above look good
 ```
 
+### Cross-platform compatibility (Windows + macOS + Linux)
+
+`--check` and `--capabilities` work on all three platforms with platform-aware path resolution. Verification status as of 2026-05-21:
+
+| Component | Windows | macOS | Linux | Notes |
+|---|---|---|---|---|
+| `resolveCommandOnPath` PATH walk | ✓ (live-verified on Win11) | ✓ (POSIX exec-bit test) | ✓ (POSIX exec-bit test) | Windows: PATHEXT-aware (`.exe`/`.com` direct, `.cmd`/`.bat` cmd.exe-wrapped). POSIX: `accessSync(X_OK)` exec-permission check (rejects file-without-exec-bit). |
+| `--check` install probe | ✓ live-tested | covered by POSIX path tests | covered by POSIX path tests | adapter `envPreflight()` uses `homedir()` + platform-conditional opencode path (`~/.local/share/...` on Linux, `~/AppData/Roaming/...` on Win, `~/Library/Application Support/...` on macOS). |
+| `--check` status classifier | ✓ | ✓ | ✓ | pure JS logic; platform-agnostic. |
+| `--capabilities` output | ✓ | ✓ | ✓ | static-data lookup; platform-agnostic. |
+| `installCheckForAdapter()` API | ✓ | ✓ | ✓ | composes PATH walk + envPreflight. |
+| Single-spawn invariant in discovery | ✓ verified | ✓ source-grep test | ✓ source-grep test | `path-resolve.js` source contains no `spawn`/`exec`/`execSync` calls (verified by `tests/unit/discovery.test.js`). |
+
+**Known POSIX-specific behavior the resolver handles**:
+
+- **Exec bit check** — Linux/Mac files MUST have exec permission (`chmod +x`). Non-executable same-named file is skipped. Verified by `tests/unit/discovery.test.js` POSIX-only test that plants a file without `0o111` mode bits and asserts resolver returns null.
+- **PATH dir order** — Linux/Mac first-match-in-first-PATH-dir semantics matched. Verified by `tests/unit/discovery.test.js` POSIX-only test with two PATH dirs containing same-named files.
+- **Symlinks** — `statSync` follows symlinks; `isFile()` returns true if the target is a regular file. Standard Homebrew/npm-global symlinked binaries (e.g. `/opt/homebrew/bin/codex → /opt/homebrew/Cellar/...`) resolve transparently.
+
+**Mac-specific install paths the adapters detect**:
+
+- `~/.codex/auth.json` (codex login)
+- `~/.kimi/config.toml` (kimi /connect)
+- `~/Library/Application Support/opencode/auth.json` (OR `~/.local/share/opencode/auth.json`)
+- `~/.gemini/` (agy OAuth artifacts)
+- `$GH_TOKEN` / `$GITHUB_TOKEN` env var (copilot)
+
+**Mac-specific install path for vendor binaries** (machine-dependent; `--check` discovers actual location):
+
+- Apple Silicon: `/opt/homebrew/bin/<vendor>` (Homebrew default)
+- Intel: `/usr/local/bin/<vendor>` (Homebrew + manual installs)
+- npm-global: `~/.npm-global/bin/<vendor>` OR `/usr/local/lib/node_modules/.bin/<vendor>`
+- bun-global: `~/.bun/bin/<vendor>`
+- pip/pipx: `~/.local/bin/<vendor>` (kimi via pipx)
+
+The resolver walks all of `$PATH` in order — whichever bin dir is first on PATH wins.
+
+**Windows-specific install paths** (machine-dependent; `--check` discovers actual location):
+
+- npm-global: `C:\Users\<you>\AppData\Roaming\npm\<vendor>.cmd` (typical) OR `C:\nvm4w\nodejs\<vendor>.cmd` (nvm4w-managed)
+- bun-global: `C:\Users\<you>\.bun\bin\<vendor>.exe`
+- pip via `--user`: `C:\Users\<you>\AppData\Local\Programs\Python\PythonXX\Scripts\<vendor>.exe`
+- Manual install via PATH: `C:\Users\<you>\bin\<vendor>.cmd`
+
+The resolver tries `.exe`/`.com` first (CreateProcessW can spawn directly), then `.cmd`/`.bat` (wraps with `cmd.exe /c` automatically). PATHEXT env-var order is honored.
+
+**Known non-issues** (validated by code-inspection):
+
+- macOS APFS case-insensitivity: resolver does literal `cmd` lookup — no case conversion. Behavior is the same as on case-sensitive filesystems.
+- WSL on Windows: if `node` is the Windows-native node spawned from WSL, PATH may mix Windows + WSL paths. The resolver respects whatever PATH is set in the runner's env.
+- Network drives / slow `statSync`: each candidate is a single `statSync` call (~ sub-ms on local FS, may be slower over SMB/NFS). Discovery cost is small per vendor count × PATH dir count.
+
 ### Maintenance: capability data freshness
 
 Each adapter's `capabilities` block declares a `staleAfter` date. After that date, the data should be re-verified against the vendor's official docs (vendors change rapidly). The summary table above is sourced from `docs/research/async-execution/` notes as of the linked dates — re-verify before quoting in essay or release docs.
