@@ -4,6 +4,9 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import actionsRouter from './routes/actions.js';
 import costRouter from './routes/cost.js';
+import { createSseHub, createSseRouter } from './events/sse.js';
+import { createWatcher } from './events/watcher.js';
+import { findHopperDir } from './lib/hopper-dir.js';
 import { createQueueRouter } from './routes/queue.js';
 import taskRouter from './routes/task.js';
 import vendorsRouter from './routes/vendors.js';
@@ -41,8 +44,9 @@ export function parseServerArgs(argv = process.argv.slice(2)) {
   return opts;
 }
 
-export function createApp({ dev = false, distDir = DEFAULT_DIST, hopperDir = null } = {}) {
+export function createApp({ dev = false, distDir = DEFAULT_DIST, hopperDir = null, sseHub = createSseHub() } = {}) {
   const app = express();
+  app.locals.sseHub = sseHub;
   app.disable('x-powered-by');
   app.use(express.json());
 
@@ -54,6 +58,7 @@ export function createApp({ dev = false, distDir = DEFAULT_DIST, hopperDir = nul
   app.use('/api/vendors', vendorsRouter);
   app.use('/api/cost', costRouter);
   app.use('/api/action', actionsRouter);
+  app.use('/events', createSseRouter(sseHub));
 
   if (dev) {
     app.get('/', (_req, res) => res.type('text').send('hopper dashboard api online'));
@@ -75,6 +80,8 @@ export function startServer({
   host = '127.0.0.1',
   port = 7777,
   requireDist = !dev,
+  watchEvents = true,
+  watcherFactory = createWatcher,
 } = {}) {
   if (host !== '127.0.0.1') throw new Error('hopper-dashboard only binds 127.0.0.1');
   if (requireDist && !existsSync(join(distDir, 'index.html'))) {
@@ -83,11 +90,29 @@ export function startServer({
 
   const app = createApp({ dev, distDir, hopperDir });
   return new Promise((resolveStart, rejectStart) => {
+    let watcher = null;
+    let closed = false;
     const server = app.listen(port, host, () => {
       const address = server.address();
       const actualPort = typeof address === 'object' && address ? address.port : port;
+      const root = hopperDir || findHopperDir();
+      if (watchEvents && root) watcher = watcherFactory({ hopperDir: root, hub: app.locals.sseHub });
+      const close = async () => {
+        if (closed) return;
+        closed = true;
+        await new Promise((resolveClose) => server.close(resolveClose));
+        await watcher?.close();
+        app.locals.sseHub.close();
+      };
+      server.once('close', () => {
+        if (!closed) {
+          closed = true;
+          void watcher?.close();
+          app.locals.sseHub.close();
+        }
+      });
       console.log(`hopper-dashboard listening on http://${host}:${actualPort}`);
-      resolveStart({ app, server, host, port: actualPort });
+      resolveStart({ app, close, server, watcher, host, port: actualPort });
     });
     server.once('error', rejectStart);
   });

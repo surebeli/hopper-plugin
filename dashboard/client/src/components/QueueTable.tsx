@@ -13,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { fetchQueue, queryKeys } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { priorityOrder, statusOrder } from '@/lib/status';
+import { priorityRank, statusOrder, statusRank } from '@/lib/status';
 import type { Task, TaskStatus } from '@/lib/types';
 import { StatusPill } from './StatusPill';
 
@@ -33,15 +33,14 @@ export function QueueTable({ rows: providedRows }: { rows?: Task[] }) {
     queryKey: queryKeys.queue,
     queryFn: fetchQueue,
     enabled: !providedRows,
-    refetchInterval: 5000,
   });
 
   const sortedRows = useMemo(() => {
     const rows = [...(providedRows || data)];
     return rows.sort((a, b) => {
-      const statusDelta = statusOrder.indexOf(a.status) - statusOrder.indexOf(b.status);
+      const statusDelta = statusRank(a.status) - statusRank(b.status);
       if (statusDelta !== 0) return statusDelta;
-      const priorityDelta = priorityOrder[a.priority] - priorityOrder[b.priority];
+      const priorityDelta = priorityRank(a.priority) - priorityRank(b.priority);
       if (priorityDelta !== 0) return priorityDelta;
       return a.id.localeCompare(b.id);
     });

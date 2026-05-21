@@ -127,6 +127,7 @@ test('StatusPill maps five statuses to glyph and color classes', async () => {
   );
 
   assert.match(html, /data-status="pending"/);
+  assert.match(html, /queued; vendor not yet started/);
   assert.match(html, /data-status="in-progress"/);
   assert.match(html, /fill-primary/);
   assert.match(html, /data-status="done"/);
