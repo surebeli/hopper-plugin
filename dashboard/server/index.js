@@ -8,7 +8,7 @@ import { createSseHub, createSseRouter } from './events/sse.js';
 import { createWatcher } from './events/watcher.js';
 import { findHopperDir } from './lib/hopper-dir.js';
 import { createQueueRouter } from './routes/queue.js';
-import taskRouter from './routes/task.js';
+import { createTaskRouter } from './routes/task.js';
 import vendorsRouter from './routes/vendors.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -54,7 +54,7 @@ export function createApp({ dev = false, distDir = DEFAULT_DIST, hopperDir = nul
     res.json({ ok: true, mode: dev ? 'dev' : 'prod' });
   });
   app.use('/api', createQueueRouter({ hopperDir }));
-  app.use('/api/task', taskRouter);
+  app.use('/api/task', createTaskRouter({ hopperDir }));
   app.use('/api/vendors', vendorsRouter);
   app.use('/api/cost', costRouter);
   app.use('/api/action', actionsRouter);

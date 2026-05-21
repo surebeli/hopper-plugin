@@ -19,6 +19,7 @@
     "dashboard:start": "node cli/bin/hopper-dashboard"
   },
   "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.0",
     "@radix-ui/react-tooltip": "^1.1.0",
     "@tanstack/react-query": "^5.51.0",
     "@tanstack/react-table": "^8.20.0",

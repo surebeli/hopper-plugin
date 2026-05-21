@@ -69,7 +69,10 @@ function publishLiveness(hub) {
 
 function taskIdFromHandoff(filePath) {
   const name = basename(filePath, '.md');
-  return name.replace(/-REVIEW-.+$/, '').replace(/-output$/, '');
+  return name
+    .replace(/-REVIEW-.+$/, '')
+    .replace(/-leader-feedback$/, '')
+    .replace(/-output$/, '');
 }
 
 function taskIdFromLog(filePath) {

@@ -23,7 +23,11 @@ export function useSSE<T>(
     const source = new EventSource(channel);
     const eventName = eventNameForChannel(channel);
     const handleMessage = (event: MessageEvent) => {
-      callbackRef.current(JSON.parse(event.data) as T);
+      try {
+        callbackRef.current(JSON.parse(event.data) as T);
+      } catch (err) {
+        console.warn(`[useSSE] parse error on ${channel}:`, err);
+      }
     };
 
     source.onopen = () => setState('open');

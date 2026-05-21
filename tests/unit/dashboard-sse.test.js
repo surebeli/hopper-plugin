@@ -94,10 +94,22 @@ test('watcher maps chokidar events to SSE channels', async () => {
   mock.watcher.emit('all', 'change', join(hopperDir, 'queue.md'));
   mock.watcher.emit('all', 'change', join(hopperDir, 'handoffs', 'T-WEB-03-output.md'));
   mock.watcher.emit('all', 'change', join(hopperDir, 'handoffs', 'T-WEB-03-output.log'));
+  mock.watcher.emit('all', 'change', join(hopperDir, 'handoffs', 'T-WEB-04-output.md'));
+  mock.watcher.emit('all', 'change', join(hopperDir, 'handoffs', 'T-WEB-04-REVIEW-claude-output.md'));
+  mock.watcher.emit('all', 'change', join(hopperDir, 'handoffs', 'T-WEB-04-leader-feedback.md'));
   mock.watcher.emit('all', 'change', join(hopperDir, 'COST-LOG.md'));
   mock.watcher.emit('all', 'change', join(hopperDir, 'AGENTS.md'));
 
-  assert.deepEqual(events.map((item) => item.channel), ['queue', 'task/T-WEB-03', 'log/T-WEB-03', 'cost', 'agents']);
+  assert.deepEqual(events.map((item) => item.channel), [
+    'queue',
+    'task/T-WEB-03',
+    'log/T-WEB-03',
+    'task/T-WEB-04',
+    'task/T-WEB-04',
+    'task/T-WEB-04',
+    'cost',
+    'agents',
+  ]);
   assert.equal(events[0].event, 'queue');
   assert.equal(events[1].payload.path, 'handoffs/T-WEB-03-output.md');
   assert.equal(mock.watcher.options.ignoreInitial, true);

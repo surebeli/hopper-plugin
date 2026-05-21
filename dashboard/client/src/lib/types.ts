@@ -10,6 +10,14 @@ export interface Task {
   vendor: string | null;
 }
 
+export type FrontmatterValue = string | number | boolean | null;
+
+export interface TaskDetail {
+  id: string;
+  frontmatter: Record<string, FrontmatterValue>;
+  body: string;
+}
+
 export interface Vendor {
   name: string;
   installed: boolean;
