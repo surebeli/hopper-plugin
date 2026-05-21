@@ -8,11 +8,12 @@ role: sidequest-executor
 status: done
 start_time: "2026-05-22T00:00:00+08:00"
 end_time: "2026-05-22T00:20:00+08:00"
-commit_sha: null
+commit_sha: "e5b535f"
 log: ./T-WEB-01-output.log
 review_required: true
-review_status: pending
-review_files: []
+review_status: accept-with-note
+review_files:
+  - ./T-WEB-01-REVIEW-claude-output.md
 hard_constraint_violations: 0
 bundle_size_gzipped_kb: 74.03
 ---
@@ -128,7 +129,7 @@ Scaffolded the dashboard as a React 18 + Vite + TypeScript client with Tailwind/
 
 | 约束 | 检查命令 | 结果 |
 |---|---|---|
-| 不写 `.hopper/` | commit stage excludes `.hopper/`; final commit diff checked post-commit | pending post-commit |
+| 不写 `.hopper/` | `git diff-tree --no-commit-id --name-only -r e5b535f \| Select-String "^\.hopper/"` | `<empty>` |
 | 不 import `executeDispatch` | `rg -n "executeDispatch" dashboard` | `<empty>` |
 | 仅 bind loopback | `rg -n "0\.0\.0\.0\|listen\(.*'::'\)\|'\*'" dashboard/server` | `<empty>` |
 | 协议红线：不动 cli/ hosts/ commands/ 已有文件 | Only new `cli/bin/hopper-dashboard{,.cmd}`; no hosts/commands edits | pass |
@@ -139,8 +140,8 @@ Scaffolded the dashboard as a React 18 + Vite + TypeScript client with Tailwind/
 | Design token byte-match | PowerShell extracted SPEC §4.2.1/§4.2.2 and compared files | `globals.css=True`; `tailwind.config.ts=True` |
 | 不 push | no push performed | pass |
 | 不 amend / 不 `--no-verify` | no amend; regular `git commit` planned | pass |
-| Commit prefix `[T-WEB-01]` | `git log -1 --format=%s HEAD` after commit | pending post-commit |
-| 单 commit | expected 1 local commit for T-WEB-01 | pending post-commit |
+| Commit prefix `[T-WEB-01]` | `git log -1 --format=%s e5b535f` | `[T-WEB-01] scaffold web dashboard` |
+| 单 commit | `git rev-list e5b535f --not "e5b535f^" --count` | `1` |
 | 文件改动 ≤ 200 行/文件 | max touched source file: `dashboard/server/index.js` 94 lines | pass |
 | README ≤ 80 行 | `dashboard/README.md` 25 lines | pass |
 | 不写 CHANGELOG/ROADMAP/CONTRIBUTING | no such files touched | pass |
@@ -197,3 +198,28 @@ After ≥1 of 2 returns `accept` / `accept-with-note`, proceed to T-WEB-02.
 ---
 
 ## Reviews
+
+### Review 1 — `claude` (`claude-opus-4-7`)
+
+- Verdict:           **accept-with-note**
+- Date:              2026-05-22T00:55:00+08:00
+- Output artifact:   `./T-WEB-01-REVIEW-claude-output.md`
+- Hard-constraint violations found: 0
+- Findings count:    P0=0 P1=0 P2=1 P3=3
+- Summary:
+  - Design tokens byte-match §4.2.1 + §4.2.2 (HSL values, radius=2px, fontSize=13px confirmed)
+  - All 7 acceptance bullets verified independently; `npm test` (332/0/15) and `npm run dashboard:build` (74.03 KB gzipped) reproduced by reviewer
+  - 0 hard-constraint violations across §3.2 协议/栈/风格 三类红线
+  - Single P2: `package-lock.json` deliberately omitted citing §3.3 200-line rule — weakens §8 multi-reviewer reproducibility
+- Follow-up actions:
+  1. **F1 (hard)** — commit `package-lock.json` before T-WEB-02; spec §3.3 patched 2026-05-22 to exempt lockfiles
+  2. F2 (soft) — update frontmatter `commit_sha` post-commit (already patched by reviewer to `e5b535f`)
+  3. F3 (soft) — refresh 3 `pending post-commit` rows in §3.2 self-check table
+  4. F4 (soft) — acknowledge route pre-staging in T-WEB-02 brief header
+
+### Verdict aggregation
+
+- Combined verdict: **accept-with-note** (1/1 reviewer; user opted for single host-session review per §8.4 minimum)
+- Hard-constraint violations total: **0**
+- Status transition: review_status `pending` → **`accept-with-note`**
+- Next: executor applies F1 fix (lockfile commit), then proceeds to T-WEB-02
