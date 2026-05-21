@@ -35,8 +35,12 @@ export const MODEL_PATTERN = /^[A-Za-z][A-Za-z0-9._/:-]{0,99}$/;
  * Reasoning effort whitelist. Matches codex CLI's vocabulary; kimi/opencode/
  * copilot adapters may or may not honor this opt — they ignore unrecognized
  * opts harmlessly. agy currently ignores it.
+ *
+ * Per Phase 6b vendor-introspection research 2026-05-21: codex actually
+ * supports 5 levels (`minimal | low | medium | high | xhigh`), not 4.
+ * Our prior whitelist missed `minimal`. Source: official codex config-reference.
  */
-export const ALLOWED_REASONING = Object.freeze(['low', 'medium', 'high', 'xhigh']);
+export const ALLOWED_REASONING = Object.freeze(['minimal', 'low', 'medium', 'high', 'xhigh']);
 
 /**
  * Legal queue status values per .hopper/queue.md schema convention.

@@ -247,10 +247,12 @@ test('capabilitiesForAdapter returns capability hint for every registered vendor
   }
 });
 
-test('capabilities: codex specifically declares reasoning enumerated low/medium/high/xhigh', () => {
+test('capabilities: codex declares reasoning enumerated with all 5 levels (Phase 6b: + minimal)', () => {
   const caps = capabilitiesForAdapter('codex');
   assert.equal(caps.reasoningArg.accepted, 'enumerated');
-  assert.deepEqual(caps.reasoningArg.knownGood, ['low', 'medium', 'high', 'xhigh']);
+  // Phase 6b vendor-introspection 2026-05-21: codex has 5 levels per
+  // official cli config-reference, not 4. `minimal` is lowest tier.
+  assert.deepEqual(caps.reasoningArg.knownGood, ['minimal', 'low', 'medium', 'high', 'xhigh']);
   assert.equal(caps.modelArg.accepted, 'ignored',
     'codex adapter uses reasoning not model — accurate per code (args() uses opts.reasoning only)');
 });

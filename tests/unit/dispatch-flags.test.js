@@ -64,8 +64,10 @@ test('validateModelName throws on bad input', () => {
   assert.throws(() => validateModelName('a'.repeat(200)));
 });
 
-test('ALLOWED_REASONING is the codex-vocabulary list', () => {
-  assert.deepEqual([...ALLOWED_REASONING], ['low', 'medium', 'high', 'xhigh']);
+test('ALLOWED_REASONING is the codex-vocabulary list (5 levels per Phase 6b research)', () => {
+  // Phase 6b: codex has 5 reasoning levels per official config-reference.
+  // `minimal` is lowest tier (cheap routing/extraction), added 2026-05-21.
+  assert.deepEqual([...ALLOWED_REASONING], ['minimal', 'low', 'medium', 'high', 'xhigh']);
 });
 
 test('validateReasoning accepts only the 4 canonical levels', () => {

@@ -25,12 +25,15 @@ export const codexAdapter = {
       // Our adapter currently uses `model_reasoning_effort` config flag only,
       // NOT --model. Mark as adapter-ignored. Available models also depend
       // on user's ChatGPT login + entitlements — not hardcoded here either.
-      sourceNote: 'codex CLI supports `-m <MODEL>` (verified 2026-05-21). Our adapter uses opts.reasoning via config flag only — does NOT forward opts.model. Adapter-ignored, not CLI-unsupported. If wired in Phase 6b, available models will depend on YOUR ChatGPT subscription tier.',
+      sourceNote: 'codex CLI supports `-m <MODEL>` (verified 2026-05-21). Our adapter uses opts.reasoning via config flag only — does NOT forward opts.model. Adapter-ignored, not CLI-unsupported. Machine-readable model catalog available via `codex debug models --bundled` (JSON) per official cli reference; user can run it to see what their ChatGPT login can access.',
     },
     reasoningArg: {
       accepted: 'enumerated',
-      knownGood: ['low', 'medium', 'high', 'xhigh'],
-      sourceNote: 'docs/research/async-execution/01-openai-hosts.md',
+      // Phase 6b vendor-introspection research 2026-05-21: codex supports 5
+      // reasoning levels per official config-reference, not 4. `minimal` is
+      // the lowest tier (cheap routing/extraction use cases).
+      knownGood: ['minimal', 'low', 'medium', 'high', 'xhigh'],
+      sourceNote: 'docs/research/async-execution/01-openai-hosts.md + docs/research/vendor-introspection/01-codex-opencode.md (live: 5 levels, including `minimal` previously missed).',
     },
     features: {
       sessionResume: { supported: true, mechanism: '`codex exec resume <SESSION_ID>` — hopper does not currently auto-capture session_id' },

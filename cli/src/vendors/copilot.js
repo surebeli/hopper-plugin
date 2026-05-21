@@ -21,13 +21,14 @@ export const copilotAdapter = {
     reasoningArg: {
       accepted: 'ignored',
       knownGood: [],
-      // Phase 6a dogfood 2026-05-21: Copilot CLI ACTUALLY supports --effort
-      // {none|low|medium|high|xhigh|max} per live `copilot --help`. Our
-      // adapter currently does NOT forward opts.reasoning to --effort.
-      // Listed as 'ignored' here to reflect adapter behavior, not CLI
-      // capability. Phase 6b candidate: wire opts.reasoning → --effort
-      // (note: copilot has 6 levels including 'max' beyond codex's 4).
-      sourceNote: 'Copilot CLI supports --effort {none|low|medium|high|xhigh|max} (verified 2026-05-21). Our adapter currently does NOT forward opts.reasoning to --effort. Mark as adapter-ignored, not CLI-unsupported.',
+      // Phase 6b research 2026-05-21: Copilot's --effort enum is GROWING
+      // rapidly. Official changelog confirms {none|low|medium|high|xhigh}
+      // (5 levels); empirical dev-machine help shows `max` too (6 levels)
+      // — `max` is UNCONFIRMED in docs as of research date, possibly a
+      // post-1.0.48 addition or per-model alias. Enum has expanded twice
+      // in two months. DO NOT enumerate client-side; let copilot validate.
+      // Our adapter does NOT forward opts.reasoning to --effort regardless.
+      sourceNote: 'Copilot CLI supports --effort (5 doc-confirmed levels: none|low|medium|high|xhigh; `max` empirically present but UNCONFIRMED in docs — enum growing). Our adapter does NOT forward opts.reasoning to --effort. Adapter-ignored, not CLI-unsupported.',
     },
     features: {
       sessionResume: { supported: true, mechanism: '`copilot --resume` (picker; UNCONFIRMED whether takes ID arg) / `--continue`. Sessions at ~/.copilot/session-state/ + SQLite.' },

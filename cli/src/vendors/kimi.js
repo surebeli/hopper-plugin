@@ -22,7 +22,7 @@ export const kimiAdapter = {
       // Phase 6a-corrected 2026-05-21: kimi help confirms `--model, -m <TEXT>`,
       // default from `~/.kimi/config.{toml,json}`. Models depend on user
       // account + config, not on this adapter. Don't hardcode.
-      sourceNote: 'kimi -m <name>. Default model from your ~/.kimi/config. Available identifiers depend on YOUR Moonshot account + config — there is no `kimi models` introspection command. Best practice: omit -m and let config decide. Empirical: `-m kimi-thinking` fails with "LLM not set" — invalid identifier (per T-AUDIT-PH5).',
+      sourceNote: 'kimi -m <alias>. CRITICAL: `-m` takes the ALIAS KEY from your `~/.kimi/config.toml` `[models.NAME]` blocks, NOT the upstream Moonshot model ID. That is why `-m kimi-thinking` previously failed with "LLM not set" — kimi-thinking is the upstream ID, not user-aliased. The `[models]` block keys define what `-m` accepts. Authoritative model identifiers per Moonshot docs: kimi-k2.6, kimi-k2.5, kimi-k2-thinking, kimi-k2-thinking-turbo, kimi-k2-0905-preview, etc. — but you call them by your chosen alias. No `kimi models` introspection command exists.',
     },
     reasoningArg: {
       accepted: 'ignored',
@@ -31,7 +31,7 @@ export const kimiAdapter = {
       // binary toggle (NOT enumerated level like codex). Our adapter does
       // not forward opts.reasoning. Phase 6b candidate: wire opts.reasoning
       // truthy → --thinking.
-      sourceNote: 'kimi has `--thinking / --no-thinking` binary toggle (verified 2026-05-21). Our adapter does NOT forward opts.reasoning. Adapter-ignored, not CLI-unsupported.',
+      sourceNote: 'kimi has `--thinking / --no-thinking` binary toggle (verified 2026-05-21 via research). STRICTLY BINARY — no hidden levels, no thinking_budget / max_thinking_tokens keys. Reasoning granularity is selected via MODEL identifier (e.g. kimi-k2-thinking vs kimi-k2-thinking-turbo), not via flag level. Per-model capability flags: `"thinking"` (toggleable) vs `"always_thinking"` (locked on). Our adapter does NOT forward opts.reasoning. Adapter-ignored, not CLI-unsupported.',
     },
     features: {
       sessionResume: { supported: true, mechanism: '`kimi --session <id>` / `--resume <id>` / `-C` (continue most recent in cwd)' },
