@@ -291,3 +291,42 @@ Vendor lens: copilot --model claude-sonnet-4.6. Audit per the audit pack above. 
 
 Vendor lens: agy (Antigravity), gemini-3.5-flash baked in; no model/reasoning flags. Audit per the audit pack above. If silent-auth-fail, adapter reports auth-fail rather than empty output.
 
+## T-AUDIT-PH6C-kimi-v2 (kimi re-dispatch without --model)
+
+Vendor lens: kimi default model + `--thinking` flag (Phase 6c maps `--reasoning high` → `--thinking`). Per user-confirmed finding 2026-05-21: kimi accepts `--prompt "X" --no-thinking` without `-m`; the implicit default model is used. The original T-AUDIT-PH6C-kimi failed because we forced `-m kimi-thinking` (alias not defined). This re-run omits `--model` entirely. Audit per the T-AUDIT-PH6C audit pack above.
+
+---
+
+## T-AUDIT-PH6C audit pack (re-run after Phase 6c fixes)
+
+**Background:** the first 5-vendor dogfood (T-AUDIT-PH6B-*) saw 5/5 timeouts and produced no verdicts; the dispatch system's adapter timeouts were mis-sized for review tasks. Phase 6c (commit `fe9a79f`) fixed:
+- F1: review task-types floor at 30min (was 120s-900s)
+- F2: agy resolvable via `knownInstallPaths` (no longer requires PATH update)
+- P1: kimi `--thinking` wired
+- P2: kimi soft-warn prints config TOML snippet
+
+**Audit scope (this re-run):** Phase 6b implementation as the PRIMARY target (commit `ed16903`); Phase 6c (commit `fe9a79f`) as SECONDARY target (verifies the timeout + path-resolve changes didn't introduce regressions).
+
+Same audit pack as T-AUDIT-PH6B (see above for the 8 audit angles + hard rules + output shape). Just longer budget per vendor (30min floor) and agy can actually spawn now.
+
+## T-AUDIT-PH6C-codex (Phase 6c re-run by codex gpt-5.5 xhigh)
+
+Per audit pack above. Codex completed deep work in the 6b run (read most of repo, ran test suite to test 313 of 341) but the 15min timeout killed it. With 30min floor it should have time to write a verdict.
+
+## T-AUDIT-PH6C-kimi (Phase 6c re-run by kimi thinking)
+
+Per audit pack above. Phase 6c wires `--thinking` flag. WARNING: still requires `[models.kimi-thinking]` in `~/.kimi/config.toml`. If absent, soft-warn now prints the exact TOML block to add — dispatch still proceeds and will fail with `LLM not set` until the user updates their config.
+
+## T-AUDIT-PH6C-opencode (Phase 6c re-run by opencode deepseek-v4-flash high)
+
+Per audit pack above. 30min floor applies. Read-most-of-repo-then-write-findings now feasible.
+
+## T-AUDIT-PH6C-copilot (Phase 6c re-run by copilot Sonnet 4.6)
+
+Per audit pack above. 30min floor (was 120s — the most aggressively misaligned vendor in 6b run).
+
+## T-AUDIT-PH6C-agy (Phase 6c re-run by agy gemini-3.5-flash)
+
+Per audit pack above. Phase 6c adds `knownInstallPaths` so agy resolves to `~/AppData/Local/agy/bin/agy.exe` even when PATH doesn't include that dir. WARNING: if user hasn't OAuth-authed agy interactively, will hit silent-auth-fail (empty stdout, exit 0; adapter detects via log inspection).
+
+

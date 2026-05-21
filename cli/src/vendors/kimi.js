@@ -23,16 +23,15 @@ export const kimiAdapter = {
       // Phase 6a-corrected 2026-05-21: kimi help confirms `--model, -m <TEXT>`,
       // default from `~/.kimi/config.{toml,json}`. Models depend on user
       // account + config, not on this adapter. Don't hardcode.
-      sourceNote: 'kimi -m <alias>. CRITICAL: `-m` takes the ALIAS KEY from your `~/.kimi/config.toml` `[models.NAME]` blocks, NOT the upstream Moonshot model ID. That is why `-m kimi-thinking` previously failed with "LLM not set" — kimi-thinking is the upstream ID, not user-aliased. The `[models]` block keys define what `-m` accepts. Authoritative model identifiers per Moonshot docs: kimi-k2.6, kimi-k2.5, kimi-k2-thinking, kimi-k2-thinking-turbo, kimi-k2-0905-preview, etc. — but you call them by your chosen alias. No `kimi models` introspection command exists.',
+      sourceNote: 'kimi works WITHOUT -m (uses default model from ~/.kimi/config.toml or kimi-cli built-in default — verified 2026-05-21 dogfood: `kimi --prompt "test" --no-thinking` succeeds with no -m). Pass -m ONLY when explicitly selecting a non-default alias from your config. CRITICAL: `-m` takes the ALIAS KEY from your `[models.NAME]` blocks, NOT the upstream Moonshot model ID — that is why `-m kimi-thinking` fails with "LLM not set" when kimi-thinking is not a defined alias. Authoritative upstream IDs per Moonshot docs: kimi-k2.6, kimi-k2.5, kimi-k2-thinking, kimi-k2-thinking-turbo, kimi-k2-0905-preview — but you call them by your chosen alias in -m. No `kimi models` introspection command exists.',
     },
     reasoningArg: {
-      accepted: 'ignored',
-      knownGood: [],
-      // Phase 6a dogfood 2026-05-21: kimi has `--thinking / --no-thinking`
-      // binary toggle (NOT enumerated level like codex). Our adapter does
-      // not forward opts.reasoning. Phase 6b candidate: wire opts.reasoning
-      // truthy → --thinking.
-      sourceNote: 'kimi has `--thinking / --no-thinking` binary toggle (verified 2026-05-21 via research). STRICTLY BINARY — no hidden levels, no thinking_budget / max_thinking_tokens keys. Reasoning granularity is selected via MODEL identifier (e.g. kimi-k2-thinking vs kimi-k2-thinking-turbo), not via flag level. Per-model capability flags: `"thinking"` (toggleable) vs `"always_thinking"` (locked on). Our adapter does NOT forward opts.reasoning. Adapter-ignored, not CLI-unsupported.',
+      accepted: 'binary',
+      knownGood: ['low', 'medium', 'high', 'xhigh', 'none'],
+      // Phase 6c wired the adapter (was Phase 6b candidate); Phase 6c follow-up
+      // added explicit --no-thinking emission for opts.reasoning === 'none'
+      // per kimi session-stickiness research.
+      sourceNote: 'kimi has `--thinking / --no-thinking` binary toggle (verified 2026-05-21 via research). STRICTLY BINARY — no hidden levels, no thinking_budget / max_thinking_tokens keys. Reasoning granularity is selected via MODEL identifier (e.g. kimi-k2-thinking vs kimi-k2-thinking-turbo), not via flag level. Per-model capability flags: `"thinking"` (toggleable) vs `"always_thinking"` (locked on). Phase 6c adapter mapping: truthy reasoning → --thinking; reasoning=none → --no-thinking (explicit, overrides kimi session stickiness); omitted → no flag (leaves kimi default / sticky).',
     },
     features: {
       sessionResume: { supported: true, mechanism: '`kimi --session <id>` / `--resume <id>` / `-C` (continue most recent in cwd)' },
@@ -43,14 +42,17 @@ export const kimiAdapter = {
   },
 
   args(input, opts) {
-    // Phase 6c: forward opts.reasoning truthy → --thinking flag. Per the
-    // sourceNote above, kimi's reasoning control is a binary --thinking /
-    // --no-thinking toggle, not an enumerated level. Any truthy reasoning
-    // value (low/medium/high/xhigh/true) maps to --thinking. To explicitly
-    // disable, pass --reasoning=none or omit the flag.
-    const thinkingFlag = opts.reasoning && opts.reasoning !== 'none'
-      ? ['--thinking']
-      : [];
+    // Phase 6c: forward opts.reasoning to kimi's --thinking / --no-thinking
+    // binary toggle. Per Phase 6c follow-up (codex + copilot dogfood):
+    // kimi reuses the last session's thinking setting when neither flag is
+    // present, so omitting both leaves the toggle "sticky" — passing
+    // --reasoning=none then doesn't actually force it off. Be explicit:
+    //   truthy (low/medium/high/xhigh) → --thinking
+    //   'none' (explicit disable)       → --no-thinking
+    //   omitted                          → no flag (leave sticky / kimi default)
+    let thinkingFlag = [];
+    if (opts.reasoning === 'none') thinkingFlag = ['--no-thinking'];
+    else if (opts.reasoning) thinkingFlag = ['--thinking'];
     return [
       '-p', input,
       '--print',

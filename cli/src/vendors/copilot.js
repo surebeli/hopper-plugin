@@ -30,7 +30,7 @@ export const copilotAdapter = {
       // post-1.0.48 addition or per-model alias. Enum has expanded twice
       // in two months. DO NOT enumerate client-side; let copilot validate.
       // Our adapter does NOT forward opts.reasoning to --effort regardless.
-      sourceNote: 'Copilot CLI supports --effort (5 doc-confirmed levels: none|low|medium|high|xhigh; `max` empirically present but UNCONFIRMED in docs — enum growing). Our adapter does NOT forward opts.reasoning to --effort. Adapter-ignored, not CLI-unsupported.',
+      sourceNote: 'Copilot CLI supports --effort (5 doc-confirmed levels: none|low|medium|high|xhigh; `max` empirically present but UNCONFIRMED in docs — enum growing). Our adapter does NOT forward opts.reasoning to --effort. Adapter-ignored, not CLI-unsupported. NOTE Phase 6c follow-up: copilot non-interactive mode requires --allow-all-tools / --allow-all-paths or it silently blocks ALL writes (including to its own output.md) and may escalate to General-purpose sub-agents that write to wrong files. Our args() now passes these explicitly.',
     },
     features: {
       sessionResume: { supported: true, mechanism: '`copilot --resume` (picker; UNCONFIRMED whether takes ID arg) / `--continue`. Sessions at ~/.copilot/session-state/ + SQLite.' },
@@ -43,6 +43,19 @@ export const copilotAdapter = {
   args(input, opts) {
     return [
       '-p', input,
+      // Phase 6c follow-up (T-AUDIT-PH6C-copilot sub-agent escape investigation):
+      // Without --allow-all-tools, copilot CLI's non-interactive permission
+      // model blocks ALL write attempts (file edits, shell, Python, Node — every
+      // exec path probed) AND blocks `copilot` from writing its own dispatched
+      // output.md. Copilot then escalates to a General-purpose sub-agent which
+      // runs in a DIFFERENT permission scope and writes content to a DIFFERENT
+      // file (T-AUDIT-PH6C-agy-output.md got contaminated in the dogfood run).
+      // --allow-all-tools makes the permission model match what hopper expects:
+      // copilot can use shell/file-edit tools needed to write its own output.
+      // Background dispatches are non-interactive; this is the explicit grant.
+      // Per --help: equivalent of COPILOT_ALLOW_ALL=true env-var.
+      '--allow-all-tools',
+      '--allow-all-paths',
       // Optional --model when explicitly chosen
       ...(opts.model ? ['--model', opts.model] : []),
     ];

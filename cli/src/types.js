@@ -41,10 +41,13 @@
  * Adapter invocation options.
  * @typedef {object} AdapterOpts
  * @property {string} [sandbox]       Vendor-specific sandbox flag (e.g. 'read-only' for codex)
- * @property {string} [reasoning]     Reasoning effort (e.g. 'low'|'medium'|'high'|'xhigh' for codex)
+ * @property {string} [reasoning]     Reasoning effort (e.g. 'low'|'medium'|'high'|'xhigh'|'none' for codex; kimi maps to --thinking/--no-thinking; 'none' explicit)
  * @property {string} [model]         Optional model override
  * @property {boolean} [webSearch]    Optional web search enable
  * @property {string} [conversationId] Optional session resume ID
+ * @property {string} [logFile]       Adapter log file path (set by runner before adapter.args() so adapter can thread it through)
+ * @property {string} [taskType]      Phase 6c F1: task-type for timeoutMs() floor calculation (e.g. 'code-review-adversarial')
+ * @property {boolean} [background]   Set true by runner for background-mode dispatches
  */
 
 /**
@@ -86,11 +89,12 @@
  * @property {string} command                                 CLI command to spawn
  * @property {function(string, AdapterOpts): string[]} args   Build CLI args from input + opts
  * @property {function(): PreflightResult} envPreflight       Check auth / env readiness
- * @property {function(AdapterOpts): number} timeoutMs        Hard timeout in milliseconds
+ * @property {function(AdapterOpts): number} timeoutMs        Hard timeout in milliseconds (Phase 6c: opts.taskType may elevate via applyTaskTypeFloor)
  * @property {function(SubprocessResult): TaskOutput} parseResult  Parse subprocess output to structured form
  * @property {string} [stdinMode]                             'none' (args carry input) | 'pipe' (input piped to stdin)
  * @property {function(string, string): {logPath: string|null}} [prepareLog]  Optional per-dispatch log file setup
+ * @property {string[]} [knownInstallPaths]                   Phase 6c F2: deterministic vendor-installer locations (NOT vendor-retry orchestration). Walked by resolveCommandWithKnownPaths when PATH lookup fails. Each entry must be an absolute path to the binary (e.g. ~/AppData/Local/agy/bin/agy.exe; expand via os.homedir() before declaring).
  */
 
 // Re-export marker (no actual exports — JSDoc only)
-export const TYPES_VERSION = '0.1.0-T-PLUGIN-04.5';
+export const TYPES_VERSION = '0.2.0-phase-6c';

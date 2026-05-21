@@ -344,12 +344,14 @@ function warnIfModelUnknown(vendor, model) {
     // introspection) is the motivating case — the user can't just wait for
     // a future probe; they have to add the alias to their config first.
     if (vendor === 'kimi' && cached.introspection_supported === 'config-only') {
-      console.error(`  hint: kimi -m takes the ALIAS from ~/.kimi/config.toml [models.X] blocks, NOT the upstream Moonshot ID.`);
-      console.error(`  fix: add this block to ~/.kimi/config.toml (replace upstream ID with your target):`);
+      console.error(`  hint: kimi works without -m (uses default model). Two paths forward:`);
+      console.error(`  (a) RECOMMENDED — omit --model entirely; pair --reasoning high|none with the default model:`);
+      console.error(`      hopper-dispatch <task-id> --reasoning high     # or 'none' for explicit --no-thinking`);
+      console.error(`  (b) Add a named alias to ~/.kimi/config.toml if you want to pick a non-default model:`);
       console.error(`      [models.${model}]`);
       console.error(`      model = "kimi-k2-thinking"   # or another Moonshot upstream ID`);
       console.error(`      capabilities = ["thinking"]   # if your target supports thinking`);
-      console.error(`  then: hopper-dispatch --probe kimi  # refresh cache`);
+      console.error(`      Then: hopper-dispatch --probe kimi  # refresh cache`);
     }
   } else if (isStale(cached.probed_at)) {
     console.error(`  note: cache for ${vendor} is ${staleness(cached.probed_at)}; consider \`hopper-dispatch --probe ${vendor}\` to refresh`);

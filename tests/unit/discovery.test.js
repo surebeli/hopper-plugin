@@ -237,8 +237,8 @@ test('capabilitiesForAdapter returns capability hint for every registered vendor
     assert.ok(caps.features, `${name}: missing features`);
     assert.ok(['enumerated', 'freeform', 'ignored'].includes(caps.modelArg.accepted),
       `${name}: modelArg.accepted must be enumerated/freeform/ignored; got ${caps.modelArg.accepted}`);
-    assert.ok(['enumerated', 'ignored'].includes(caps.reasoningArg.accepted),
-      `${name}: reasoningArg.accepted must be enumerated/ignored; got ${caps.reasoningArg.accepted}`);
+    assert.ok(['enumerated', 'binary', 'ignored'].includes(caps.reasoningArg.accepted),
+      `${name}: reasoningArg.accepted must be enumerated/binary/ignored; got ${caps.reasoningArg.accepted}`);
     assert.ok(Array.isArray(caps.modelArg.knownGood));
     assert.ok(Array.isArray(caps.reasoningArg.knownGood));
     assert.ok(typeof caps.sourceNote === 'undefined' || typeof caps.modelArg.sourceNote === 'string');
@@ -265,12 +265,16 @@ test('capabilities: kimi/opencode/copilot accept --model freeform', () => {
   }
 });
 
-test('capabilities: kimi/opencode/copilot/agy all ignore --reasoning', () => {
-  for (const name of ['kimi', 'opencode', 'copilot', 'agy']) {
+test('capabilities: opencode/copilot/agy ignore --reasoning; kimi maps to binary --thinking', () => {
+  // Phase 6c+follow-up wired kimi --thinking/--no-thinking binary toggle.
+  for (const name of ['opencode', 'copilot', 'agy']) {
     const caps = capabilitiesForAdapter(name);
     assert.equal(caps.reasoningArg.accepted, 'ignored',
       `${name} adapter does not honor opts.reasoning`);
   }
+  const kimi = capabilitiesForAdapter('kimi');
+  assert.equal(kimi.reasoningArg.accepted, 'binary',
+    'kimi maps opts.reasoning to --thinking / --no-thinking binary toggle (Phase 6c follow-up)');
 });
 
 test('capabilities: every adapter has staleAfter date for freshness tracking', () => {

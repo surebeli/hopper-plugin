@@ -130,8 +130,17 @@ export function isCommandAvailable(cmd) {
  */
 export function resolveCommandWithKnownPaths(cmd, knownInstallPaths = []) {
   const onPath = resolveCommandOnPath(cmd);
-  if (onPath && onPath.resolvedPath) return onPath;
-  if (!knownInstallPaths || knownInstallPaths.length === 0) return onPath;  // null or qualified-as-is
+  // Phase 6c follow-up P1 (codex/copilot dogfood convergent finding,
+  // codex reproduced with node.exe→cmd.exe hijack):
+  // resolveCommandOnPath returns non-null in TWO cases — (a) resolved via
+  // PATH walk (resolvedPath set), and (b) qualified pass-through where
+  // cmd already contained /, \, or .ext (resolvedPath null). The previous
+  // check only honored (a) and fell through to the fallback walk for (b),
+  // hijacking the user's qualified path. Honor both: if onPath is non-null
+  // at all, return it. The fallback walk only runs when resolveCommandOnPath
+  // returned null (genuinely unqualified-and-not-on-PATH).
+  if (onPath) return onPath;
+  if (!knownInstallPaths || knownInstallPaths.length === 0) return null;
 
   const isWindows = process.platform === 'win32';
   for (const candidate of knownInstallPaths) {

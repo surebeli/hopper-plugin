@@ -141,6 +141,34 @@ test('F2: agy adapter declares knownInstallPaths for both platforms', async () =
   }
 });
 
+// ─── 6c follow-up P1#1: qualified-path NOT hijacked by knownInstallPaths ─
+
+test('6c-followup P1: qualified paths are NOT hijacked by knownInstallPaths', (t) => {
+  // codex/copilot reproduced: node.exe → cmd.exe hijack when knownInstallPaths
+  // declared a different .exe. resolveCommandOnPath returns qualified paths
+  // with resolvedPath:null (pass-through). resolveCommandWithKnownPaths must
+  // honor that pass-through and NOT fall through to the fallback walk.
+  const isWindows = process.platform === 'win32';
+  const qualified = isWindows ? 'C:\\Windows\\System32\\cmd.exe' : '/bin/sh';
+  // Fake knownInstallPaths that point to a DIFFERENT real binary
+  const decoy = isWindows ? 'C:\\Windows\\System32\\notepad.exe' : '/bin/ls';
+  const r = resolveCommandWithKnownPaths(qualified, [decoy]);
+  assert.ok(r, 'qualified path must resolve, not return null');
+  assert.equal(r.command, qualified,
+    `qualified path must pass through unmodified; got ${r.command} (decoy was ${decoy})`);
+  assert.equal(r.resolvedPath, null,
+    'resolvedPath stays null for qualified pass-through (matches resolveCommandOnPath contract)');
+});
+
+test('6c-followup P1: relative path with extension also bypasses fallback walk', () => {
+  // 'foo.exe' (Windows) or 'foo.sh' (POSIX) — has an extension, so qualified
+  const cmd = process.platform === 'win32' ? 'someName.exe' : 'someName.sh';
+  // knownInstallPaths is irrelevant here; cmd is qualified by extension
+  const r = resolveCommandWithKnownPaths(cmd, ['/no/such/decoy']);
+  assert.ok(r, 'extension-qualified cmd must resolve');
+  assert.equal(r.command, cmd, 'qualified cmd passes through');
+});
+
 // ─── P1: kimi --thinking forwarding ────────────────────────────────────
 
 test('P1: kimi args() includes --thinking when opts.reasoning is truthy', async () => {
@@ -156,11 +184,20 @@ test('P1: kimi args() includes --thinking when opts.reasoning is truthy', async 
   }
 });
 
-test('P1: kimi args() omits --thinking when opts.reasoning is "none"', async () => {
-  const { kimiAdapter } = await import('../../cli/src/vendors/kimi.js');
-  const args = kimiAdapter.args('prompt', { reasoning: 'none' });
-  assert.ok(!args.includes('--thinking'),
-    `reasoning=none → no --thinking; got: ${args.join(' ')}`);
+// (Old test 'P1: kimi args() omits --thinking when reasoning=none' removed in
+// 6c follow-up — superseded by the more precise 6c-followup tests above which
+// assert --no-thinking emission for explicit-disable and no flags for omitted.)
+
+test('6c-followup P2: copilot args() includes --allow-all-tools and --allow-all-paths', async () => {
+  // T-AUDIT-PH6C-copilot dogfood: copilot non-interactive mode blocked every
+  // write attempt and escalated to a General-purpose sub-agent that wrote to
+  // the WRONG file (agy-output.md got contaminated). Fix: explicit allow flags.
+  const { copilotAdapter } = await import('../../cli/src/vendors/copilot.js');
+  const args = copilotAdapter.args('prompt', {});
+  assert.ok(args.includes('--allow-all-tools'),
+    `copilot must pass --allow-all-tools so dispatches can write their own output; got: ${args.join(' ')}`);
+  assert.ok(args.includes('--allow-all-paths'),
+    `copilot must pass --allow-all-paths so file writes aren't blocked; got: ${args.join(' ')}`);
 });
 
 test('P1: kimi args() preserves -m forwarding alongside --thinking', async () => {
