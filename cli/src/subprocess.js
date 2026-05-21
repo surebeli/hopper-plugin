@@ -103,12 +103,13 @@ export async function runSubprocessOnce({
 
 /**
  * Kill an entire process tree (parent + descendants).
- * Per codex v2.0.3 F3: NOT by port; tree-kill via OS-specific mechanism.
+ * Per codex v2.0.3 F3 + Phase 5 audit F1: NOT by port; tree-kill via OS-specific
+ * mechanism. Exported so hopper-runner can reuse it for background-mode timeout.
  *
  * @param {number} pid
  * @param {boolean} isWindows
  */
-function killProcessTree(pid, isWindows) {
+export function killProcessTree(pid, isWindows) {
   if (!pid) return;
   if (isWindows) {
     // taskkill /T = kill tree (all child processes), /F = force

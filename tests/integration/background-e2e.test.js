@@ -28,7 +28,7 @@ import { strict as assert } from 'node:assert';
 import {
   spawnDetached, readFrontmatter, writeFrontmatter, isAlive,
 } from '../../cli/src/background.js';
-import { mkdtempSync, mkdirSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -228,3 +228,96 @@ test('spawnDetached path-traversal: rejects unsafe task-id BEFORE writing anythi
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// ─── codex Phase 5 audit F1-F7 regression tests ────────────────────────
+
+test('F3 atomic lock: concurrent spawnDetached on SAME task — second refuses', () => {
+  const { tmp, hopperDir } = setup();
+  try {
+    // Plant a sentinel lockfile so the second call sees EEXIST
+    const lockPath = join(hopperDir, 'handoffs', 'T-lock-test.dispatching');
+    writeFileSync(lockPath, `pid=${process.pid}\nts=${Date.now()}\n`, 'utf-8');
+
+    assert.throws(
+      () => spawnDetached({
+        hopperDir,
+        taskId: 'T-lock-test',
+        adapterName: 'codex',
+        adapterArgv: ['exec', 'noop'],
+        runnerPath: RUNNER_PATH,
+      }),
+      /already running|already.*dispatched|lock/i,
+      'second concurrent dispatch must refuse via lockfile'
+    );
+
+    // Lock should still exist (we didn't acquire it; the first holder owns it)
+    assert.ok(existsSync(lockPath), 'lockfile must remain for first holder');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('F3 atomic lock: stale lockfile (>60s) is reclaimed', () => {
+  const { tmp, hopperDir } = setup();
+  try {
+    const lockPath = join(hopperDir, 'handoffs', 'T-stale-lock.dispatching');
+    // Create lockfile + backdate mtime to 2 minutes ago
+    writeFileSync(lockPath, `pid=99999\nts=${Date.now() - 120_000}\n`, 'utf-8');
+    const oldT = (Date.now() - 120_000) / 1000;
+    utimesSync(lockPath, oldT, oldT);
+
+    // spawnDetached should reclaim the stale lock and proceed
+    let result;
+    try {
+      result = spawnDetached({
+        hopperDir,
+        taskId: 'T-stale-lock',
+        adapterName: 'codex',
+        adapterArgv: ['exec', 'noop'],
+        runnerPath: RUNNER_PATH,
+      });
+    } catch (err) {
+      assert.fail(`stale lock should be reclaimed; got: ${err.message}`);
+    }
+    assert.ok(result.pid > 0);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('F2 + F3: spawnDetached releases lock after PID seeded', async () => {
+  const { tmp, hopperDir } = setup();
+  try {
+    const result = spawnDetached({
+      hopperDir,
+      taskId: 'T-lock-release',
+      adapterName: 'codex',
+      adapterArgv: ['exec', 'noop'],
+      runnerPath: RUNNER_PATH,
+      adapterOpts: { reasoning: 'xhigh' },  // F2: opts propagation test
+    });
+
+    // After spawnDetached returns, lock should be GONE.
+    // (Race: runner may finish so fast that frontmatter is already
+    // 'done' or 'failed' before our final check. Either way, lock
+    // must not exist.)
+    const lockPath = join(hopperDir, 'handoffs', 'T-lock-release.dispatching');
+    // Give a tiny moment for any cleanup if needed (still synchronous in
+    // spawnDetached's return path — race tolerance only).
+    await new Promise(r => setTimeout(r, 50));
+    assert.equal(existsSync(lockPath), false,
+      'lockfile must be deleted after PID is seeded into frontmatter');
+
+    // PID is in frontmatter (either as the runner PID OR null if the runner
+    // already flipped the frontmatter to 'done' before our PID-patch landed)
+    const fm = readFrontmatter(result.outputMdPath);
+    assert.ok(fm.pid === result.pid || fm.pid === null || fm.status !== 'in-progress',
+      `PID expected ${result.pid}; got ${fm.pid} with status ${fm.status}`);
+
+    // Give runner up to 5s to exit cleanly
+    await new Promise(r => setTimeout(r, 3000));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+

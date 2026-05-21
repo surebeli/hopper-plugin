@@ -426,6 +426,7 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {} } = {
       adapterArgv: [resolved.vendor, ...adapterArgv].slice(1), // pass argv only, adapter name passed via --adapter
       runnerPath: RUNNER_PATH,
       hostNative: hostVendor || null,
+      adapterOpts: effectiveOpts,  // codex Phase 5 F2: opts → runner via env for timeoutMs
     });
     console.log('=== BACKGROUND DISPATCH STARTED ===');
     console.log(`Task:        ${taskId}`);
@@ -502,6 +503,24 @@ async function runWatch(hopperDir, taskId) {
   console.error(`Watching ${taskId} (status: ${initialFm.status}, pid: ${initialFm.pid || 'n/a'})`);
   console.error(`Log: ${initialFm.log || 'n/a'}`);
   console.error('');
+
+  // Per codex Phase 5 audit F6: if the task is ALREADY terminal at the time
+  // --watch is invoked, surface result + exit immediately. Previously
+  // `lastStatus = initialFm.status` made the watch loop think nothing
+  // changed, so the file got tailed once and then we waited forever.
+  if (initialFm.status === 'done' || initialFm.status === 'failed' || initialFm.status === 'orphaned') {
+    const logPath = outputMdPath.replace(/\.md$/, '.log');
+    if (existsSync(logPath)) {
+      try {
+        const stat = statSync(logPath);
+        if (stat.size > 0) process.stdout.write(readFileSync(logPath, 'utf-8'));
+      } catch (_) {}
+    }
+    console.error('');
+    console.error(`=== TASK ${initialFm.status.toUpperCase()} ===`);
+    console.error(`exit_code: ${initialFm.exit_code} | duration: ${initialFm.duration_ms}ms${initialFm.signal ? ' | signal: ' + initialFm.signal : ''}${initialFm.timed_out ? ' | TIMED OUT' : ''}`);
+    process.exit(initialFm.status === 'done' ? 0 : 1);
+  }
 
   const logPath = outputMdPath.replace(/\.md$/, '.log');
   let lastSize = 0;

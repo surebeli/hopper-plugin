@@ -10,38 +10,55 @@
 // Single-spawn invariant: this script contains exactly one spawn() call.
 // Counter-tested in tests/integration/runner-single-spawn.test.js.
 
-import { spawn, execSync } from 'node:child_process';
-import { openSync, closeSync, readFileSync, existsSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { openSync, closeSync, readFileSync, existsSync, statSync } from 'node:fs';
+import { join, delimiter } from 'node:path';
 import { readFrontmatter, writeFrontmatter } from '../src/background.js';
 import { getAdapter } from '../src/vendors/index.js';
+import { killProcessTree } from '../src/subprocess.js';
 
 /**
  * Windows .cmd/.bat lookup: CreateProcessW can directly execute .exe but
- * NOT .cmd or .bat. When the command is unqualified, use `where` to resolve.
- * If the resolved file is .exe → use it directly. If .cmd/.bat → wrap with
- * cmd.exe /c (preserves single-spawn invariant; still one spawn — just one
- * level of shell indirection for command resolution).
+ * NOT .cmd or .bat. When the command is unqualified, walk PATH + PATHEXT
+ * IN-PROCESS to find the actual file. If .exe → use directly. If .cmd/.bat
+ * → wrap with cmd.exe /c.
+ *
+ * Per codex Phase 5 audit F7: this MUST be in-process (no execSync) so the
+ * single-spawn proof stays clean.
  *
  * Returns { command, prependArgs }. Returns command unchanged on POSIX.
  */
 function resolveWindowsCommand(cmd) {
   if (process.platform !== 'win32') return { command: cmd, prependArgs: [] };
-  // If already a path or already has extension, trust it
   if (cmd.includes('/') || cmd.includes('\\') || /\.\w+$/.test(cmd)) {
     return { command: cmd, prependArgs: [] };
   }
-  try {
-    const out = execSync(`where ${cmd}`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
-    const lines = out.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-    // Prefer .exe (executable directly by CreateProcessW)
-    const exe = lines.find(l => l.toLowerCase().endsWith('.exe'));
-    if (exe) return { command: exe, prependArgs: [] };
-    // Fall back to .cmd/.bat → wrap with cmd.exe
-    const batch = lines.find(l => /\.(cmd|bat)$/i.test(l));
-    if (batch) return { command: process.env.ComSpec || 'cmd.exe', prependArgs: ['/c', batch] };
-  } catch (_) {
-    // `where` failed — return original; CreateProcessW will likely fail too
+  const pathDirs = (process.env.PATH || '').split(delimiter).filter(Boolean);
+  // PATHEXT defaults if not set
+  const exts = (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').map(e => e.trim()).filter(Boolean);
+  let firstExe = null;
+  let firstBatch = null;
+  for (const dir of pathDirs) {
+    for (const ext of exts) {
+      const candidate = join(dir, cmd + ext);
+      try {
+        if (statSync(candidate).isFile()) {
+          const lower = ext.toLowerCase();
+          if (lower === '.exe' || lower === '.com') {
+            if (!firstExe) firstExe = candidate;
+          } else if (lower === '.cmd' || lower === '.bat') {
+            if (!firstBatch) firstBatch = candidate;
+          }
+        }
+      } catch (_) {
+        // not found / not accessible — keep searching
+      }
+    }
+    // If we've found an .exe in this dir, prefer it over any batch later in PATH
+    if (firstExe) break;
   }
+  if (firstExe) return { command: firstExe, prependArgs: [] };
+  if (firstBatch) return { command: process.env.ComSpec || 'cmd.exe', prependArgs: ['/c', firstBatch] };
   return { command: cmd, prependArgs: [] };
 }
 
@@ -116,6 +133,17 @@ async function main() {
     fail(outputMdPath, `Unknown adapter: ${adapterName}`);
   }
 
+  // Per codex Phase 5 audit F2: deserialize adapter opts from env var so
+  // timeoutMs honors --reasoning xhigh / --model etc.
+  let adapterOpts = {};
+  if (process.env.HOPPER_ADAPTER_OPTS) {
+    try {
+      adapterOpts = JSON.parse(process.env.HOPPER_ADAPTER_OPTS);
+    } catch (_) {
+      adapterOpts = {};
+    }
+  }
+
   const t0 = Date.now();
 
   // Open log fds for vendor stdio. The runner's own stdout/stderr was already
@@ -150,12 +178,17 @@ async function main() {
   closeSync(fdErr);
 
   let timedOut = false;
-  const timeoutMs = adapter.timeoutMs({ background: true });
+  // Per codex Phase 5 audit F2: pass adapter opts to timeoutMs so --reasoning xhigh
+  // actually gets 900s instead of the default 300s.
+  const timeoutMs = adapter.timeoutMs({ ...adapterOpts, background: true });
+  const isWindows = process.platform === 'win32';
   const killTimer = setTimeout(() => {
     timedOut = true;
-    try { vendor.kill('SIGTERM'); } catch (_) {}
-    // Hard-kill after 5s grace
-    setTimeout(() => { try { vendor.kill('SIGKILL'); } catch (_) {} }, 5000).unref();
+    // Per codex Phase 5 audit F1: process-tree kill (not just top-level vendor)
+    // so children of .cmd wrappers + agentic CLIs don't leak. Reuses shared
+    // killProcessTree from subprocess.js (taskkill /T /F on Windows; SIGKILL
+    // on process group on POSIX).
+    try { killProcessTree(vendor.pid, isWindows); } catch (_) {}
   }, timeoutMs);
   killTimer.unref();
 

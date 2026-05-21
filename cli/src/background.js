@@ -14,7 +14,7 @@
 
 import { spawn } from 'node:child_process';
 import {
-  openSync, closeSync, existsSync, renameSync,
+  openSync, closeSync, existsSync, renameSync, unlinkSync, mkdirSync,
   readFileSync, writeFileSync, statSync, readdirSync, lstatSync, realpathSync,
 } from 'node:fs';
 import { resolve, dirname, basename, join, sep } from 'node:path';
@@ -238,21 +238,71 @@ export function preflightDispatch(outputMdPath) {
  * @param {string|null} [args.stdinInput]      adapter stdin payload (kept null in background mode; piping stdin to detached child is unreliable)
  * @returns {{ pid: number, outputMdPath: string, logPath: string, startTime: string }}
  */
-export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, runnerPath, hostNative = null, stdinInput = null }) {
+export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, runnerPath, hostNative = null, stdinInput = null, adapterOpts = null }) {
   validateTaskId(taskId);
 
   const handoffDir = join(hopperDir, 'handoffs');
   const outputMdPath = join(handoffDir, `${taskId}-output.md`);
   const logPath = outputMdPath.replace(/\.md$/, '.log');
+  const lockPath = join(handoffDir, `${taskId}.dispatching`);
 
   // Per codex Phase 5 audit P1 #3: enforce path safety BEFORE preflight write.
   assertPathSafe(outputMdPath, hopperDir);
   assertPathSafe(logPath, hopperDir);
 
-  const pf = preflightDispatch(outputMdPath);
-  if (!pf.ok) {
-    const err = new Error(`Refusing dispatch: ${pf.reason}`);
-    err.code = 'EALREADYRUNNING';
+  // Ensure handoffs/ exists before we try the atomic lock.
+  if (!existsSync(handoffDir)) mkdirSync(handoffDir, { recursive: true });
+
+  // Per codex Phase 5 audit F3: close the preflight-to-spawn TOCTOU window
+  // via atomic lock-file create. `openSync(lockPath, 'wx')` is atomic on
+  // both POSIX and Windows NTFS — only ONE process succeeds. The other
+  // gets EEXIST and refuses. Lock is released after PID is seeded into
+  // frontmatter; subsequent --jobs / --watch readers use the frontmatter,
+  // not this lockfile.
+  let lockFd;
+  try {
+    lockFd = openSync(lockPath, 'wx');
+  } catch (err) {
+    if (err.code === 'EEXIST') {
+      // Stale lockfile from a previous crash? Check age — if > 60s and no
+      // matching in-progress frontmatter with alive PID, reclaim it. This
+      // is the SAME orphan logic as the 24h ceiling on output.md, scoped
+      // tighter because lockfile lifetime is supposed to be <1s.
+      let staleReclaimed = false;
+      try {
+        const lockAge = Date.now() - statSync(lockPath).mtimeMs;
+        if (lockAge > 60_000) {
+          unlinkSync(lockPath);
+          lockFd = openSync(lockPath, 'wx');
+          staleReclaimed = true;
+        }
+      } catch (_) {
+        // race or unlinked by another process — fall through
+      }
+      if (!staleReclaimed) {
+        const e = new Error(`Refusing dispatch: task ${taskId} is currently being dispatched by another process (lock at ${lockPath}). Wait or remove the lockfile if stale.`);
+        e.code = 'EALREADYRUNNING';
+        throw e;
+      }
+    } else {
+      throw err;
+    }
+  }
+  writeFileSync(lockFd, `pid=${process.pid}\nts=${Date.now()}\n`);
+
+  try {
+    const pf = preflightDispatch(outputMdPath);
+    if (!pf.ok) {
+      closeSync(lockFd);
+      try { unlinkSync(lockPath); } catch (_) {}
+      const err = new Error(`Refusing dispatch: ${pf.reason}`);
+      err.code = 'EALREADYRUNNING';
+      throw err;
+    }
+  } catch (err) {
+    // Failure during preflight — release lock and propagate
+    try { closeSync(lockFd); } catch (_) {}
+    try { unlinkSync(lockPath); } catch (_) {}
     throw err;
   }
 
@@ -293,6 +343,11 @@ export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, run
   const fdOut = openSync(logPath, 'a');
   const fdErr = openSync(logPath, 'a');
 
+  // Per codex Phase 5 audit F2: pass adapter opts to runner via env so
+  // runner can call adapter.timeoutMs(opts) — fixes the dropped --reasoning
+  // xhigh issue. Env is simpler than argv (no length pressure on Windows).
+  const optsJson = JSON.stringify(adapterOpts || {});
+
   // Spawn the runner. node executes our runner script with task metadata.
   const child = spawn(process.execPath, [
     runnerPath,
@@ -308,7 +363,11 @@ export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, run
     stdio: ['ignore', fdOut, fdErr],
     windowsHide: true,
     cwd: process.cwd(),
-    env: { ...process.env, HOPPER_RUNNER_INVOKED: '1' },
+    env: {
+      ...process.env,
+      HOPPER_RUNNER_INVOKED: '1',
+      HOPPER_ADAPTER_OPTS: optsJson,
+    },
   });
 
   // Parent's fd copies no longer needed; child has its own duplicates post-spawn.
@@ -327,6 +386,13 @@ export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, run
   if (fm.status === 'in-progress' && !fm.pid) {
     writeFrontmatter(outputMdPath, { ...fm, pid: child.pid });
   }
+
+  // Per codex Phase 5 audit F3: PID is now seeded; release the dispatch lock
+  // so subsequent legitimate re-dispatch (after this task completes) isn't
+  // falsely refused. Lockfile lifetime: from openSync(wx) at top to here —
+  // bounded by spawn + frontmatter-patch latency (~10-50ms typical).
+  try { closeSync(lockFd); } catch (_) {}
+  try { unlinkSync(lockPath); } catch (_) {}
 
   return { pid: child.pid, outputMdPath, logPath, startTime };
 }

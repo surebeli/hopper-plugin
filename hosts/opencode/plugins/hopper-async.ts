@@ -42,7 +42,10 @@ interface PluginContext {
 
 interface ToolArgs {
   taskId: string;
-  hopperDir?: string;
+  // Per codex Phase 5 audit F4: hopperDir tool-arg REMOVED. The plugin now
+  // derives hopperDir exclusively from the project context (or HOPPER_DIR
+  // env), which is set before plugin load. Accepting it as a tool arg let
+  // a model put `/anywhere/with/.hopper` and the plugin would write there.
   adapterArgv?: string[];
   systemPrompt?: string;
 }
@@ -97,11 +100,11 @@ export default async function hopperAsync(ctx: PluginContext) {
 
   const hopperDispatchTool = {
     name: 'hopper_dispatch',
-    description: 'Dispatch a hopper task to a vendor adapter via OpenCode native async. Returns immediately; result lands in .hopper/handoffs/<task-id>-output.md per spec §14.',
+    description: 'Dispatch a hopper task via OpenCode native async (EXPERIMENTAL — see plugin README §14.9 + Phase 5 F5: this path bypasses dispatcher resolveDispatch / task-frames / heterogeneous-only warning; for parity, use Tier A `hopper-dispatch --background`).',
     args: {
       taskId: { type: 'string', description: 'Task ID from .hopper/queue.md. Must match ^[A-Za-z][A-Za-z0-9._-]{0,99}$ and not contain "..".' },
-      hopperDir: { type: 'string', optional: true, description: 'Override .hopper/ location' },
       systemPrompt: { type: 'string', optional: true, description: 'System prompt to set for the dispatched session' },
+      // Per codex Phase 5 audit F4: hopperDir REMOVED — derived from project context only.
     },
     async execute(args: ToolArgs) {
       const { taskId } = args;
@@ -113,19 +116,10 @@ export default async function hopperAsync(ctx: PluginContext) {
         throw new Error(`hopper_dispatch: task-id "${taskId}" contains '..' (path traversal)`);
       }
 
-      // Per codex Phase 5 audit P1 #3: validate hopperDir override.
-      // Defensive whitelist: reject '..' and require path to end with '.hopper'
-      // (no full realpath-containment check since the plugin may run in a
-      // different working dir than the project root — code-inspection only).
-      let taskHopperDir = args.hopperDir || hopperDir;
-      if (args.hopperDir) {
-        if (args.hopperDir.includes('..')) {
-          throw new Error(`hopper_dispatch: hopperDir argument "${args.hopperDir}" contains '..'`);
-        }
-        if (!args.hopperDir.endsWith('.hopper') && !args.hopperDir.endsWith('.hopper/')) {
-          throw new Error(`hopper_dispatch: hopperDir argument must end with '.hopper'`);
-        }
-      }
+      // Per codex Phase 5 audit F4: hopperDir is ALWAYS derived from project
+      // context — tool arg removed. The closure-bound `hopperDir` is set at
+      // plugin load from HOPPER_DIR env OR project.directory/.hopper.
+      const taskHopperDir = hopperDir;
       mkdirSync(join(taskHopperDir, 'handoffs'), { recursive: true });
       const outputMdPath = join(taskHopperDir, 'handoffs', `${taskId}-output.md`);
       const logPath = outputMdPath.replace(/\.md$/, '.log');
