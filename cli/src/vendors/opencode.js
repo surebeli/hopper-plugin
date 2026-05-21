@@ -19,26 +19,13 @@ export const opencodeAdapter = {
   capabilities: {
     modelArg: {
       accepted: 'freeform',
-      // Phase 6a dogfood 2026-05-21: real `opencode models` list captured
-      // from this machine. Available models depend on user's opencode auth
-      // configuration; this is the snapshot at first dogfood. Run
-      // `opencode models` for live list on any other machine.
-      knownGood: [
-        'opencode/big-pickle',
-        'opencode/deepseek-v4-flash-free',
-        'opencode/nemotron-3-super-free',
-        'opencode/qwen3.6-plus-free',
-        'deepseek/deepseek-chat',
-        'deepseek/deepseek-reasoner',
-        'deepseek/deepseek-v4-flash',
-        'deepseek/deepseek-v4-pro',
-        'xiaomi/mimo-v2-flash',
-        'xiaomi/mimo-v2-omni',
-        'xiaomi/mimo-v2-pro',
-        'xiaomi/mimo-v2.5',
-        'xiaomi/mimo-v2.5-pro',
-      ],
-      sourceNote: 'opencode --model <provider/model>. Provider prefix required. List depends on user opencode auth; verified via live `opencode models` 2026-05-21. Run `opencode models` on your machine for current list.',
+      // Phase 6a-corrected per user feedback 2026-05-21: do NOT hardcode
+      // model lists in the adapter — actual catalog depends on the user's
+      // opencode auth config + active subscriptions, which is per-machine
+      // and per-account. The adapter forwards opts.model verbatim; whether
+      // a given identifier resolves is opencode's concern.
+      knownGood: ['<provider>/<model>'],  // format example only — not a catalog
+      sourceNote: 'opencode --model <provider/model>. Provider prefix required. Available models depend on YOUR opencode auth configuration + active subscriptions, NOT on this adapter. Run `opencode models` on your machine for live list. See .hopper/handoffs/T-DOGFOOD-PHASE6A-VENDORS.md for a sample snapshot from one dev machine (illustrative, not canonical).',
     },
     reasoningArg: {
       accepted: 'ignored',

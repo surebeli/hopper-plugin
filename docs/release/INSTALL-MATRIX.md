@@ -318,6 +318,12 @@ For quick reference (re-verify quarterly per each adapter's `staleAfter` date):
 - Only **kimi / opencode / copilot** accept `--model`. Passing `--model X` to codex or agy is silently ignored.
 - No vendor accepts BOTH `--model` and `--reasoning` in the current adapter set.
 - Hopper does NOT validate model names against `knownGood` — it stays freeform (validation regex is shell-safety only). Invalid models surface as vendor-side errors at dispatch.
+- **`knownGood` arrays are intentionally near-empty** (Phase 6a design correction per user feedback 2026-05-21): available models depend on YOUR vendor account + machine + subscription tier — opencode model catalog varies per provider auth, kimi varies per Moonshot account, copilot varies per Business/Enterprise tier, codex varies per ChatGPT entitlements. The adapter is NOT a model database. Run the vendor's own command to see what works on YOUR machine:
+  - `opencode models` — live catalog including provider prefixes
+  - `kimi --help` — confirms `-m` accepts free text; specific models come from your `~/.kimi/config`
+  - `copilot --help` — confirms `--model <name>`; available list is account-tier dependent
+  - `codex doctor` or `codex exec --help` — codex available models depend on ChatGPT login
+  - `agy --help` — agy doesn't currently accept `--model` flag
 
 ### Typical pre-dispatch workflow
 

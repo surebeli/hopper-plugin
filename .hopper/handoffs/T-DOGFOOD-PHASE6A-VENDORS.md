@@ -81,6 +81,37 @@ Directly invoked each vendor CLI from Bash (NOT via hopper-dispatch — this is 
 
 **Status correction for everyone reading the audit trail**: agy CAN run on this machine. T-AUDIT-PH5-kimi 0-byte log was almost certainly NOT an agy-vs-antigravity binary mismatch (since agy wasn't the kimi audit's vendor) — it was kimi-specific opacity. Re-investigate T-AUDIT-PH5-kimi separately if needed.
 
+## Design correction 2026-05-21 (per user feedback)
+
+After the initial dogfood, user pointed out a real design issue with my
+approach: I hardcoded the 13 opencode models probed from THIS machine
+into the adapter's `capabilities.knownGood` array. That's wrong because:
+
+- Available opencode models depend on the USER's opencode auth configuration
+  (which providers they have signed in to) — varies per account
+- kimi models depend on `~/.kimi/config` content + Moonshot account
+- copilot models depend on Business/Enterprise subscription tier
+- codex models depend on ChatGPT login entitlements
+- One machine's snapshot ≠ another machine's truth
+
+Hardcoding the snapshot pretends it's universal. It's not. The adapter
+should describe its OWN forwarding behavior (modelArg.accepted,
+reasoningArg.accepted, features), NOT maintain a model catalog.
+
+**Corrective action**:
+- Adapter `knownGood` arrays now near-empty (0-1 format-example values
+  like `<provider>/<model>` for opencode); no real model identifiers
+- sourceNote on each adapter directs user to run vendor's own `models`
+  command for actual list on their machine
+- This dogfood doc retains the full probed snapshot below as a HISTORICAL
+  record from one dev machine on one date — useful as essay evidence
+  ("hopper-plugin probed real CLIs and corrected its data") but NOT
+  parsed by the adapter at runtime
+
+The 13-model opencode list captured in the per-vendor findings above
+remains here as that snapshot. Treat it as illustrative only — your
+machine may differ.
+
 ## Updates landed
 
 5 adapter capability blocks updated:

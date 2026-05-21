@@ -20,12 +20,12 @@ export const codexAdapter = {
   capabilities: {
     modelArg: {
       accepted: 'ignored',
-      knownGood: [],
-      // Phase 6a dogfood 2026-05-21: codex CLI supports `-m, --model <MODEL>`
-      // (verified via live `codex exec --help`). Our adapter currently uses
-      // `model_reasoning_effort` config flag only, NOT --model. Mark as
-      // adapter-ignored. Phase 6b candidate: wire opts.model → -m.
-      sourceNote: 'codex CLI supports `-m <MODEL>` (verified 2026-05-21). Our adapter uses opts.reasoning via config flag only — does NOT forward opts.model. Adapter-ignored, not CLI-unsupported.',
+      knownGood: [],  // codex available models depend on user ChatGPT subscription
+      // Phase 6a dogfood 2026-05-21: codex CLI supports `-m, --model <MODEL>`.
+      // Our adapter currently uses `model_reasoning_effort` config flag only,
+      // NOT --model. Mark as adapter-ignored. Available models also depend
+      // on user's ChatGPT login + entitlements — not hardcoded here either.
+      sourceNote: 'codex CLI supports `-m <MODEL>` (verified 2026-05-21). Our adapter uses opts.reasoning via config flag only — does NOT forward opts.model. Adapter-ignored, not CLI-unsupported. If wired in Phase 6b, available models will depend on YOUR ChatGPT subscription tier.',
     },
     reasoningArg: {
       accepted: 'enumerated',

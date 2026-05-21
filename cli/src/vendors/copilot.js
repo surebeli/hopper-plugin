@@ -15,8 +15,8 @@ export const copilotAdapter = {
   capabilities: {
     modelArg: {
       accepted: 'freeform',
-      knownGood: ['claude-sonnet-4-5', 'gpt-4o-mini'],
-      sourceNote: 'copilot --model <name>. Available models depend on user subscription tier (premium-request meter applies).',
+      knownGood: [],  // No canonical list — depends on user Copilot subscription tier
+      sourceNote: 'copilot --model <name>. Available models depend on YOUR Copilot subscription tier (premium-request meter applies; Business/Enterprise tiers see different models). Not hardcoded in this adapter.',
     },
     reasoningArg: {
       accepted: 'ignored',

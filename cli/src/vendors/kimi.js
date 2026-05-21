@@ -18,12 +18,11 @@ export const kimiAdapter = {
   capabilities: {
     modelArg: {
       accepted: 'freeform',
-      knownGood: ['default'],
-      // Phase 6a dogfood 2026-05-21: kimi help confirms `--model, -m <TEXT>`.
-      // Default model comes from `~/.kimi/config.{toml,json}`. Smoke test
-      // with default succeeded (HOPPER_OK_KIMI). UNCONFIRMED: explicit list
-      // of accepted model identifiers (no `kimi models` subcommand exists).
-      sourceNote: 'kimi -m <name>, default from config. Verified default works 2026-05-21. UNCONFIRMED: full list of accepted model identifiers; `--model kimi-thinking` previously failed with "LLM not set" per T-AUDIT-PH5 attempt. Best practice: omit -m and let config decide.',
+      knownGood: [],  // No canonical list — depends on user kimi config + Moonshot account
+      // Phase 6a-corrected 2026-05-21: kimi help confirms `--model, -m <TEXT>`,
+      // default from `~/.kimi/config.{toml,json}`. Models depend on user
+      // account + config, not on this adapter. Don't hardcode.
+      sourceNote: 'kimi -m <name>. Default model from your ~/.kimi/config. Available identifiers depend on YOUR Moonshot account + config — there is no `kimi models` introspection command. Best practice: omit -m and let config decide. Empirical: `-m kimi-thinking` fails with "LLM not set" — invalid identifier (per T-AUDIT-PH5).',
     },
     reasoningArg: {
       accepted: 'ignored',
