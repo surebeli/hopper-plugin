@@ -1,0 +1,141 @@
+# T-WEB-05 command/evidence log
+
+## Commits
+
+```
+$ git log --oneline -3
+6a820b8 [T-WEB-05] implement live log stream
+ff482c9 [T-WEB-04.5] lazy-load TaskDetailRoute for bundle headroom
+2ff23d5 [T-WEB-04] add handoff evidence
+```
+
+## Targeted unit tests
+
+```
+$ node --test tests/unit/dashboard-log.test.js tests/unit/dashboard-task.test.js tests/unit/dashboard-sse.test.js
+# tests 11
+# pass 11
+# fail 0
+# duration_ms 4505.2761
+```
+
+## Full test suite
+
+```
+$ npm test
+# tests 361
+# suites 0
+# pass 346
+# fail 0
+# cancelled 0
+# skipped 15
+# todo 0
+# duration_ms 5010.5052
+```
+
+## Dashboard build
+
+```
+$ npm run dashboard:build
+dist/index.html                          gzip:   0.27 kB
+dist/assets/index-qNKfg5wu.css           gzip:   4.34 kB
+dist/assets/TaskDetailRoute-B_Hvjoxh.js  gzip:  72.38 kB
+dist/assets/index-CBHpo2ms.js            gzip: 106.88 kB
+Total gzip: 183.87 kB
+```
+
+## Chrome/CDP live-log validation
+
+```
+Browser plugin attempt failed:
+- Identifier 'setupBrowserRuntime' has already been declared
+- privileged native pipe bridge is not available; browser-client is not trusted
+
+Fallback: local Chrome headless via CDP, temp HOPPER_DIR under %TEMP%.
+```
+
+```json
+{
+  "url": "http://127.0.0.1:7799/task/T-WEB-05",
+  "initialOffset": 13,
+  "liveLatencyMs": 230,
+  "ansiEvidence": {
+    "red": true,
+    "green": true,
+    "yellow": true,
+    "text": true
+  },
+  "duplicateCounts": {
+    "initial": 1,
+    "live": 1,
+    "reconnect": 1
+  },
+  "scroll": {
+    "lockedScrollTop": 0,
+    "followDistance": 0
+  },
+  "bigLog": {
+    "bytes": 5242880,
+    "elapsedMs": 709,
+    "targetOffset": 5244208
+  },
+  "heap": {
+    "usedMB": 10.04,
+    "totalMB": 13.5
+  },
+  "domCounters": {
+    "documents": 2,
+    "nodes": 1376,
+    "jsEventListeners": 327
+  },
+  "finalStats": {
+    "offset": 5244208,
+    "lineCount": 383,
+    "lineCap": 10000,
+    "state": "live",
+    "textHasAnsi": true
+  },
+  "screenshot": "docs/sidequests/web-dashboard/handoffs/T-WEB-05-screenshot.png"
+}
+```
+
+## Hard checks
+
+```
+$ node package-top-level-redline-check
+banned top-level: none
+top-level radix: @radix-ui/react-dialog, @radix-ui/react-tabs, @radix-ui/react-tooltip
+
+$ rg -n "SheetOverlay|Overlay" dashboard/client/src/components/ui/sheet.tsx dashboard/client/src/components/TaskDrawer.tsx
+<empty>
+
+$ node emoji-scan-changed-ui
+no emoji pictographs in changed UI files
+
+$ Get-FileHash dashboard/client/src/styles/globals.css -Algorithm SHA256
+789046FC976A7FC387D77BD64AC6EADA56014AEBF3EC9E31CC621454C423462C
+
+$ Get-FileHash dashboard/client/tailwind.config.ts -Algorithm SHA256
+D0E34ECFADDF4F035C3AA551530A57C41DFB36530F5AC5295D24FA34E299704C
+
+$ git diff --cached --name-only -- .hopper cli hosts commands .claude-plugin .codex-plugin
+<empty>
+
+$ git diff --cached --check
+<empty>
+```
+
+## Line counts
+
+```
+112 dashboard/client/src/components/LiveLog.tsx
+146 dashboard/client/src/components/TaskDrawer.tsx
+40  dashboard/client/src/components/ui/tabs.tsx
+55  dashboard/client/src/lib/ansi.ts
+73  dashboard/server/events/sse.js
+83  dashboard/server/events/watcher.js
+126 dashboard/server/index.js
+54  dashboard/server/lib/tail.js
+81  tests/unit/dashboard-log.test.js
+107 tests/unit/dashboard-task.test.js
+```
