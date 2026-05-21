@@ -618,15 +618,23 @@ async function runCheck(target) {
     }
   }
 
-  // Per codex Phase 6a strict audit P2 #2: redact home-dir in resolved
-  // paths to avoid leaking username + install-layout into pasted logs.
-  // Original path still discoverable via `--check <vendor> --verbose`
-  // (not implemented now; documented as Phase 6b enhancement).
+  // Per codex Phase 6a strict audit P2 #2 + recheck F2 #2 tightening:
+  // redact home-dir in resolved paths to avoid leaking username + install
+  // layout into pasted logs. Case-insensitive comparison on Windows AND
+  // separator-boundary check to avoid `/home/al` matching `/home/alice`.
   const { homedir } = await import('node:os');
+  const { sep } = await import('node:path');
   const home = homedir();
+  const isWin = process.platform === 'win32';
+  const norm = (s) => (isWin ? s.toLowerCase() : s);
+  const homeN = home ? norm(home) : null;
   const redact = (p) => {
-    if (!p) return p;
-    if (home && p.startsWith(home)) return '~' + p.slice(home.length);
+    if (!p || !homeN) return p;
+    const pN = norm(p);
+    if (pN === homeN) return '~';
+    if (pN.startsWith(homeN + sep.toLowerCase())) {
+      return '~' + p.slice(home.length);
+    }
     return p;
   };
 
@@ -636,7 +644,9 @@ async function runCheck(target) {
   console.log('|-----------|----------------------------------------------------|-----------|----------------|');
   for (const { name: v, r, err } of results) {
     if (err) {
-      console.log(`| ${v.padEnd(9)} | ERROR: ${err.message.slice(0, 40).padEnd(40)} |           | ERROR          |`);
+      // Defensive: if a non-Error is thrown, err.message might be undefined.
+      const errMsg = String((err && err.message) || err || 'unknown');
+      console.log(`| ${v.padEnd(9)} | ERROR: ${errMsg.slice(0, 40).padEnd(40)} |           | ERROR          |`);
       continue;
     }
     const cmd = r.binaryFound

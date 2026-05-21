@@ -174,17 +174,27 @@ test('installCheckForAdapter returns expected shape for each registered vendor',
 
 test('installCheckForAdapter does NOT spawn vendor subprocess (single-spawn proof)', async () => {
   // Per spec §3 #4: discovery must not break the single-spawn proof.
-  // Per codex Phase 6a strict audit P2 #5: previously this scan only checked
-  // path-resolve.js. Discovery actually pulls in vendors/index.js + every
-  // adapter file + their transitive imports. Now we scan the FULL discovery
-  // surface for top-level spawn/exec calls.
+  // Per codex Phase 6a strict audit P2 #5 + recheck F2 #5 tightening:
+  // this test scans every file whose CODE PATH is REACHED by --check or
+  // --capabilities. It does NOT scan files merely imported transitively
+  // (e.g. background.js, subprocess.js) — those legitimately contain spawn
+  // call sites for dispatch/runner paths NEVER entered during discovery.
+  //
+  // The integrity argument is: the imports of those modules don't execute
+  // their spawn-containing functions; only resolveCommandOnPath +
+  // adapter.capabilities/envPreflight execute, and those live in files
+  // listed here. Future regressions in adapter init code that called
+  // spawn at top-level would be caught.
   const { readFileSync } = await import('node:fs');
   const { fileURLToPath } = await import('node:url');
   const { dirname, resolve, join } = await import('node:path');
   const __dirname = dirname(fileURLToPath(import.meta.url));
   const REPO_ROOT = resolve(__dirname, '..', '..');
 
-  // All files reachable from --check / --capabilities WITHOUT a dispatch.
+  // Files whose CODE is invoked during --check / --capabilities:
+  // - path-resolve.js: called by installCheckForAdapter
+  // - vendors/index.js: installCheckForAdapter + capabilitiesForAdapter
+  // - vendors/*.js: each adapter's envPreflight() runs during installCheck
   const filesToScan = [
     join(REPO_ROOT, 'cli', 'src', 'path-resolve.js'),
     join(REPO_ROOT, 'cli', 'src', 'vendors', 'index.js'),
