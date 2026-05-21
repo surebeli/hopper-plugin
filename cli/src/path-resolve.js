@@ -106,3 +106,60 @@ export function isCommandAvailable(cmd) {
   const r = resolveCommandOnPath(cmd);
   return r !== null && r.resolvedPath !== null;
 }
+
+/**
+ * Phase 6c F2: resolveCommandOnPath + deterministic known-install-path lookup.
+ *
+ * NOTE: This is NOT vendor fallback orchestration (banned by spec §3 #4). This
+ * is a deterministic path resolver: walks PATH first, then statSync's a known
+ * fixed list of vendor-installer locations. No retry across vendors, no
+ * recovery loop — just "where on this machine does the binary live."
+ *
+ * Some installers (notably agy on Windows) don't add their bin directory to
+ * PATH. Without this lookup, dispatch fails with `spawn ENOENT` even when the
+ * binary exists at a deterministic location. This helper:
+ *   1. Tries resolveCommandOnPath() first (preferred — respects user's PATH)
+ *   2. If null, walks `knownInstallPaths` in order; first existing file wins
+ *   3. Returns null only if both fail
+ *
+ * Each `knownInstallPaths` entry must be an absolute path to the binary itself
+ * (e.g. `~/AppData/Local/agy/bin/agy.exe`). Tildes are not expanded — caller
+ * should expand via `os.homedir()` before declaring.
+ *
+ * Returns the same shape as resolveCommandOnPath: `{ command, prependArgs, resolvedPath }`.
+ */
+export function resolveCommandWithKnownPaths(cmd, knownInstallPaths = []) {
+  const onPath = resolveCommandOnPath(cmd);
+  if (onPath && onPath.resolvedPath) return onPath;
+  if (!knownInstallPaths || knownInstallPaths.length === 0) return onPath;  // null or qualified-as-is
+
+  const isWindows = process.platform === 'win32';
+  for (const candidate of knownInstallPaths) {
+    try {
+      const st = statSync(candidate);
+      if (!st.isFile()) continue;
+      if (!isWindows) {
+        // POSIX: verify exec bit before accepting
+        try { accessSync(candidate, constants.X_OK); } catch (_) { continue; }
+        return { command: candidate, prependArgs: [], resolvedPath: candidate };
+      }
+      // Windows: .exe/.com return directly; .cmd/.bat get cmd.exe wrap
+      const lower = candidate.toLowerCase();
+      if (lower.endsWith('.exe') || lower.endsWith('.com')) {
+        return { command: candidate, prependArgs: [], resolvedPath: candidate };
+      }
+      if (lower.endsWith('.cmd') || lower.endsWith('.bat')) {
+        return {
+          command: process.env.ComSpec || 'cmd.exe',
+          prependArgs: ['/c', candidate],
+          resolvedPath: candidate,
+        };
+      }
+      // Unknown extension — assume direct-exec on Windows
+      return { command: candidate, prependArgs: [], resolvedPath: candidate };
+    } catch (_) {
+      // continue to next fallback
+    }
+  }
+  return null;
+}

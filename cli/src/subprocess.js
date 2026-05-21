@@ -11,6 +11,39 @@
 //   NOT by port — children may be unrelated.
 
 import { spawn, execSync } from 'node:child_process';
+
+// Phase 6c F1: task-type-aware timeout floors.
+// Adapter-native timeoutMs is tuned for code-impl (short tasks). Review tasks
+// inherently need 30+ min because the reviewer reads dozens of files, runs the
+// test suite, then writes findings. Without this floor, the 5-vendor dogfood
+// audit on 2026-05-21 had all 5 vendors timeout before writing a verdict.
+// See docs/audit/phase-6b-dogfood-5vendor.md for the meta-finding.
+const REVIEW_TASK_TYPES = new Set([
+  'code-review-adversarial',
+  'code-review-acceptance',
+]);
+const REVIEW_TASK_FLOOR_MS = 1_800_000;  // 30 min floor for any review task
+
+/**
+ * Apply task-type-aware floor to an adapter-native timeout.
+ * - For review task-types: returns max(native, REVIEW_TASK_FLOOR_MS).
+ *   Lets a vendor like codex with reasoning=xhigh still extend beyond the
+ *   floor if it wants more time; capped vendors get raised TO the floor.
+ * - For non-review task-types: returns native unchanged.
+ *
+ * Adapters call this from their `timeoutMs(opts)` implementation. The
+ * dispatch/runner path is responsible for setting `opts.taskType`.
+ */
+export function applyTaskTypeFloor(nativeMs, opts) {
+  if (!opts || !opts.taskType) return nativeMs;
+  if (REVIEW_TASK_TYPES.has(opts.taskType)) {
+    return Math.max(nativeMs, REVIEW_TASK_FLOOR_MS);
+  }
+  return nativeMs;
+}
+
+export { REVIEW_TASK_TYPES, REVIEW_TASK_FLOOR_MS };
+
 import { platform, tmpdir } from 'node:os';
 import { join } from 'node:path';
 

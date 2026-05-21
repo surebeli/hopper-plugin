@@ -13,6 +13,7 @@ import { parseQueue, findEligibleTask, summarizeQueue } from './queue.js';
 import { loadTaskFrame, composePrompt } from './tasks.js';
 import { parseAgentsFile, resolveVendor } from './agents.js';
 import { getAdapter } from './vendors/index.js';
+import { resolveCommandWithKnownPaths } from './path-resolve.js';
 import { runSubprocessOnce } from './subprocess.js';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -154,15 +155,25 @@ export async function executeWithAdapter({ resolved, adapter, adapterOpts = {} }
     logPath = hint.logPath || null;
   }
 
-  // Build args (adapter may want logFile threaded through opts)
-  const effectiveOpts = { ...adapterOpts, logFile: logPath };
+  // Build args (adapter may want logFile threaded through opts).
+  // Phase 6c F1: include task.taskType so timeoutMs can apply review-task floor.
+  const effectiveOpts = { ...adapterOpts, logFile: logPath, taskType: task.taskType };
   const args = adapter.args(composedPrompt, effectiveOpts);
 
-  // Spawn subprocess ONCE (per spec §3 #4)
+  // Spawn subprocess ONCE (per spec §3 #4).
+  // Phase 6c F2: resolve adapter.command with deterministic known-install
+  // paths (NOT vendor-retry orchestration) so installers that don't add
+  // their bin to PATH (agy on Windows) still work.
+  const resolvedCmd = resolveCommandWithKnownPaths(adapter.command, adapter.knownInstallPaths || []);
+  const spawnCommand = resolvedCmd ? resolvedCmd.command : adapter.command;
+  const spawnArgs = resolvedCmd && resolvedCmd.prependArgs.length > 0
+    ? [...resolvedCmd.prependArgs, ...args]
+    : args;
+
   const stdinInput = adapter.stdinMode === 'pipe' ? composedPrompt : null;
   const raw = await runSubprocessOnce({
-    command: adapter.command,
-    args,
+    command: spawnCommand,
+    args: spawnArgs,
     stdinInput,
     timeoutMs: adapter.timeoutMs(effectiveOpts),
     logFilePath: logPath,

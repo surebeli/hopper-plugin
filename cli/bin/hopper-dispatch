@@ -340,6 +340,17 @@ function warnIfModelUnknown(vendor, model) {
     console.error(`  warn: model '${model}' not in cached list for ${vendor}`);
     console.error(`  cached models (${staleness(cached.probed_at)}): ${cached.models.slice(0, 8).join(', ')}${cached.models.length > 8 ? '...' : ''}`);
     console.error(`  proceeding anyway; run \`hopper-dispatch --probe ${vendor}\` to refresh cache if vendor recently added it`);
+    // Phase 6c P1: vendor-specific actionable hint. kimi (config-only
+    // introspection) is the motivating case — the user can't just wait for
+    // a future probe; they have to add the alias to their config first.
+    if (vendor === 'kimi' && cached.introspection_supported === 'config-only') {
+      console.error(`  hint: kimi -m takes the ALIAS from ~/.kimi/config.toml [models.X] blocks, NOT the upstream Moonshot ID.`);
+      console.error(`  fix: add this block to ~/.kimi/config.toml (replace upstream ID with your target):`);
+      console.error(`      [models.${model}]`);
+      console.error(`      model = "kimi-k2-thinking"   # or another Moonshot upstream ID`);
+      console.error(`      capabilities = ["thinking"]   # if your target supports thinking`);
+      console.error(`  then: hopper-dispatch --probe kimi  # refresh cache`);
+    }
   } else if (isStale(cached.probed_at)) {
     console.error(`  note: cache for ${vendor} is ${staleness(cached.probed_at)}; consider \`hopper-dispatch --probe ${vendor}\` to refresh`);
   }
@@ -488,7 +499,8 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {} } = {
   const handoffDir = join(hopperDir, 'handoffs');
   const outputMdPath = join(handoffDir, `${taskId}-output.md`);
   const logPath = outputMdPath.replace(/\.md$/, '.log');
-  const effectiveOpts = { ...adapterOpts, logFile: logPath };
+  // Phase 6c F1: thread taskType through so runner's timeoutMs() applies review floor.
+  const effectiveOpts = { ...adapterOpts, logFile: logPath, taskType: resolved.task.taskType };
   const adapterArgv = adapter.args(resolved.composedPrompt, effectiveOpts);
 
   try {

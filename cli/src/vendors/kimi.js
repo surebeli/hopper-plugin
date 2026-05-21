@@ -7,6 +7,7 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { applyTaskTypeFloor } from '../subprocess.js';
 
 /** @type {import('../types.js').VendorAdapter} */
 export const kimiAdapter = {
@@ -42,11 +43,20 @@ export const kimiAdapter = {
   },
 
   args(input, opts) {
+    // Phase 6c: forward opts.reasoning truthy → --thinking flag. Per the
+    // sourceNote above, kimi's reasoning control is a binary --thinking /
+    // --no-thinking toggle, not an enumerated level. Any truthy reasoning
+    // value (low/medium/high/xhigh/true) maps to --thinking. To explicitly
+    // disable, pass --reasoning=none or omit the flag.
+    const thinkingFlag = opts.reasoning && opts.reasoning !== 'none'
+      ? ['--thinking']
+      : [];
     return [
       '-p', input,
       '--print',
       '--afk',
       '--final-message-only',
+      ...thinkingFlag,
       ...(opts.model ? ['-m', opts.model] : []),
     ];
   },
@@ -68,9 +78,11 @@ export const kimiAdapter = {
     };
   },
 
-  timeoutMs(_opts) {
-    // Kimi-thinking can take longer; default 180s per T-00b
-    return 180_000;
+  timeoutMs(opts) {
+    // Native: 180s for kimi-thinking (T-00b research)
+    const native = 180_000;
+    // Phase 6c F1: review task-types get raised to 30min floor
+    return applyTaskTypeFloor(native, opts);
   },
 
   parseResult(raw) {

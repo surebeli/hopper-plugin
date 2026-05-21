@@ -15,13 +15,20 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { makeUniqueLogPath } from '../subprocess.js';
+import { makeUniqueLogPath, applyTaskTypeFloor } from '../subprocess.js';
 
 /** @type {import('../types.js').VendorAdapter} */
 export const agyAdapter = {
   name: 'agy',
   command: 'agy',
   stdinMode: 'none',
+  // Phase 6c F2: agy installer on Windows does NOT add its bin to PATH.
+  // Probe and dispatch both correctly report "not found" without these
+  // fallbacks. When PATH lookup fails, the runner consults this list to
+  // locate the binary at its deterministic install location.
+  knownInstallPaths: process.platform === 'win32'
+    ? [join(homedir(), 'AppData', 'Local', 'agy', 'bin', 'agy.exe')]
+    : [join(homedir(), '.local', 'bin', 'agy')],
 
   // Phase 6a static capability hint — sourced from docs/research/.
   capabilities: {
@@ -119,9 +126,10 @@ export const agyAdapter = {
     }
   },
 
-  timeoutMs(_opts) {
-    // agy default print-timeout is 5min; we hard-cap at 6min for safety margin
-    return 360_000;
+  timeoutMs(opts) {
+    // Native: 360s (agy default print-timeout is 5min; we cap at 6min)
+    // Phase 6c F1: review task-types get raised to 30min floor
+    return applyTaskTypeFloor(360_000, opts);
   },
 
   parseResult(raw) {

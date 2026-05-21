@@ -6,11 +6,16 @@
 // Default model `gemini-3.5-flash` is baked into the binary. There is nothing
 // to probe — just declare the static capability.
 
-import { resolveCommandOnPath } from '../path-resolve.js';
+import { resolveCommandWithKnownPaths } from '../path-resolve.js';
+import { agyAdapter } from '../vendors/agy.js';
 
 export async function probe() {
   const t0 = Date.now();
-  const resolved = resolveCommandOnPath('agy');
+  // Phase 6c F2: respect adapter's knownInstallPaths so probe matches dispatch.
+  // Without this, probe correctly reports 0 models for agy on Windows
+  // (because the installer didn't add bin to PATH) even though the binary
+  // is present at its deterministic install path.
+  const resolved = resolveCommandWithKnownPaths('agy', agyAdapter.knownInstallPaths || []);
   const binaryPath = resolved && resolved.resolvedPath ? resolved.resolvedPath : null;
 
   return {

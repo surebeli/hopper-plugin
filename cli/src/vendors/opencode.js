@@ -8,6 +8,7 @@
 import { existsSync } from 'node:fs';
 import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
+import { applyTaskTypeFloor } from '../subprocess.js';
 
 /** @type {import('../types.js').VendorAdapter} */
 export const opencodeAdapter = {
@@ -72,8 +73,10 @@ export const opencodeAdapter = {
     };
   },
 
-  timeoutMs(_opts) {
-    return 180_000;
+  timeoutMs(opts) {
+    // Native: 180s for typical opencode run
+    // Phase 6c F1: review task-types get raised to 30min floor
+    return applyTaskTypeFloor(180_000, opts);
   },
 
   parseResult(raw) {

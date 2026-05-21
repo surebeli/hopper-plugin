@@ -1,0 +1,196 @@
+// Phase 6c tests: task-type-aware timeouts + adapter knownInstallPaths + kimi --thinking + soft-warn enhancement
+// Anchor: tests/unit/phase6c.test.js
+
+import { test } from 'node:test';
+import { strict as assert } from 'node:assert';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { applyTaskTypeFloor, REVIEW_TASK_FLOOR_MS, REVIEW_TASK_TYPES } from '../../cli/src/subprocess.js';
+import { resolveCommandWithKnownPaths } from '../../cli/src/path-resolve.js';
+
+// ─── F1: applyTaskTypeFloor ────────────────────────────────────────────
+
+test('F1: applyTaskTypeFloor returns native when opts has no taskType', () => {
+  assert.equal(applyTaskTypeFloor(120_000, {}), 120_000);
+  assert.equal(applyTaskTypeFloor(120_000, undefined), 120_000);
+  assert.equal(applyTaskTypeFloor(120_000, null), 120_000);
+});
+
+test('F1: applyTaskTypeFloor returns native for non-review task-types', () => {
+  for (const tt of ['code-impl', 'spec-write', 'sidecar-polish', 'spec-blindspot-hunt']) {
+    assert.equal(applyTaskTypeFloor(120_000, { taskType: tt }), 120_000,
+      `non-review task-type '${tt}' should not be elevated`);
+  }
+});
+
+test('F1: applyTaskTypeFloor raises review task-types to 30min floor', () => {
+  for (const tt of REVIEW_TASK_TYPES) {
+    assert.equal(applyTaskTypeFloor(120_000, { taskType: tt }), REVIEW_TASK_FLOOR_MS,
+      `review task-type '${tt}' should be raised to floor`);
+    assert.equal(applyTaskTypeFloor(120_000, { taskType: tt }), 1_800_000);
+  }
+});
+
+test('F1: applyTaskTypeFloor does NOT cap above the floor (codex xhigh stays 900s only if < floor)', () => {
+  // If a vendor's native is already above the floor, keep it.
+  const above = 3_600_000;
+  assert.equal(applyTaskTypeFloor(above, { taskType: 'code-review-adversarial' }), above,
+    'native above floor should be preserved');
+});
+
+test('F1: REVIEW_TASK_TYPES contains the two review task-types from tasks/', () => {
+  assert.ok(REVIEW_TASK_TYPES.has('code-review-adversarial'));
+  assert.ok(REVIEW_TASK_TYPES.has('code-review-acceptance'));
+});
+
+// ─── F1 wiring: each adapter applies the floor through opts.taskType ──
+
+test('F1 wiring: codex timeoutMs(opts) returns 30min floor for review task-types', async () => {
+  const { codexAdapter } = await import('../../cli/src/vendors/codex.js');
+  // Native codex defaults to 300s; xhigh = 900s; both are < 30min floor
+  assert.equal(codexAdapter.timeoutMs({}), 300_000);
+  assert.equal(codexAdapter.timeoutMs({ reasoning: 'xhigh' }), 900_000);
+  assert.equal(codexAdapter.timeoutMs({ taskType: 'code-review-adversarial' }), 1_800_000);
+  assert.equal(codexAdapter.timeoutMs({ taskType: 'code-review-adversarial', reasoning: 'xhigh' }), 1_800_000);
+});
+
+test('F1 wiring: copilot timeoutMs(opts) elevates from 120s → 30min for review tasks', async () => {
+  const { copilotAdapter } = await import('../../cli/src/vendors/copilot.js');
+  assert.equal(copilotAdapter.timeoutMs({}), 120_000);
+  assert.equal(copilotAdapter.timeoutMs({ taskType: 'code-review-adversarial' }), 1_800_000);
+});
+
+test('F1 wiring: opencode timeoutMs(opts) elevates from 180s → 30min for review tasks', async () => {
+  const { opencodeAdapter } = await import('../../cli/src/vendors/opencode.js');
+  assert.equal(opencodeAdapter.timeoutMs({}), 180_000);
+  assert.equal(opencodeAdapter.timeoutMs({ taskType: 'code-review-acceptance' }), 1_800_000);
+});
+
+test('F1 wiring: kimi timeoutMs(opts) elevates from 180s → 30min for review tasks', async () => {
+  const { kimiAdapter } = await import('../../cli/src/vendors/kimi.js');
+  assert.equal(kimiAdapter.timeoutMs({}), 180_000);
+  assert.equal(kimiAdapter.timeoutMs({ taskType: 'code-review-adversarial' }), 1_800_000);
+});
+
+test('F1 wiring: agy timeoutMs(opts) elevates from 360s → 30min for review tasks', async () => {
+  const { agyAdapter } = await import('../../cli/src/vendors/agy.js');
+  assert.equal(agyAdapter.timeoutMs({}), 360_000);
+  assert.equal(agyAdapter.timeoutMs({ taskType: 'code-review-adversarial' }), 1_800_000);
+});
+
+// ─── F2: resolveCommandWithKnownPaths ────────────────────────────────────
+
+test('F2: resolveCommandWithKnownPaths returns null when PATH lookup fails AND no known paths', () => {
+  const r = resolveCommandWithKnownPaths('definitely-nonexistent-binary-xyz123', []);
+  assert.equal(r, null);
+});
+
+test('F2: resolveCommandWithKnownPaths returns null when PATH fails AND all known paths missing', () => {
+  const r = resolveCommandWithKnownPaths('definitely-nonexistent-binary-xyz123', ['/no/such/path']);
+  assert.equal(r, null);
+});
+
+test('F2: resolveCommandWithKnownPaths uses known-install path when PATH lookup fails', async (t) => {
+  const tmp = mkdtempSync(join(tmpdir(), 'fallback-'));
+  t.after(() => rmSync(tmp, { recursive: true, force: true }));
+  const isWindows = process.platform === 'win32';
+  const fallbackBin = join(tmp, isWindows ? 'fake.exe' : 'fake');
+  writeFileSync(fallbackBin, '');
+  if (!isWindows) {
+    const { chmodSync } = await import('node:fs');
+    chmodSync(fallbackBin, 0o755);
+  }
+  const r = resolveCommandWithKnownPaths('this-name-isnt-on-path-xyz', [fallbackBin]);
+  assert.ok(r, 'fallback should resolve');
+  assert.equal(r.resolvedPath, fallbackBin);
+  // .exe on Windows → direct exec; POSIX → direct
+  if (isWindows && fallbackBin.toLowerCase().endsWith('.exe')) {
+    assert.equal(r.command, fallbackBin);
+    assert.deepEqual(r.prependArgs, []);
+  }
+});
+
+test('F2: resolveCommandWithKnownPaths walks known paths in order (first hit wins)', async (t) => {
+  const tmp = mkdtempSync(join(tmpdir(), 'fallback-order-'));
+  t.after(() => rmSync(tmp, { recursive: true, force: true }));
+  const isWindows = process.platform === 'win32';
+  const first = join(tmp, isWindows ? 'first.exe' : 'first');
+  const second = join(tmp, isWindows ? 'second.exe' : 'second');
+  writeFileSync(first, '');
+  writeFileSync(second, '');
+  if (!isWindows) {
+    const { chmodSync } = await import('node:fs');
+    chmodSync(first, 0o755);
+    chmodSync(second, 0o755);
+  }
+  const r = resolveCommandWithKnownPaths('not-on-path-xyz', ['/no/such', first, second]);
+  assert.equal(r.resolvedPath, first, 'should take first existing fallback');
+});
+
+test('F2: agy adapter declares knownInstallPaths for both platforms', async () => {
+  const { agyAdapter } = await import('../../cli/src/vendors/agy.js');
+  assert.ok(Array.isArray(agyAdapter.knownInstallPaths), 'agy must declare knownInstallPaths');
+  assert.ok(agyAdapter.knownInstallPaths.length > 0, 'at least one fallback path');
+  if (process.platform === 'win32') {
+    assert.ok(agyAdapter.knownInstallPaths[0].endsWith('agy.exe'),
+      `Windows fallback should end in agy.exe; got ${agyAdapter.knownInstallPaths[0]}`);
+    assert.ok(agyAdapter.knownInstallPaths[0].includes('AppData'),
+      'Windows fallback should point at Windows install location');
+  }
+});
+
+// ─── P1: kimi --thinking forwarding ────────────────────────────────────
+
+test('P1: kimi args() includes --thinking when opts.reasoning is truthy', async () => {
+  const { kimiAdapter } = await import('../../cli/src/vendors/kimi.js');
+  const argsWithoutReasoning = kimiAdapter.args('prompt', {});
+  assert.ok(!argsWithoutReasoning.includes('--thinking'),
+    `no reasoning → no --thinking; got: ${argsWithoutReasoning.join(' ')}`);
+
+  for (const r of ['low', 'medium', 'high', 'xhigh', true]) {
+    const args = kimiAdapter.args('prompt', { reasoning: r });
+    assert.ok(args.includes('--thinking'),
+      `reasoning=${r} should include --thinking; got: ${args.join(' ')}`);
+  }
+});
+
+test('P1: kimi args() omits --thinking when opts.reasoning is "none"', async () => {
+  const { kimiAdapter } = await import('../../cli/src/vendors/kimi.js');
+  const args = kimiAdapter.args('prompt', { reasoning: 'none' });
+  assert.ok(!args.includes('--thinking'),
+    `reasoning=none → no --thinking; got: ${args.join(' ')}`);
+});
+
+test('P1: kimi args() preserves -m forwarding alongside --thinking', async () => {
+  const { kimiAdapter } = await import('../../cli/src/vendors/kimi.js');
+  const args = kimiAdapter.args('prompt', { reasoning: 'high', model: 'kimi-thinking' });
+  assert.ok(args.includes('--thinking'));
+  assert.ok(args.includes('-m'));
+  assert.ok(args.includes('kimi-thinking'));
+});
+
+// ─── P2: soft-warn enhancement for kimi config-only ───────────────────
+
+test('P2 (manual-check): kimi config-only soft-warn includes TOML snippet hint', async () => {
+  // The hopper-dispatch warnIfModelUnknown helper writes to console.error
+  // when vendor=kimi + introspection_supported=config-only. Hard to unit
+  // test without exec'ing the bin — assert the bin file contains the
+  // expected hint string + recommended TOML snippet structure.
+  const { readFileSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const { dirname, resolve, join: pathJoin } = await import('node:path');
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const REPO_ROOT = resolve(__dirname, '..', '..');
+  const src = readFileSync(pathJoin(REPO_ROOT, 'cli', 'bin', 'hopper-dispatch'), 'utf-8');
+
+  assert.match(src, /vendor === 'kimi'/,
+    'soft-warn must include vendor-specific branch for kimi');
+  assert.match(src, /config-only/,
+    'soft-warn must check introspection_supported === config-only');
+  assert.match(src, /\[models\.\$\{model\}\]/,
+    'soft-warn must print the [models.X] TOML block snippet');
+  assert.match(src, /capabilities = \["thinking"\]/,
+    'soft-warn must include capabilities hint for thinking-capable models');
+});

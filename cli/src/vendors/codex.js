@@ -8,6 +8,7 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { applyTaskTypeFloor } from '../subprocess.js';
 
 /** @type {import('../types.js').VendorAdapter} */
 export const codexAdapter = {
@@ -68,9 +69,12 @@ export const codexAdapter = {
   },
 
   timeoutMs(opts) {
-    if (opts.reasoning === 'xhigh') return 900_000;
-    if (opts.reasoning === 'high') return 600_000;
-    return 300_000;
+    // Native: codex scales with reasoning level
+    let native = 300_000;
+    if (opts.reasoning === 'xhigh') native = 900_000;
+    else if (opts.reasoning === 'high') native = 600_000;
+    // Phase 6c F1: review task-types get raised to 30min floor
+    return applyTaskTypeFloor(native, opts);
   },
 
   parseResult(raw) {

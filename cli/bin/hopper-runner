@@ -15,7 +15,7 @@ import { openSync, closeSync, readFileSync, existsSync } from 'node:fs';
 import { readFrontmatter, writeFrontmatter } from '../src/background.js';
 import { getAdapter } from '../src/vendors/index.js';
 import { killProcessTree } from '../src/subprocess.js';
-import { resolveCommandOnPath } from '../src/path-resolve.js';
+import { resolveCommandOnPath, resolveCommandWithKnownPaths } from '../src/path-resolve.js';
 
 function parseRunnerArgs(argv) {
   // Format: --task-id X --hopper-dir Y --adapter Z --output-md A --log B -- <adapter argv...>
@@ -115,7 +115,10 @@ async function main() {
   // Per shared cli/src/path-resolve.js: in-process PATH + PATHEXT walk
   // (no subprocess). Real .exe → spawn directly; .cmd/.bat → wrap with
   // cmd.exe /c. POSIX returns command unchanged.
-  const resolved = resolveCommandOnPath(adapter.command);
+  // Phase 6c F2: also consult adapter.knownInstallPaths for installers that
+  // don't add their bin to PATH (agy on Windows is the motivating case).
+  // This is deterministic path lookup, NOT vendor-retry orchestration.
+  const resolved = resolveCommandWithKnownPaths(adapter.command, adapter.knownInstallPaths || []);
   const resolvedCmd = resolved ? resolved.command : adapter.command;
   const prependArgs = resolved ? resolved.prependArgs : [];
   const finalArgv = [...prependArgs, ...adapterArgv];

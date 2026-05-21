@@ -5,6 +5,8 @@
 // Per subagent research: requires GH_TOKEN env with "Copilot Requests" PAT permission.
 // Quota meter: every -p call consumes premium request quota; use sparingly.
 
+import { applyTaskTypeFloor } from '../subprocess.js';
+
 /** @type {import('../types.js').VendorAdapter} */
 export const copilotAdapter = {
   name: 'copilot',
@@ -59,8 +61,11 @@ export const copilotAdapter = {
     };
   },
 
-  timeoutMs(_opts) {
-    return 120_000;
+  timeoutMs(opts) {
+    // Native: 120s for typical copilot -p call
+    // Phase 6c F1: review task-types get raised to 30min floor (was the
+    // most aggressively misaligned vendor — killed in 122s before context-load done)
+    return applyTaskTypeFloor(120_000, opts);
   },
 
   parseResult(raw) {

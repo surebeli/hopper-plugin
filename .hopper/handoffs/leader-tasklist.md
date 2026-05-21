@@ -220,3 +220,74 @@ TOP-3 INSIGHTS prior audits missed.
 STRONGEST HN ATTACK on this Phase 5 work + best rebuttal prep.
 
 Length budget: ~1500 words.
+
+---
+
+## T-AUDIT-PH6B audit pack (5 vendors, parallel)
+
+Phase 6b just shipped (commit `ed16903`): asymmetric vendor probe + per-machine capability cache. Two rounds of codex strict audit already cleared (R1 + R2; see `docs/audit/phase-6b-strict-audit.md` and `phase-6b-strict-audit-r2.md`). This dogfood dispatches 5 heterogeneous vendors to cross-check what those rounds may still have missed.
+
+**Repo root:** `F:/workspace/ai/hopper-plugin`
+**Commit under audit:** `ed16903` (Phase 6b: probe + cache + soft-warn)
+
+**Files to audit (newly added or significantly changed by Phase 6b):**
+- `cli/src/cache.js` — per-machine cache; O_EXCL lockfile race fix; readCacheWithDiagnostics
+- `cli/src/vendor-probe/codex.js` — JSON parsing of `codex debug models --bundled`; 5 reasoning levels
+- `cli/src/vendor-probe/opencode.js` — text + ANSI strip + anchored identifier regex
+- `cli/src/vendor-probe/kimi.js` — TOML parsing with quoted-key + bracket-in-key tolerance
+- `cli/src/vendor-probe/copilot.js` — `version` + filesystem scan of agent .md files
+- `cli/src/vendor-probe/agy.js` — static (zero spawn); identifier is bare `gemini-3.5-flash`
+- `cli/src/vendors/index.js` — `probeVendor()` lazy-import carve-out
+- `cli/bin/hopper-dispatch` — `--probe`, `--models`, `warnIfModelUnknown` helper
+- `tests/unit/cache.test.js` — sync-barrier race test
+- `tests/unit/vendor-probe.test.js` — 13 fixture-based parser tests
+
+**Hard rules (any violation = at least P1):**
+1. Spec §3 #4 no-harness-core: probe is opt-in diagnostic only; no retry/fallback/round-robin/circuit-breaker/consensus.
+2. Single-spawn invariant: `cli/src/path-resolve.js`, `cli/src/vendors/index.js`, `cli/src/vendors/*.js` adapter files MUST remain zero-spawn. `vendor-probe/*.js` may spawn (lazy-import carve-out).
+3. No hardcoded model lists in probe runtime path.
+4. agy ≠ antigravity: probe adapter must not conflate the two binaries.
+5. No Anthropic Agent SDK / `claude -p` / direct Anthropic SDK usage anywhere.
+
+**Audit angles (cover all 8; flag any P0/P1 immediately):**
+1. Cache race correctness — O_EXCL lockfile + re-read-merge inside critical section + stale-lock auto-clear; cross-platform.
+2. Parser robustness — codex `.slug`, opencode anchored regex, kimi TOML alternation, copilot directory-scan.
+3. Single-spawn invariant integrity — any `--check`/`--capabilities`/dispatch path that loads vendor-probe?
+4. Probe timeout/process-tree hygiene — killProcessTree with detached on POSIX; 30s per spawn.
+5. Soft-warn behavior — warnIfModelUnknown is non-blocking, called from both sync + background.
+6. Schema/version safety — cache version field migration path.
+7. Cross-platform fragility — Windows PATHEXT, UNC paths, symlink behavior.
+8. Code/test alignment — do new tests actually exercise what they claim?
+
+**Output (each vendor writes to `.hopper/handoffs/<task-id>-output.md`):**
+- Summary (1 paragraph)
+- Findings (severity-ordered): `[F<N>] P0/P1/P2: <one-line>` + Root cause + Recommended fix
+- Verdict: PASS | PASS_WITH_NOTES | REWORK
+- Top-3 things prior codex R1+R2 might have missed
+
+Length budget per vendor: ~1500 words.
+
+---
+
+## T-AUDIT-PH6B-codex (Phase 6b audit by codex gpt-5.5 xhigh)
+
+Vendor lens: codex with reasoning xhigh. Dispatched FRESH — audit per the T-AUDIT-PH6B audit pack above. Look for what a third pass would catch beyond R1/R2.
+
+## T-AUDIT-PH6B-kimi (Phase 6b audit by kimi thinking)
+
+Vendor lens: kimi -m kimi-thinking. Audit per the T-AUDIT-PH6B audit pack above. Particularly valuable for spotting cross-platform or test-design issues codex's heavy reasoning may have glossed.
+
+WARNING: Prior T-AUDIT-PH5-kimi failed at 180s timeout. If you hit timeout, output whatever you have — partial findings are still data.
+
+## T-AUDIT-PH6B-opencode (Phase 6b audit by opencode deepseek-v4-flash high)
+
+Vendor lens: opencode --model deepseek/deepseek-v4-flash --reasoning high. Audit per the audit pack above. Second-tier vendor perspective on real-bug vs over-engineering.
+
+## T-AUDIT-PH6B-copilot (Phase 6b audit by copilot Sonnet 4.6)
+
+Vendor lens: copilot --model claude-sonnet-4.6. Audit per the audit pack above. Quota-metered; keep findings focused, verdict-driven.
+
+## T-AUDIT-PH6B-agy (Phase 6b audit by agy gemini-3.5-flash)
+
+Vendor lens: agy (Antigravity), gemini-3.5-flash baked in; no model/reasoning flags. Audit per the audit pack above. If silent-auth-fail, adapter reports auth-fail rather than empty output.
+

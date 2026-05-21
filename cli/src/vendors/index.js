@@ -68,10 +68,12 @@ export function listAdapters() {
  * }}
  */
 export async function installCheckForAdapter(name) {
-  const { resolveCommandOnPath } = await import('../path-resolve.js');
+  // Phase 6c F2: also consult adapter.knownInstallPaths so --check reports
+  // installed-but-not-on-PATH binaries (agy on Windows) correctly.
+  const { resolveCommandWithKnownPaths } = await import('../path-resolve.js');
   const adapter = REGISTRY[name];
   if (!adapter) throw new Error(`No vendor adapter registered for '${name}'`);
-  const resolved = resolveCommandOnPath(adapter.command);
+  const resolved = resolveCommandWithKnownPaths(adapter.command, adapter.knownInstallPaths || []);
   const binaryFound = resolved !== null && resolved.resolvedPath !== null;
   const auth = adapter.envPreflight();
   const authOk = auth.ok && (!auth.missing || auth.missing.length === 0);
