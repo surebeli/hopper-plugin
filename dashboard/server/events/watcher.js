@@ -4,6 +4,7 @@ import { basename, join, relative } from 'node:path';
 export function createWatcher({
   hopperDir,
   hub,
+  logTailer = null,
   livenessIntervalMs = 5000,
   watch = chokidar.watch,
 } = {}) {
@@ -17,7 +18,13 @@ export function createWatcher({
   });
   watcher.on('all', (type, filePath) => {
     const mapped = mapFileEvent(hopperDir, type, filePath);
-    if (mapped) hub.publish(mapped.channel, mapped.event, mapped.payload);
+    if (!mapped) return;
+    if (mapped.event === 'log' && logTailer) {
+      const chunk = logTailer.readNew(mapped.payload.taskId);
+      if (chunk.chunk) hub.publish(mapped.channel, 'log', { ...mapped.payload, ...chunk });
+      return;
+    }
+    hub.publish(mapped.channel, mapped.event, mapped.payload);
   });
   const liveness = livenessIntervalMs > 0
     ? setInterval(() => publishLiveness(hub), livenessIntervalMs)
@@ -53,7 +60,8 @@ export function mapFileEvent(hopperDir, type, filePath) {
     return withChannel(`task/${taskIdFromHandoff(filePath)}`, 'task', payload);
   }
   if (rel.startsWith('handoffs/') && rel.endsWith('.log')) {
-    return withChannel(`log/${taskIdFromLog(filePath)}`, 'log', payload);
+    const taskId = taskIdFromLog(filePath);
+    return withChannel(`log/${taskId}`, 'log', { ...payload, taskId });
   }
   return null;
 }

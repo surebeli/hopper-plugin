@@ -8,7 +8,9 @@ import json from 'highlight.js/lib/languages/json';
 import markdownLanguage from 'highlight.js/lib/languages/markdown';
 import typescript from 'highlight.js/lib/languages/typescript';
 import { useNavigate } from 'react-router-dom';
+import { LiveLog } from '@/components/LiveLog';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
 import { fetchTask, queryKeys } from '@/lib/api';
 import { useSSE } from '@/lib/sse';
@@ -70,7 +72,7 @@ export function TaskDrawer({ id }: { id: string }) {
           <SheetTitle>{id || 'task detail'}</SheetTitle>
           <SheetDescription>frontmatter and output body</SheetDescription>
         </SheetHeader>
-        <TaskDetailPanel detail={data} isError={isError} isLoading={isLoading} />
+        <TaskDetailPanel detail={data} id={id} isError={isError} isLoading={isLoading} />
       </SheetContent>
     </Sheet>
   );
@@ -78,10 +80,12 @@ export function TaskDrawer({ id }: { id: string }) {
 
 export function TaskDetailPanel({
   detail,
+  id = '',
   isError = false,
   isLoading = false,
 }: {
   detail?: TaskDetail;
+  id?: string;
   isError?: boolean;
   isLoading?: boolean;
 }) {
@@ -95,26 +99,40 @@ export function TaskDetailPanel({
   }
 
   return (
-    <div className="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)]">
-      <section className="border-b border-border">
-        <Table className="font-mono text-xs">
-          <TableBody>
-            {frontmatterFields.map((field) => (
-              <TableRow key={field} className="h-8">
-                <TableCell className="h-8 w-40 text-muted-foreground">{field}</TableCell>
-                <TableCell className="h-8 truncate text-foreground">{formatValue(detail?.frontmatter[field])}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </section>
-      <section className="min-h-0 overflow-auto p-3">
+    <Tabs defaultValue="output">
+      <TabsList>
+        <TabsTrigger value="output">Output</TabsTrigger>
+        <TabsTrigger value="live-log">Live log</TabsTrigger>
+        <TabsTrigger value="frontmatter">Frontmatter</TabsTrigger>
+      </TabsList>
+      <TabsContent value="output" className="overflow-auto p-3">
         <div
           className="font-mono text-sm leading-6 text-foreground [&_a]:text-primary [&_a]:underline [&_code]:rounded-sm [&_code]:bg-muted/50 [&_code]:px-1 [&_li]:ml-5 [&_ol]:list-decimal [&_p]:mb-3 [&_pre]:mb-3 [&_pre]:overflow-auto [&_pre]:rounded-sm [&_pre]:border [&_pre]:border-border [&_pre]:bg-background [&_pre]:p-2 [&_table]:mb-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-border [&_th]:px-2 [&_th]:py-1 [&_ul]:list-disc [&_.hljs-line-code]:min-w-0 [&_.hljs-line-number]:select-none [&_.hljs-line-number]:pr-3 [&_.hljs-line-number]:text-right [&_.hljs-line-number]:text-muted-foreground [&_.hljs-line]:grid [&_.hljs-line]:grid-cols-[2rem_minmax(0,1fr)]"
           dangerouslySetInnerHTML={{ __html: bodyHtml || '<p class="text-muted-foreground">—</p>' }}
         />
-      </section>
-    </div>
+      </TabsContent>
+      <TabsContent value="live-log" className="flex">
+        <LiveLog id={id || detail?.id || ''} />
+      </TabsContent>
+      <TabsContent value="frontmatter" className="overflow-auto">
+        <FrontmatterTable frontmatter={detail?.frontmatter || {}} />
+      </TabsContent>
+    </Tabs>
+  );
+}
+
+export function FrontmatterTable({ frontmatter }: { frontmatter: TaskDetail['frontmatter'] }) {
+  return (
+    <Table className="font-mono text-xs">
+      <TableBody>
+        {frontmatterFields.map((field) => (
+          <TableRow key={field} className="h-8">
+            <TableCell className="h-8 w-40 text-muted-foreground">{field}</TableCell>
+            <TableCell className="h-8 truncate text-foreground">{formatValue(frontmatter[field])}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 

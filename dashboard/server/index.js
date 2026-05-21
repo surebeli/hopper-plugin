@@ -7,6 +7,7 @@ import costRouter from './routes/cost.js';
 import { createSseHub, createSseRouter } from './events/sse.js';
 import { createWatcher } from './events/watcher.js';
 import { findHopperDir } from './lib/hopper-dir.js';
+import { createLogTailer } from './lib/tail.js';
 import { createQueueRouter } from './routes/queue.js';
 import { createTaskRouter } from './routes/task.js';
 import vendorsRouter from './routes/vendors.js';
@@ -44,21 +45,24 @@ export function parseServerArgs(argv = process.argv.slice(2)) {
   return opts;
 }
 
-export function createApp({ dev = false, distDir = DEFAULT_DIST, hopperDir = null, sseHub = createSseHub() } = {}) {
+export function createApp({ dev = false, distDir = DEFAULT_DIST, hopperDir = null, sseHub = createSseHub(), logTailer = null } = {}) {
   const app = express();
+  const root = hopperDir || findHopperDir();
+  const tailer = logTailer || createLogTailer({ hopperDir: root });
   app.locals.sseHub = sseHub;
+  app.locals.logTailer = tailer;
   app.disable('x-powered-by');
   app.use(express.json());
 
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true, mode: dev ? 'dev' : 'prod' });
   });
-  app.use('/api', createQueueRouter({ hopperDir }));
-  app.use('/api/task', createTaskRouter({ hopperDir }));
+  app.use('/api', createQueueRouter({ hopperDir: root }));
+  app.use('/api/task', createTaskRouter({ hopperDir: root }));
   app.use('/api/vendors', vendorsRouter);
   app.use('/api/cost', costRouter);
   app.use('/api/action', actionsRouter);
-  app.use('/events', createSseRouter(sseHub));
+  app.use('/events', createSseRouter(sseHub, { logTailer: tailer }));
 
   if (dev) {
     app.get('/', (_req, res) => res.type('text').send('hopper dashboard api online'));
@@ -96,13 +100,15 @@ export function startServer({
       const address = server.address();
       const actualPort = typeof address === 'object' && address ? address.port : port;
       const root = hopperDir || findHopperDir();
-      if (watchEvents && root) watcher = watcherFactory({ hopperDir: root, hub: app.locals.sseHub });
+      if (watchEvents && root) {
+        watcher = watcherFactory({ hopperDir: root, hub: app.locals.sseHub, logTailer: app.locals.logTailer });
+      }
       const close = async () => {
         if (closed) return;
         closed = true;
-        await new Promise((resolveClose) => server.close(resolveClose));
-        await watcher?.close();
         app.locals.sseHub.close();
+        await watcher?.close();
+        await new Promise((resolveClose) => server.close(resolveClose));
       };
       server.once('close', () => {
         if (!closed) {

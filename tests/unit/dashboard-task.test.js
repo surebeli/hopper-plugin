@@ -67,7 +67,7 @@ test('dashboard task route returns frontmatter and body', async () => {
 });
 
 test('TaskDetailPanel renders 13 frontmatter fields with missing-value fallback', async () => {
-  const { TaskDetailPanel, frontmatterFields } = await vite.ssrLoadModule('/src/components/TaskDrawer.tsx');
+  const { FrontmatterTable, frontmatterFields } = await vite.ssrLoadModule('/src/components/TaskDrawer.tsx');
   const detail = {
     id: 'T-WEB-04',
     frontmatter: {
@@ -84,7 +84,7 @@ test('TaskDetailPanel renders 13 frontmatter fields with missing-value fallback'
     },
     body: '# Done',
   };
-  const html = renderToStaticMarkup(React.createElement(TaskDetailPanel, { detail }));
+  const html = renderToStaticMarkup(React.createElement(FrontmatterTable, { frontmatter: detail.frontmatter }));
 
   assert.equal(frontmatterFields.length, 13);
   for (const field of frontmatterFields) assert.match(html, new RegExp(field));
