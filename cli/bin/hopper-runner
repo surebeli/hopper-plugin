@@ -36,8 +36,9 @@ function resolveWindowsCommand(cmd) {
   const pathDirs = (process.env.PATH || '').split(delimiter).filter(Boolean);
   // PATHEXT defaults if not set
   const exts = (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').map(e => e.trim()).filter(Boolean);
-  let firstExe = null;
-  let firstBatch = null;
+  // Per codex F1-F7 recheck: Windows PATH+PATHEXT semantics — for each PATH
+  // dir IN ORDER, try each PATHEXT IN ORDER; FIRST hit wins (do NOT prefer
+  // .exe globally over .cmd from earlier PATH dir).
   for (const dir of pathDirs) {
     for (const ext of exts) {
       const candidate = join(dir, cmd + ext);
@@ -45,20 +46,16 @@ function resolveWindowsCommand(cmd) {
         if (statSync(candidate).isFile()) {
           const lower = ext.toLowerCase();
           if (lower === '.exe' || lower === '.com') {
-            if (!firstExe) firstExe = candidate;
-          } else if (lower === '.cmd' || lower === '.bat') {
-            if (!firstBatch) firstBatch = candidate;
+            return { command: candidate, prependArgs: [] };
           }
+          // .cmd / .bat / other → cmd.exe wrapper
+          return { command: process.env.ComSpec || 'cmd.exe', prependArgs: ['/c', candidate] };
         }
       } catch (_) {
         // not found / not accessible — keep searching
       }
     }
-    // If we've found an .exe in this dir, prefer it over any batch later in PATH
-    if (firstExe) break;
   }
-  if (firstExe) return { command: firstExe, prependArgs: [] };
-  if (firstBatch) return { command: process.env.ComSpec || 'cmd.exe', prependArgs: ['/c', firstBatch] };
   return { command: cmd, prependArgs: [] };
 }
 
@@ -164,13 +161,20 @@ async function main() {
   const finalArgv = [...prependArgs, ...adapterArgv];
 
   // *** THE single spawn (spec §3 #4) ***
-  // Single spawn() call. Windows command resolution above is a pure-sync
-  // PATH lookup, not a spawn (uses execSync only for `where`).
+  // Single spawn() call. Windows command resolution above is pure-sync
+  // PATH lookup (no subprocess, no execSync).
+  //
+  // Per codex Phase 5 F1 recheck (POSIX side): vendor MUST be detached so it
+  // gets its own process group; otherwise killProcessTree(-pid) hits the
+  // runner's group, not the vendor's children. Windows uses taskkill /T
+  // which works without detached. detached on POSIX puts vendor in new pgrp.
+  const isWindows = process.platform === 'win32';
   const vendor = spawn(resolvedCmd, finalArgv, {
     stdio: ['ignore', fdOut, fdErr],
     windowsHide: true,
     cwd: process.cwd(),
     env: process.env,
+    detached: !isWindows,
   });
 
   // Close our copies of the fds; vendor has its own.
@@ -181,13 +185,13 @@ async function main() {
   // Per codex Phase 5 audit F2: pass adapter opts to timeoutMs so --reasoning xhigh
   // actually gets 900s instead of the default 300s.
   const timeoutMs = adapter.timeoutMs({ ...adapterOpts, background: true });
-  const isWindows = process.platform === 'win32';
   const killTimer = setTimeout(() => {
     timedOut = true;
-    // Per codex Phase 5 audit F1: process-tree kill (not just top-level vendor)
-    // so children of .cmd wrappers + agentic CLIs don't leak. Reuses shared
-    // killProcessTree from subprocess.js (taskkill /T /F on Windows; SIGKILL
-    // on process group on POSIX).
+    // Per codex Phase 5 audit F1 + recheck: process-tree kill (not just
+    // top-level vendor) so children of .cmd wrappers + agentic CLIs don't
+    // leak. Reuses shared killProcessTree from subprocess.js: taskkill /T /F
+    // on Windows; process.kill(-pid, SIGKILL) on POSIX (works because vendor
+    // was spawned with detached: true → owns its own process group).
     try { killProcessTree(vendor.pid, isWindows); } catch (_) {}
   }, timeoutMs);
   killTimer.unref();

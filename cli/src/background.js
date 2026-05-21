@@ -264,14 +264,28 @@ export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, run
     lockFd = openSync(lockPath, 'wx');
   } catch (err) {
     if (err.code === 'EEXIST') {
-      // Stale lockfile from a previous crash? Check age — if > 60s and no
-      // matching in-progress frontmatter with alive PID, reclaim it. This
-      // is the SAME orphan logic as the 24h ceiling on output.md, scoped
-      // tighter because lockfile lifetime is supposed to be <1s.
+      // Stale lockfile from a previous crash? Reclaim if BOTH (a) mtime
+      // older than 60s AND (b) no matching in-progress frontmatter with
+      // alive PID. The dual check prevents racing against a slow-but-alive
+      // sibling dispatch in the first 60s.
       let staleReclaimed = false;
       try {
         const lockAge = Date.now() - statSync(lockPath).mtimeMs;
-        if (lockAge > 60_000) {
+        let blockedByLiveSibling = false;
+        if (lockAge <= 60_000) {
+          blockedByLiveSibling = true;
+        } else {
+          // mtime says stale; double-check via frontmatter if it exists
+          if (existsSync(outputMdPath)) {
+            try {
+              const fm = readFrontmatter(outputMdPath);
+              if (fm.status === 'in-progress' && fm.pid && isAlive(fm.pid)) {
+                blockedByLiveSibling = true;
+              }
+            } catch (_) {}
+          }
+        }
+        if (!blockedByLiveSibling) {
           unlinkSync(lockPath);
           lockFd = openSync(lockPath, 'wx');
           staleReclaimed = true;
@@ -290,19 +304,26 @@ export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, run
   }
   writeFileSync(lockFd, `pid=${process.pid}\nts=${Date.now()}\n`);
 
+  // Per codex F1-F7 recheck: wrap REMAINING body in try/finally so the
+  // lockfile is released on ALL failure paths, not just preflight.
+  // Function-level try/finally is broken across multiple early-throw sites
+  // below; instead, we use a single `releasing` function called from each
+  // exit point.
+  const releaseLock = () => {
+    try { closeSync(lockFd); } catch (_) {}
+    try { unlinkSync(lockPath); } catch (_) {}
+  };
+
   try {
     const pf = preflightDispatch(outputMdPath);
     if (!pf.ok) {
-      closeSync(lockFd);
-      try { unlinkSync(lockPath); } catch (_) {}
+      releaseLock();
       const err = new Error(`Refusing dispatch: ${pf.reason}`);
       err.code = 'EALREADYRUNNING';
       throw err;
     }
   } catch (err) {
-    // Failure during preflight — release lock and propagate
-    try { closeSync(lockFd); } catch (_) {}
-    try { unlinkSync(lockPath); } catch (_) {}
+    releaseLock();
     throw err;
   }
 
@@ -310,6 +331,7 @@ export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, run
   // a pipe that survives parent exit, which is fragile cross-platform).
   // Adapters that need stdinMode='pipe' must compose prompt into argv instead.
   if (stdinInput) {
+    releaseLock();
     throw new Error(
       `Background mode does not support stdin piping (adapter ${adapterName} ` +
       `requires stdinMode='pipe'). Use sync mode or update the adapter to ` +
@@ -375,6 +397,7 @@ export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, run
   closeSync(fdErr);
 
   if (!child.pid) {
+    releaseLock();
     throw new Error('Failed to spawn hopper-runner (no PID returned)');
   }
 
@@ -391,8 +414,7 @@ export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, run
   // so subsequent legitimate re-dispatch (after this task completes) isn't
   // falsely refused. Lockfile lifetime: from openSync(wx) at top to here —
   // bounded by spawn + frontmatter-patch latency (~10-50ms typical).
-  try { closeSync(lockFd); } catch (_) {}
-  try { unlinkSync(lockPath); } catch (_) {}
+  releaseLock();
 
   return { pid: child.pid, outputMdPath, logPath, startTime };
 }

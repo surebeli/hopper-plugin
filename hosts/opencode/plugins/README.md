@@ -3,6 +3,21 @@
 Anchor: `hosts/opencode/plugins/README.md::root`
 
 > **Status**: Phase 5b, spec v2.1.0 §14.9 native-preferred path for Tier C #2 OpenCode host.
+>
+> **⚠ EXPERIMENTAL DIVERGENCE (codex Phase 5 F5)**: this plugin path is a SECOND
+> dispatcher implementation. It uses OpenCode's `prompt_async` + `session.idle`
+> hook directly and does NOT route through `cli/src/dispatch.js → resolveDispatch`.
+> Consequence:
+>
+> - **Bypasses task-type frame composition** (`.hopper/tasks/<type>.md` not loaded)
+> - **Bypasses vendor routing** (AGENTS.md `task-vendor-preference` ignored — plugin
+>   always uses OpenCode itself as the vendor)
+> - **Bypasses heterogeneous-only warning** (HOPPER_HOST_VENDOR check skipped)
+> - **Marks success if any assistant message exists** (no adapter.parseResult chain)
+>
+> For full dispatcher-parity behavior (frame + routing + warning), use **Tier A
+> `hopper-dispatch --background`** invoked from a shell tool inside the OpenCode
+> session instead of this plugin's `hopper_dispatch` tool.
 
 ## What this is
 
