@@ -10,7 +10,7 @@
       "name": "hopper",
       "source": "./",
       "description": "Thin plugin layer over the llm-hopper file-based protocol. Dispatches task-typed work to vendor CLI subprocesses. No harness core; vendor CLIs bring their own runtime.",
-      "version": "0.5.0-phase-5a",
+      "version": "0.6.0-phase-6c",
       "author": {
         "name": "surebeli (litianyi)"
       },

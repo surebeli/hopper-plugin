@@ -1,6 +1,6 @@
 {
   "name": "hopper-plugin",
-  "version": "0.5.0-phase-5a",
+  "version": "0.6.0-phase-6c",
   "description": "Reference implementation of llm-hopper protocol as a thin plugin layer. No harness reaction core; vendor CLIs bring their own runtime.",
   "type": "module",
   "bin": {
@@ -8,7 +8,7 @@
   },
   "scripts": {
     "smoke": "node cli/bin/hopper-dispatch --smoke",
-    "test": "node --test tests/unit/",
+    "test": "node --test tests/unit/*.test.js",
     "test:queue": "node --test tests/unit/queue.test.js",
     "test:tasks": "node --test tests/unit/tasks.test.js",
     "test:agents": "node --test tests/unit/agents.test.js",
