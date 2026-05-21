@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { NavLink, Route, Routes } from 'react-router-dom';
 import { Activity, Circle, Clock3 } from 'lucide-react';
 import { buttonVariants } from '@/components/ui/button';
@@ -6,8 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import CostRoute from '@/routes/CostRoute';
 import QueueRoute from '@/routes/QueueRoute';
-import TaskDetailRoute from '@/routes/TaskDetailRoute';
 import VendorsRoute from '@/routes/VendorsRoute';
+
+const TaskDetailRoute = lazy(() => import('@/routes/TaskDetailRoute'));
 
 const navItems = [
   { to: '/', label: 'Queue' },
@@ -35,7 +36,14 @@ export default function App() {
         <section className="grid flex-1 gap-4 py-4 md:grid-cols-[1fr_280px]">
           <Routes>
             <Route path="/" element={<QueueRoute />} />
-            <Route path="/task/:id" element={<TaskDetailRoute />} />
+            <Route
+              path="/task/:id"
+              element={(
+                <Suspense fallback={<QueueRoute />}>
+                  <TaskDetailRoute />
+                </Suspense>
+              )}
+            />
             <Route path="/vendors" element={<VendorsRoute />} />
             <Route path="/cost" element={<CostRoute />} />
           </Routes>

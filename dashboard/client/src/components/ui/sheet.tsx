@@ -35,8 +35,8 @@ function SheetContent({
         data-slot="sheet-content"
         className={cn(
           'fixed z-50 flex flex-col gap-0 border-border bg-card text-card-foreground transition ease-swift data-[state=closed]:animate-out data-[state=open]:animate-in',
-          side === 'right' && 'inset-y-0 right-0 h-full w-[min(760px,calc(100vw-16px))] border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right',
-          side === 'left' && 'inset-y-0 left-0 h-full w-[min(760px,calc(100vw-16px))] border-r data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left',
+          side === 'right' && 'inset-y-0 right-0 h-full w-[min(720px,calc(100vw-16px))] border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right',
+          side === 'left' && 'inset-y-0 left-0 h-full w-[min(720px,calc(100vw-16px))] border-r data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left',
           side === 'top' && 'inset-x-0 top-0 h-auto border-b data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top',
           side === 'bottom' && 'inset-x-0 bottom-0 h-auto border-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom',
           className,
