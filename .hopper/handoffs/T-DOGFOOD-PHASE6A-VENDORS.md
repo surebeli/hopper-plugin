@@ -57,15 +57,29 @@ Directly invoked each vendor CLI from Bash (NOT via hopper-dispatch — this is 
 - Our adapter does NOT forward `opts.reasoning` to `--effort`; capability claim "ignored" remains accurate **for adapter**, sourceNote now explicit
 - Live smoke (`copilot -p ... --allow-all-tools`): returned response with 18.6k input tokens, 30 reasoning tokens, 1 Premium request
 
-### agy — NOT_INSTALLED (corrected understanding)
+### agy — INSTALLED at non-default Bash PATH location (corrected 2026-05-21 evening)
 
-- **CRITICAL FINDING**: This machine has `~/AppData/Local/Programs/Antigravity/bin/antigravity{.cmd,}` installed but it's the **VS-Code-fork EDITOR LAUNCHER** (Antigravity 1.107.0):
-  - `--diff`, `--merge`, `--goto`, `--new-window`, `--extensions-dir`, `--install-extension`, `--list-extensions`
-- NOT the agentic CLI our adapter targets
-- The agentic `agy` CLI (Google's Gemini CLI successor) is a **distinct binary** with separate distribution channel
-- `--check` correctly reports `NOT_INSTALLED` for agy on this machine
-- Adapter capability gains new `installDistinction` field explicitly warning: **DO NOT alias `agy → antigravity`** — they are different binaries
-- This explains why T-AUDIT-PH5-kimi's audit attempt produced 0 bytes — and the same root cause likely affects any agy dispatch attempt on this machine
+**Initial misdiagnosis** (now retracted): I first reported agy as NOT_INSTALLED because Bash `--check` couldn't find it, and assumed the `antigravity` editor I found at `~/AppData/Local/Programs/Antigravity/bin/` was what the user had instead. **Both wrong.**
+
+**Actual state** (per user PowerShell verification):
+
+- agy IS installed at `C:\Users\litianyi\AppData\Local\agy\bin\agy.exe` (150 MB exe, last modified 2026-05-20)
+- User's PowerShell PATH includes that dir; `agy --help` works in PS and confirms agentic CLI:
+  - `--print` / `-p`, `--dangerously-skip-permissions`, `--log-file`, `--continue`, `--conversation` (all match our adapter's invocation pattern)
+  - `--print-timeout` default 5m0s (our adapter timeoutMs is 360s = 6min, safe margin)
+  - `--sandbox` flag exists (separate from `--dangerously-skip-permissions`)
+  - Subcommands: changelog, help, install, plugin{,s}, update
+- **Bash session PATH** (Git-Bash / MSYS2) does NOT inherit `~/AppData/Local/agy/bin/` by default
+- Hence `hopper-dispatch --check` run from Bash showed NOT_INSTALLED — TECHNICALLY CORRECT for that shell, but MISLEADING because user can run agy fine from PowerShell
+
+**Separate binary confusion**: `antigravity` at `~/AppData/Local/Programs/Antigravity/bin/antigravity.cmd` is **Google's VS-Code-fork editor** (1.107.0), a different product from `agy` the agentic CLI. They are NOT aliases. The fact that both share the Antigravity brand caused my misdiagnosis.
+
+**Real Phase 6a learning**: `--check` reports PATH-coverage truth as seen by the invoking shell. On Windows specifically, Git-Bash users may see false-negative NOT_INSTALLED for vendor CLIs that PowerShell would find. Either:
+  (a) User runs hopper-dispatch from PowerShell (PATH coverage is broader)
+  (b) User adds vendor bin dirs to Bash PATH manually
+  (c) hopper-dispatch could add a Phase 6b "common install path" fallback scan (NOT done in this commit per minimal-harness principle)
+
+**Status correction for everyone reading the audit trail**: agy CAN run on this machine. T-AUDIT-PH5-kimi 0-byte log was almost certainly NOT an agy-vs-antigravity binary mismatch (since agy wasn't the kimi audit's vendor) — it was kimi-specific opacity. Re-investigate T-AUDIT-PH5-kimi separately if needed.
 
 ## Updates landed
 

@@ -40,19 +40,26 @@ export const agyAdapter = {
       fileOutput: { supported: false, mechanism: '`--log-file <path>` writes diagnostic log (NOT answer text). Answer text is stdout-only.' },
       streaming: { supported: true, mechanism: '`agy -p` streams; first-run blocked by OAuth (interactive once).' },
     },
-    // Phase 6a dogfood 2026-05-21 CRITICAL FINDING: this adapter targets
-    // the AGENTIC `agy` CLI (Google Antigravity 2.0, successor to Gemini CLI).
-    // On many "Antigravity" installs (incl. this dev machine), the binary
-    // installed under $HOME/AppData/Local/Programs/Antigravity/bin/antigravity
-    // is the VS-Code-fork EDITOR LAUNCHER (`--diff`, `--merge`, `--goto`,
-    // `--extensions-dir`, `--install-extension`), NOT the agentic CLI.
-    // Our `--check` correctly reports NOT_INSTALLED in that case because
-    // `agy` is not on PATH. Users wanting the agentic CLI must install it
-    // separately (it has its own distribution channel; details UNCONFIRMED
-    // as of dogfood date). DO NOT alias `agy → antigravity` — they are
-    // different binaries.
+    // Phase 6a dogfood 2026-05-21 (CORRECTED 2026-05-21 evening per user
+    // feedback): this adapter targets the AGENTIC `agy` CLI. Confirmed on
+    // this dev machine at:
+    //   C:\Users\litianyi\AppData\Local\agy\bin\agy.exe
+    // user-verified `agy --help` from PowerShell shows: --print / -p,
+    // --dangerously-skip-permissions, --log-file, --continue,
+    // --conversation, --sandbox, --print-timeout (default 5m0s),
+    // subcommands: changelog / help / install / plugin{,s} / update.
+    //
+    // Bash session PATH coverage caveat (verified live): some MSYS2 /
+    // Git-Bash environments do NOT inherit Windows-installed-app PATH
+    // entries by default. PowerShell users get agy on PATH; Git-Bash users
+    // may need to add `~/AppData/Local/agy/bin` manually OR run via full
+    // path. Our `--check` correctly reflects whichever shell ran it.
+    //
+    // Distinct binary: `antigravity` (Google's VS-Code-fork editor at
+    // ~/AppData/Local/Programs/Antigravity/bin/) is a SEPARATE product
+    // from `agy` (the agentic CLI). They are NOT aliases of each other.
     staleAfter: '2026-08-21',
-    installDistinction: 'agy (agentic CLI; this adapter targets) ≠ antigravity (VS-Code-fork editor launcher; commonly pre-installed). Verified 2026-05-21 dogfood: this machine has antigravity editor at ~/AppData/Local/Programs/Antigravity/bin/antigravity.cmd but no agentic agy binary.',
+    installPath: 'Default Windows install: ~/AppData/Local/agy/bin/agy.exe. PATH coverage shell-dependent on Windows (PowerShell yes; Git-Bash may need manual setup).',
   },
 
   args(input, opts) {

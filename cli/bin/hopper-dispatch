@@ -666,6 +666,21 @@ async function runCheck(target) {
   console.log('');
   console.log('No vendor subprocess is spawned for this check (spec §3 #4 single-spawn proof preserved).');
   console.log('Paths shown with `~` home-dir redaction. PATH is trusted input — review your $PATH if unsure.');
+
+  // Per Phase 6a dogfood 2026-05-21: emit diagnostic hint when any vendor
+  // reports NOT_INSTALLED. PATH coverage varies between shells on Windows
+  // (PowerShell sees more entries than Git-Bash/MSYS2 by default).
+  const notInstalled = results.filter(({ r }) => r && r.overallStatus === 'NOT_INSTALLED');
+  if (notInstalled.length > 0) {
+    console.log('');
+    console.log('Diagnostic — NOT_INSTALLED vendors:');
+    console.log('  PATH coverage is shell-dependent on Windows. If you can run the vendor');
+    console.log('  from PowerShell but `--check` reports NOT_INSTALLED in Git-Bash/MSYS2,');
+    console.log('  the binary likely lives in a Windows-app install dir that PowerShell sees');
+    console.log('  on PATH but your shell does not (e.g. ~/AppData/Local/<vendor>/bin/).');
+    console.log('  Either: (a) run hopper-dispatch from PowerShell, or');
+    console.log('          (b) add the vendor bin dir to your shell PATH.');
+  }
 }
 
 function runCapabilities(vendor) {
