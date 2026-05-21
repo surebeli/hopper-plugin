@@ -1,0 +1,149 @@
+T-WEB-03 execution log
+cwd: F:\workspace\ai\hopper-plugin
+date: 2026-05-22T01:26:55+08:00
+implementation_commit: b0785da
+
+--- SPEC reads
+$ rg -n "^## §B\.3\.3|Radix|v2\.1|T-WEB-03|§8\.1|reviewer" docs/sidequests/web-dashboard/SPEC.md
+753:#### B.3.3 Radix primitives — shadcn 依赖基座（root `package.json` `dependencies`）
+816:| **v2.1** | **2026-05-22** | **Radix primitives 入白名单** ...
+
+$ Get-Content docs/sidequests/web-dashboard/SPEC.md | Select-Object -Skip 405 -First 48
+T-WEB-03 range: watcher.js, sse.js, client lib/sse.ts, QueueRoute SSE mode; remove T-02 polling.
+T-WEB-03 acceptance: 6 SSE channels + reconnect; watcher close no leak; chokidar event mapping test; Set-Content queue rerender <= 1s.
+
+--- shadcn / Radix cleanup
+$ npx shadcn@latest info -c dashboard/client
+Detected framework: Vite
+Style: default
+Base color: neutral
+Components: badge, button, card, table, tooltip
+
+$ npx shadcn@latest add tooltip --dry-run -y -c dashboard/client
+The path F:\workspace\ai\hopper-plugin\dashboard\client does not contain a package.json file. Would you like to start a new project?
+
+$ node -e "const p=require('./package.json'); console.log(Object.keys(p.dependencies||{}).filter(k=>k.startsWith('@radix-ui/')).join('\n')||'NO_RADIX_TOPLEVEL')"
+@radix-ui/react-tooltip
+
+--- tests
+$ node --test tests/unit/dashboard-queue.test.js tests/unit/dashboard-sse.test.js
+# tests 7
+# pass 7
+# fail 0
+
+$ npm test
+# tests 354
+# pass 339
+# fail 0
+# cancelled 0
+# skipped 15
+# todo 0
+# duration_ms 5196.4297
+
+--- build
+$ npm run dashboard:build
+dist/index.html                 0.40 kB │ gzip:   0.27 kB
+dist/assets/index-nGmBvh1u.css 12.04 kB │ gzip:   3.31 kB
+dist/assets/index-Dss0m240.js 336.51 kB │ gzip: 106.10 kB
+Total gzip: 109.68 kB < 200 kB
+
+--- runtime SSE proof
+Browser plugin attempt failed:
+privileged native pipe bridge is not available; browser-client is not trusted
+
+Fallback: local Chrome DevTools Protocol + temp HOPPER_DIR.
+Server PID: 45980
+Vite PID: 34928
+Server port: 7783
+Vite port: 5173
+Temp hopper dir: C:\Users\litianyi\AppData\Local\Temp\hopper-dashboard-sse-140938f44d954770bc7b4c4c263dddfd\.hopper
+
+Manual queue update:
+Set-Content <temp>\.hopper\queue.md with T-SSE-01 updated row + T-SSE-02 second row
+
+Result:
+{
+  "elapsedMs": 249,
+  "hasSecond": true,
+  "screenshotPath": "F:/workspace/ai/hopper-plugin/docs/sidequests/web-dashboard/handoffs/T-WEB-03-screenshot.png",
+  "logEvents": 1,
+  "hasInitial": true,
+  "hasUpdated": true
+}
+
+$ taskkill /PID 45980 /T /F
+SUCCESS: The process with PID 50264 has been terminated.
+SUCCESS: The process with PID 42196 has been terminated.
+SUCCESS: The process with PID 34928 has been terminated.
+SUCCESS: The process with PID 45980 has been terminated.
+
+$ Get-NetTCPConnection -LocalPort 7783,5173
+No Listen sockets remained; only transient 127.0.0.1 TimeWait rows for 7783.
+
+--- hard checks
+$ git diff --cached --name-only before commit
+dashboard/client/src/components/QueueTable.tsx
+dashboard/client/src/components/StatusPill.tsx
+dashboard/client/src/components/ui/tooltip.tsx
+dashboard/client/src/lib/sse.ts
+dashboard/client/src/lib/status.ts
+dashboard/client/src/routes/QueueRoute.tsx
+dashboard/server/events/sse.js
+dashboard/server/events/watcher.js
+dashboard/server/index.js
+package-lock.json
+package.json
+tests/unit/dashboard-queue.test.js
+tests/unit/dashboard-sse.test.js
+
+$ git diff --cached --name-only | Select-String '^\.hopper/|^cli/|^hosts/|^commands/|^\.claude-plugin/|^\.codex-plugin/'
+<empty>
+
+$ git diff --cached --numstat
+3  4  dashboard/client/src/components/QueueTable.tsx
+12 6  dashboard/client/src/components/StatusPill.tsx
+36 21 dashboard/client/src/components/ui/tooltip.tsx
+43 5  dashboard/client/src/lib/sse.ts
+15 1  dashboard/client/src/lib/status.ts
+10 0  dashboard/client/src/routes/QueueRoute.tsx
+73 13 dashboard/server/events/sse.js
+78 2  dashboard/server/events/watcher.js
+27 2  dashboard/server/index.js
+452 4 package-lock.json
+1  0 package.json
+1  0 tests/unit/dashboard-queue.test.js
+122 0 tests/unit/dashboard-sse.test.js
+
+$ package red-line scan
+NO_BANNED_PACKAGES
+
+$ rg -n "executeDispatch|refetchInterval" dashboard package.json tests/unit cli/bin/hopper-dashboard cli/bin/hopper-dashboard.cmd
+<empty>
+
+$ rg -n "0\.0\.0\.0|listen\([^\n]*(::|\*)" dashboard cli/bin/hopper-dashboard tests/unit
+tests/unit\dashboard-server.test.js:21: assert.throws(() => parseServerArgs(['--host', '0.0.0.0']), /127\.0\.0\.1/);
+tests/unit\dashboard-server.test.js:22: assert.throws(() => startServer({ host: '0.0.0.0', dev: true, requireDist: false }), /127\.0\.0\.1/);
+
+$ rg -n "[\p{Emoji_Presentation}\p{Extended_Pictographic}]" dashboard/client/src
+<empty>
+
+$ Get-FileHash dashboard/client/src/styles/globals.css -Algorithm SHA256
+789046FC976A7FC387D77BD64AC6EADA56014AEBF3EC9E31CC621454C423462C
+
+$ Get-FileHash dashboard/client/tailwind.config.ts -Algorithm SHA256
+D0E34ECFADDF4F035C3AA551530A57C41DFB36530F5AC5295D24FA34E299704C
+
+$ line-count check
+QueueTable.tsx 151
+dashboard-queue.test.js 125
+dashboard/server/index.js 120
+dashboard-sse.test.js 109
+watcher.js 72
+sse.js 64
+All source/test files touched are <= 200 lines; package-lock.json exempt by SPEC v2.0.1.
+
+--- commit
+$ git commit -m "[T-WEB-03] implement watcher sse" -m "Adopts whitelisted @radix-ui/react-tooltip per SPEC v2.1 for T-WEB-02 review F1. Adds SSE broker, chokidar watcher, client EventSource hook, and queue invalidation without polling."
+[main b0785da] [T-WEB-03] implement watcher sse
+13 files changed, 873 insertions(+), 58 deletions(-)
+create mode 100644 tests/unit/dashboard-sse.test.js
