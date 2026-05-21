@@ -14,6 +14,26 @@ export const kimiAdapter = {
   command: 'kimi',
   stdinMode: 'none',
 
+  // Phase 6a static capability hint — sourced from docs/research/.
+  capabilities: {
+    modelArg: {
+      accepted: 'freeform',
+      knownGood: ['default'],
+      sourceNote: 'kimi -m <name>. Empirical: invalid model causes "LLM not set" error from kimi-cli. Per Phase 0 smoke + T-AUDIT-PH5 attempt. UNCONFIRMED: precise list of kimi-cli-accepted model identifiers.',
+    },
+    reasoningArg: {
+      accepted: 'ignored',
+      knownGood: [],
+      sourceNote: 'kimi has its own thinking mechanism; no --reasoning equivalent. docs/research/async-execution/03-other-ai-clis.md',
+    },
+    features: {
+      sessionResume: { supported: true, mechanism: '`kimi --session <id>` / `--resume <id>` / `-C` (continue most recent in cwd)' },
+      fileOutput: { supported: false, mechanism: 'stdout only; redirect at shell layer' },
+      streaming: { supported: true, mechanism: '--print mode streams incrementally; --final-message-only suppresses intermediate tool calls' },
+    },
+    staleAfter: '2026-08-21',
+  },
+
   args(input, opts) {
     return [
       '-p', input,

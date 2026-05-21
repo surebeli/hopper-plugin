@@ -7,7 +7,7 @@
 
 import { resolveDispatch, getStatus, executeDispatch } from '../src/dispatch.js';
 import { listTaskTypes } from '../src/tasks.js';
-import { listAdapters, getAdapter } from '../src/vendors/index.js';
+import { listAdapters, getAdapter, installCheckForAdapter, capabilitiesForAdapter } from '../src/vendors/index.js';
 import { writeOutput } from '../src/output.js';
 import {
   validateTaskId,
@@ -53,6 +53,8 @@ function printUsage() {
   console.log('  hopper-dispatch --smoke                         Standalone CLI smoke test');
   console.log('  hopper-dispatch --task-types                    List available task-type frames');
   console.log('  hopper-dispatch --vendors                       List registered vendor adapters');
+  console.log('  hopper-dispatch --check [<vendor>]              Show install + auth status (all, or single vendor)');
+  console.log('  hopper-dispatch --capabilities <vendor>         Show static model/reasoning/feature support for vendor');
   console.log('  hopper-dispatch --help                          Show this message');
   console.log('  hopper-dispatch --version                       Print version');
   console.log('');
@@ -104,6 +106,25 @@ async function main() {
   }
   if (args.includes('--smoke')) {
     printSmoke();
+    return;
+  }
+
+  // Phase 6a discovery commands — project-agnostic (don't need hopperDir).
+  if (args.includes('--check')) {
+    const checkIdx = args.indexOf('--check');
+    const target = args[checkIdx + 1] && !args[checkIdx + 1].startsWith('-') ? args[checkIdx + 1] : null;
+    await runCheck(target);
+    return;
+  }
+  const capIdx = args.indexOf('--capabilities');
+  if (capIdx !== -1) {
+    const target = args[capIdx + 1];
+    if (!target || target.startsWith('-')) {
+      console.error('Error: --capabilities requires a vendor name.');
+      console.error(`Available: ${listAdapters().join(', ')}`);
+      process.exit(1);
+    }
+    runCapabilities(target);
     return;
   }
 
@@ -574,6 +595,82 @@ async function runWatch(hopperDir, taskId) {
 
   // Tick once now in case state is already terminal
   handler(statSync(outputMdPath), { mtimeMs: -1, size: -1 });
+}
+
+// ─── Discovery commands (Phase 6a) ────────────────────────────────────
+
+async function runCheck(target) {
+  const vendors = target ? [target] : listAdapters();
+  if (target && !listAdapters().includes(target)) {
+    console.error(`Error: unknown vendor '${target}'. Known: ${listAdapters().join(', ')}`);
+    process.exit(1);
+  }
+
+  console.log(`hopper-dispatch v${VERSION} — vendor install + auth check`);
+  console.log('');
+  console.log('| Vendor    | Command resolution                                 | Auth      | Status         |');
+  console.log('|-----------|----------------------------------------------------|-----------|----------------|');
+  for (const v of vendors) {
+    try {
+      const r = await installCheckForAdapter(v);
+      const cmd = r.binaryFound
+        ? `${r.resolvedPath || r.command}${r.needsShellWrap ? ' (cmd.exe /c wrap)' : ''}`
+        : '(not on PATH)';
+      const auth = r.authOk ? 'OK' : (r.authNotes.length > 0 ? 'note' : 'missing');
+      console.log(`| ${v.padEnd(9)} | ${cmd.slice(0, 50).padEnd(50)} | ${auth.padEnd(9)} | ${r.overallStatus.padEnd(14)} |`);
+    } catch (err) {
+      console.log(`| ${v.padEnd(9)} | ERROR: ${err.message.slice(0, 40).padEnd(40)} |           | ERROR          |`);
+    }
+  }
+  console.log('');
+  console.log('Notes (auth):');
+  for (const v of vendors) {
+    try {
+      const r = await installCheckForAdapter(v);
+      if (r.authNotes.length > 0) {
+        console.log(`  ${v}:`);
+        for (const note of r.authNotes) console.log(`    - ${note}`);
+      }
+    } catch (_) {}
+  }
+  console.log('');
+  console.log('No vendor subprocess is spawned for this check (spec §3 #4 single-spawn proof preserved).');
+}
+
+function runCapabilities(vendor) {
+  if (!listAdapters().includes(vendor)) {
+    console.error(`Error: unknown vendor '${vendor}'. Known: ${listAdapters().join(', ')}`);
+    process.exit(1);
+  }
+  const caps = capabilitiesForAdapter(vendor);
+  if (!caps) {
+    console.error(`Vendor '${vendor}' has no capabilities() metadata yet (Phase 6a adapter pending).`);
+    process.exit(1);
+  }
+  console.log(`hopper-dispatch v${VERSION} — capabilities for ${vendor}`);
+  console.log('');
+  console.log(`  --model      ${caps.modelArg.accepted}`);
+  if (caps.modelArg.knownGood.length > 0) {
+    console.log(`               Known good: ${caps.modelArg.knownGood.join(', ')}`);
+  }
+  console.log(`               Note: ${caps.modelArg.sourceNote}`);
+  console.log('');
+  console.log(`  --reasoning  ${caps.reasoningArg.accepted}`);
+  if (caps.reasoningArg.knownGood.length > 0) {
+    console.log(`               Values: ${caps.reasoningArg.knownGood.join(' | ')}`);
+  }
+  console.log(`               Note: ${caps.reasoningArg.sourceNote}`);
+  console.log('');
+  console.log('  Features:');
+  for (const [feat, info] of Object.entries(caps.features)) {
+    const mark = info.supported ? 'YES' : 'NO ';
+    console.log(`    ${feat.padEnd(16)} ${mark}  ${info.mechanism}`);
+  }
+  console.log('');
+  console.log(`  Capability data stale after: ${caps.staleAfter}`);
+  console.log(`  Re-verify quarterly. Source: docs/research/ — see notes above.`);
+  console.log('');
+  console.log('No vendor subprocess is spawned for this lookup (static data only).');
 }
 
 main().catch((err) => {

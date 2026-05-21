@@ -23,6 +23,26 @@ export const agyAdapter = {
   command: 'agy',
   stdinMode: 'none',
 
+  // Phase 6a static capability hint — sourced from docs/research/.
+  capabilities: {
+    modelArg: {
+      accepted: 'ignored',
+      knownGood: [],
+      sourceNote: 'agy -p does not expose --model. Marketing references "Gemini 3.5 Flash" as default; some third-party blog mentions `antigravity agent run --model gemini-3.5-flash` separate binary, UNCONFIRMED.',
+    },
+    reasoningArg: {
+      accepted: 'ignored',
+      knownGood: [],
+      sourceNote: 'agy uses internal "parallel subagents" orchestration; no external reasoning-effort flag.',
+    },
+    features: {
+      sessionResume: { supported: false, mechanism: 'UNCONFIRMED — no documented --resume <id> flag as of 2026-05-20.' },
+      fileOutput: { supported: false, mechanism: '`--log-file <path>` writes diagnostic log (NOT answer text). Answer text is stdout-only.' },
+      streaming: { supported: true, mechanism: '`agy -p` streams; first-run blocked by OAuth (interactive once).' },
+    },
+    staleAfter: '2026-08-21',
+  },
+
   args(input, opts) {
     return [
       '-p', input,

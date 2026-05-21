@@ -11,6 +11,26 @@ export const copilotAdapter = {
   command: 'copilot',
   stdinMode: 'none',
 
+  // Phase 6a static capability hint.
+  capabilities: {
+    modelArg: {
+      accepted: 'freeform',
+      knownGood: ['claude-sonnet-4-5', 'gpt-4o-mini'],
+      sourceNote: 'copilot --model <name>. Available models depend on user subscription tier (premium-request meter applies).',
+    },
+    reasoningArg: {
+      accepted: 'ignored',
+      knownGood: [],
+      sourceNote: 'Copilot CLI has no reasoning-effort flag.',
+    },
+    features: {
+      sessionResume: { supported: true, mechanism: '`copilot --resume` (picker; UNCONFIRMED whether takes ID arg) / `--continue`. Sessions at ~/.copilot/session-state/ + SQLite.' },
+      fileOutput: { supported: false, mechanism: 'stdout only.' },
+      streaming: { supported: true, mechanism: 'copilot -p streams during execution.' },
+    },
+    staleAfter: '2026-08-21',
+  },
+
   args(input, opts) {
     return [
       '-p', input,

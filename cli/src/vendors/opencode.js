@@ -15,6 +15,26 @@ export const opencodeAdapter = {
   command: 'opencode',
   stdinMode: 'none',
 
+  // Phase 6a static capability hint.
+  capabilities: {
+    modelArg: {
+      accepted: 'freeform',
+      knownGood: ['deepseek/v4-flash', 'anthropic/claude-sonnet-4-6'],
+      sourceNote: 'opencode --model <provider/model>. Provider prefix required. Run `opencode models` for live list.',
+    },
+    reasoningArg: {
+      accepted: 'ignored',
+      knownGood: [],
+      sourceNote: 'opencode does not expose reasoning-effort knob via CLI flags.',
+    },
+    features: {
+      sessionResume: { supported: true, mechanism: '`opencode run --session <id>` / `--continue` / `--fork`. Session IDs per-machine (sst/opencode#10349 — not portable Win<->macOS).' },
+      fileOutput: { supported: false, mechanism: 'No --output flag; stdout-only. Use `--format json` + shell redirect.' },
+      streaming: { supported: true, mechanism: 'opencode run streams events; exits when idle.' },
+    },
+    staleAfter: '2026-08-21',
+  },
+
   args(input, opts) {
     return [
       'run',

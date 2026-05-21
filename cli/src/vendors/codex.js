@@ -15,6 +15,27 @@ export const codexAdapter = {
   command: 'codex',
   stdinMode: 'none',
 
+  // Phase 6a static capability hint (no live vendor introspection — would
+  // break single-spawn proof). Source: docs/research/.
+  capabilities: {
+    modelArg: {
+      accepted: 'ignored',
+      knownGood: [],
+      sourceNote: 'codex adapter uses opts.reasoning, not opts.model. See args() below.',
+    },
+    reasoningArg: {
+      accepted: 'enumerated',
+      knownGood: ['low', 'medium', 'high', 'xhigh'],
+      sourceNote: 'docs/research/async-execution/01-openai-hosts.md',
+    },
+    features: {
+      sessionResume: { supported: true, mechanism: '`codex exec resume <SESSION_ID>` — hopper does not currently auto-capture session_id' },
+      fileOutput: { supported: true, mechanism: '`--output-last-message <path>` exists (NOT currently used by adapter)' },
+      streaming: { supported: true, mechanism: 'codex exec streams progress to stderr; final message to stdout' },
+    },
+    staleAfter: '2026-08-21',
+  },
+
   args(input, opts) {
     return [
       'exec',

@@ -11,53 +11,11 @@
 // Counter-tested in tests/integration/runner-single-spawn.test.js.
 
 import { spawn } from 'node:child_process';
-import { openSync, closeSync, readFileSync, existsSync, statSync } from 'node:fs';
-import { join, delimiter } from 'node:path';
+import { openSync, closeSync, readFileSync, existsSync } from 'node:fs';
 import { readFrontmatter, writeFrontmatter } from '../src/background.js';
 import { getAdapter } from '../src/vendors/index.js';
 import { killProcessTree } from '../src/subprocess.js';
-
-/**
- * Windows .cmd/.bat lookup: CreateProcessW can directly execute .exe but
- * NOT .cmd or .bat. When the command is unqualified, walk PATH + PATHEXT
- * IN-PROCESS to find the actual file. If .exe → use directly. If .cmd/.bat
- * → wrap with cmd.exe /c.
- *
- * Per codex Phase 5 audit F7: this MUST be in-process (no execSync) so the
- * single-spawn proof stays clean.
- *
- * Returns { command, prependArgs }. Returns command unchanged on POSIX.
- */
-function resolveWindowsCommand(cmd) {
-  if (process.platform !== 'win32') return { command: cmd, prependArgs: [] };
-  if (cmd.includes('/') || cmd.includes('\\') || /\.\w+$/.test(cmd)) {
-    return { command: cmd, prependArgs: [] };
-  }
-  const pathDirs = (process.env.PATH || '').split(delimiter).filter(Boolean);
-  // PATHEXT defaults if not set
-  const exts = (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').map(e => e.trim()).filter(Boolean);
-  // Per codex F1-F7 recheck: Windows PATH+PATHEXT semantics — for each PATH
-  // dir IN ORDER, try each PATHEXT IN ORDER; FIRST hit wins (do NOT prefer
-  // .exe globally over .cmd from earlier PATH dir).
-  for (const dir of pathDirs) {
-    for (const ext of exts) {
-      const candidate = join(dir, cmd + ext);
-      try {
-        if (statSync(candidate).isFile()) {
-          const lower = ext.toLowerCase();
-          if (lower === '.exe' || lower === '.com') {
-            return { command: candidate, prependArgs: [] };
-          }
-          // .cmd / .bat / other → cmd.exe wrapper
-          return { command: process.env.ComSpec || 'cmd.exe', prependArgs: ['/c', candidate] };
-        }
-      } catch (_) {
-        // not found / not accessible — keep searching
-      }
-    }
-  }
-  return { command: cmd, prependArgs: [] };
-}
+import { resolveCommandOnPath } from '../src/path-resolve.js';
 
 function parseRunnerArgs(argv) {
   // Format: --task-id X --hopper-dir Y --adapter Z --output-md A --log B -- <adapter argv...>
@@ -154,10 +112,12 @@ async function main() {
     fail(outputMdPath, `Could not open log file ${logPath}: ${err.message}`);
   }
 
-  // Windows .cmd resolution: kimi.exe spawns directly; codex.cmd needs
-  // cmd.exe /c wrapper. Resolved synchronously via `where`. Real-exe path
-  // is used directly when available (no shell wrap).
-  const { command: resolvedCmd, prependArgs } = resolveWindowsCommand(adapter.command);
+  // Per shared cli/src/path-resolve.js: in-process PATH + PATHEXT walk
+  // (no subprocess). Real .exe → spawn directly; .cmd/.bat → wrap with
+  // cmd.exe /c. POSIX returns command unchanged.
+  const resolved = resolveCommandOnPath(adapter.command);
+  const resolvedCmd = resolved ? resolved.command : adapter.command;
+  const prependArgs = resolved ? resolved.prependArgs : [];
   const finalArgv = [...prependArgs, ...adapterArgv];
 
   // *** THE single spawn (spec §3 #4) ***
