@@ -1,0 +1,158 @@
+T-WEB-04 execution log
+cwd: F:\workspace\ai\hopper-plugin
+date: 2026-05-22T01:53:26+08:00
+implementation_commit: 239e835
+
+--- SPEC reads
+$ Get-Content docs/sidequests/web-dashboard/SPEC.md | Select-Object -Skip 95 -First 48
+§3.3 allows max 2 commits per task: impl commit + optional pure handoff-artifacts commit.
+
+$ Get-Content docs/sidequests/web-dashboard/SPEC.md | Select-Object -Skip 430 -First 45
+T-WEB-04 range: /task/:id route, shadcn Sheet side=right with no overlay, GET /api/task/:id via readFrontmatter, TaskDrawer frontmatter/body markdown.
+Acceptance: click row URL /task/T-XXX; direct deep-link; 13 fields with — fallback; markdown table/code/list/link; close returns /.
+
+--- shadcn / Sheet
+$ npx shadcn@latest info -c dashboard/client
+base radix; installed components include badge, button, card, sheet, table, tooltip
+
+$ npx shadcn@latest docs sheet
+sheet docs: https://ui.shadcn.com/docs/components/radix/sheet
+api: https://www.radix-ui.com/docs/primitives/components/dialog.md
+
+$ npx shadcn@latest add sheet --dry-run -y -c dashboard/client
+The path F:\workspace\ai\hopper-plugin\dashboard\client does not contain a package.json file. Would you like to start a new project?
+
+$ npx shadcn@latest view sheet
+registry dependency list contains aggregate "radix-ui"; not allowed by SPEC §B.3.3 as top-level dep.
+
+$ npm install @radix-ui/react-dialog@^1.1.0
+added 11 packages, audited 303 packages in 2s
+
+$ npm audit --omit=dev --json
+"vulnerabilities":{"info":0,"low":0,"moderate":0,"high":0,"critical":0,"total":0}
+
+--- targeted tests
+$ node --test tests/unit/dashboard-task.test.js tests/unit/dashboard-sse.test.js
+# tests 7
+# pass 7
+# fail 0
+# duration_ms 4429.4214
+
+--- full tests
+$ npm test
+# tests 357
+# pass 342
+# fail 0
+# cancelled 0
+# skipped 15
+# todo 0
+# duration_ms 4964.5364
+
+--- build
+$ npm run dashboard:build
+dist/index.html                 0.40 kB │ gzip:   0.27 kB
+dist/assets/index-B7TcvM9f.css 16.09 kB │ gzip:   4.12 kB
+dist/assets/index-7YpgkWZe.js 497.21 kB │ gzip: 174.83 kB
+Total gzip: 179.22 kB < 200 kB
+
+Initial full `highlight.js` import produced JS gzip 473.00 kB; fixed by switching to `highlight.js/lib/core` plus bash/js/json/markdown/typescript modules.
+
+--- rendered browser validation
+Flow under test: / -> click T-WEB-04 queue row -> drawer opens -> direct /task/T-WEB-04 -> close drawer returns /.
+
+Browser plugin attempt:
+privileged native pipe bridge is not available; browser-client is not trusted
+
+Fallback: Chrome headless via CDP.
+Server port: 7785
+CDP port: 9235
+Temp hopper dir: C:\Users\litianyi\AppData\Local\Temp\hopper-dashboard-tweb04-uJ43h6\.hopper
+
+Result:
+{
+  "clickOpen": "/task/T-WEB-04",
+  "clickedHasDrawer": true,
+  "direct": {
+    "url": "/task/T-WEB-04",
+    "hasQueue": true,
+    "hasDrawer": true,
+    "fields": 13,
+    "hasFallback": true,
+    "hasUndefined": false,
+    "hasTable": true,
+    "hasBodyTable": true,
+    "hasCodeLines": true,
+    "hasList": true,
+    "hasLink": true,
+    "overlayCount": 0
+  },
+  "afterClose": "/",
+  "screenshotPath": "F:\\workspace\\ai\\hopper-plugin\\docs\\sidequests\\web-dashboard\\handoffs\\T-WEB-04-screenshot.png",
+  "relevantLogs": []
+}
+
+$ Get-NetTCPConnection -LocalPort 7785,9235
+No Listen sockets remained; only transient 127.0.0.1 TimeWait for CDP port 9235.
+
+--- hard checks
+$ git diff --cached --name-only
+dashboard/client/src/App.tsx
+dashboard/client/src/components/TaskDrawer.tsx
+dashboard/client/src/components/ui/sheet.tsx
+dashboard/client/src/lib/api.ts
+dashboard/client/src/lib/sse.ts
+dashboard/client/src/lib/types.ts
+dashboard/client/src/routes/TaskDetailRoute.tsx
+dashboard/client/src/types/markdown-it.d.ts
+dashboard/server/events/watcher.js
+dashboard/server/index.js
+dashboard/server/routes/task.js
+package-lock.json
+package.json
+tests/unit/dashboard-sse.test.js
+tests/unit/dashboard-task.test.js
+
+$ git diff --cached --name-only | Select-String '^\.hopper/|^cli/|^hosts/|^commands/|^\.claude-plugin/|^\.codex-plugin/|T-WEB-04-output|T-WEB-04-screenshot'
+<empty>
+
+$ package red-line scan
+NO_BANNED_PACKAGES
+
+$ node -e "const p=require('./package.json'); console.log(Object.keys(p.dependencies||{}).filter(k=>k.startsWith('@radix-ui/')||k==='radix-ui').sort().join('\n'))"
+@radix-ui/react-dialog
+@radix-ui/react-tooltip
+
+$ rg -n "executeDispatch|refetchInterval" dashboard package.json tests/unit cli/bin/hopper-dashboard cli/bin/hopper-dashboard.cmd
+<empty>
+
+$ rg -n "0\.0\.0\.0|listen\([^\n]*(::|\*)|host:\s*['\"]0\.0\.0\.0" dashboard cli/bin/hopper-dashboard tests/unit
+<empty>
+
+$ rg -n "[\p{Emoji_Presentation}\p{Extended_Pictographic}]" dashboard/client/src
+<empty>
+
+$ rg -n "SheetOverlay|sheet-overlay|bg-black|shadow" dashboard/client/src/components/ui/sheet.tsx dashboard/client/src/components/TaskDrawer.tsx
+<empty>
+
+$ Get-FileHash dashboard/client/src/styles/globals.css -Algorithm SHA256
+789046FC976A7FC387D77BD64AC6EADA56014AEBF3EC9E31CC621454C423462C
+
+$ Get-FileHash dashboard/client/tailwind.config.ts -Algorithm SHA256
+D0E34ECFADDF4F035C3AA551530A57C41DFB36530F5AC5295D24FA34E299704C
+
+$ line-count check
+TaskDrawer.tsx 129
+dashboard-sse.test.js 121
+dashboard/server/index.js 120
+dashboard-task.test.js 107
+sheet.tsx 73
+task.js 51
+All source/test files touched are <= 200 lines; package-lock.json exempt by SPEC v2.0.1.
+
+--- commit
+$ git commit -m "[T-WEB-04] implement task detail drawer" -m "Adds Radix Dialog-backed shadcn Sheet without overlay, task detail API, markdown body rendering, route/deep-link flow, and T-WEB-03 review nit fixes."
+[main 239e835] [T-WEB-04] implement task detail drawer
+15 files changed, 666 insertions(+), 23 deletions(-)
+create mode 100644 dashboard/client/src/components/ui/sheet.tsx
+create mode 100644 dashboard/client/src/types/markdown-it.d.ts
+create mode 100644 tests/unit/dashboard-task.test.js
