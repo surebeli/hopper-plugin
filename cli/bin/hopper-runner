@@ -10,10 +10,40 @@
 // Single-spawn invariant: this script contains exactly one spawn() call.
 // Counter-tested in tests/integration/runner-single-spawn.test.js.
 
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import { openSync, closeSync, readFileSync, existsSync } from 'node:fs';
 import { readFrontmatter, writeFrontmatter } from '../src/background.js';
 import { getAdapter } from '../src/vendors/index.js';
+
+/**
+ * Windows .cmd/.bat lookup: CreateProcessW can directly execute .exe but
+ * NOT .cmd or .bat. When the command is unqualified, use `where` to resolve.
+ * If the resolved file is .exe → use it directly. If .cmd/.bat → wrap with
+ * cmd.exe /c (preserves single-spawn invariant; still one spawn — just one
+ * level of shell indirection for command resolution).
+ *
+ * Returns { command, prependArgs }. Returns command unchanged on POSIX.
+ */
+function resolveWindowsCommand(cmd) {
+  if (process.platform !== 'win32') return { command: cmd, prependArgs: [] };
+  // If already a path or already has extension, trust it
+  if (cmd.includes('/') || cmd.includes('\\') || /\.\w+$/.test(cmd)) {
+    return { command: cmd, prependArgs: [] };
+  }
+  try {
+    const out = execSync(`where ${cmd}`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const lines = out.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    // Prefer .exe (executable directly by CreateProcessW)
+    const exe = lines.find(l => l.toLowerCase().endsWith('.exe'));
+    if (exe) return { command: exe, prependArgs: [] };
+    // Fall back to .cmd/.bat → wrap with cmd.exe
+    const batch = lines.find(l => /\.(cmd|bat)$/i.test(l));
+    if (batch) return { command: process.env.ComSpec || 'cmd.exe', prependArgs: ['/c', batch] };
+  } catch (_) {
+    // `where` failed — return original; CreateProcessW will likely fail too
+  }
+  return { command: cmd, prependArgs: [] };
+}
 
 function parseRunnerArgs(argv) {
   // Format: --task-id X --hopper-dir Y --adapter Z --output-md A --log B -- <adapter argv...>
@@ -99,8 +129,16 @@ async function main() {
     fail(outputMdPath, `Could not open log file ${logPath}: ${err.message}`);
   }
 
+  // Windows .cmd resolution: kimi.exe spawns directly; codex.cmd needs
+  // cmd.exe /c wrapper. Resolved synchronously via `where`. Real-exe path
+  // is used directly when available (no shell wrap).
+  const { command: resolvedCmd, prependArgs } = resolveWindowsCommand(adapter.command);
+  const finalArgv = [...prependArgs, ...adapterArgv];
+
   // *** THE single spawn (spec §3 #4) ***
-  const vendor = spawn(adapter.command, adapterArgv, {
+  // Single spawn() call. Windows command resolution above is a pure-sync
+  // PATH lookup, not a spawn (uses execSync only for `where`).
+  const vendor = spawn(resolvedCmd, finalArgv, {
     stdio: ['ignore', fdOut, fdErr],
     windowsHide: true,
     cwd: process.cwd(),

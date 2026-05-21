@@ -14,8 +14,8 @@ Anchor: `.hopper/queue.md::root`
 
 ## Tasks
 
-| ID | Task-type | Status | Depends | Priority | Brief |
-|----|-----------|--------|---------|----------|-------|
+| ID | Task-type | Status | Depends | Priority | Brief | Vendor |
+|----|-----------|--------|---------|----------|-------|--------|
 | T-PLUGIN-00 | spec-blindspot-hunt | in-progress | | high | Phase 0 host-lifecycle spike: 3 prongs. Prong 2 + Prong 3 VERIFIED. **Prong 1 Claude Code plugin install blocked-on-user-manual** per PING.md Step 6 — task stays in-progress until user installs plugin + reports `/hopper:smoke` output. Codex Phase 0 audit F2 fix. |
 | T-PLUGIN-00b | spec-blindspot-hunt | done | | high | Vendor invocation spike: kimi + opencode + copilot + **agy** (Antigravity; swapped in for Gemini per user 2026-05-20) headless calls. Outputs `docs/spikes/T-PLUGIN-00b-vendors.md`. Parallel-eligible with T-PLUGIN-00. Final score: 4/5 vendors smoke-verified (Codex+Kimi+OpenCode+Copilot); agy smoke pending user OAuth login per unified user-action gate. |
 | T-PLUGIN-00.5 | spec-write | done | T-PLUGIN-00, T-PLUGIN-00b | high | Tasks library bootstrap: write 6 `.hopper/tasks/<type>.md` frames (spec-write, code-impl, code-review-adversarial, code-review-acceptance, sidecar-polish, spec-blindspot-hunt). |
@@ -34,7 +34,9 @@ Anchor: `.hopper/queue.md::root`
 | T-PLUGIN-08a | code-impl | done | T-PLUGIN-07 | normal | Codex CLI host adapter (Tier C #1): bash wrapper `hosts/codex-cli/bin/hopper-codex` (+ Windows `.cmd`) that validates args, locates dispatcher, invokes `codex exec` once with a prompt that drives codex to call hopper-dispatch via its shell tool. Single-spawn at every layer. 14 wrapper tests pass. |
 | T-PLUGIN-08b | code-impl | done | T-PLUGIN-07 | normal | OpenCode host adapter (Tier C #2): bash wrapper `hosts/opencode/bin/hopper-opencode` (+ Windows `.cmd`) parallel to T-08a. Cross-host parity: identical regex, .. rejection, flag whitelist, symlink-safe SCRIPT_DIR, no-soft-orchestration prompt clause. Invokes `opencode run` once. 16 tests pass + parity test asserts byte-equivalent validation logic with Codex CLI wrapper. |
 | T-PLUGIN-09 | spec-write | done | T-PLUGIN-08a, T-PLUGIN-08b | normal | PASS materials (no-screencast variant per user 2026-05-20): docs/release/PASS-RATIONALE.md + docs/release/INSTALL-MATRIX.md + scripts/cross-host-verify.sh + root README refresh. **Screencast deferred as TODO — tracked separately, NOT part of this task's scope.** |
-| T-PLUGIN-10 | code-review-acceptance | done | T-PLUGIN-09 | high | Critic end-to-end verdict PASS_WITH_NOTES. Per-criterion: #1 PASS_WITH_NOTE (sidecar .txt disclosed); #2 PASS_WITH_NOTE (4/5 live-smoked, structural cross-host); #3 PASS_WITH_NOTE (OpenCode ANTHROPIC_API_KEY env-var fallback disclosed); #4 PASS clean; #5 PASS_WITH_NOTE (role vocabulary retained as legacy). GO for essay material with framing constraints. |
+| T-PLUGIN-10 | code-review-acceptance | done | T-PLUGIN-09 | high | Critic end-to-end verdict PASS_WITH_NOTES. Per-criterion: #1 PASS_WITH_NOTE (sidecar .txt disclosed); #2 PASS_WITH_NOTE (4/5 live-smoked, structural cross-host); #3 PASS_WITH_NOTE (OpenCode ANTHROPIC_API_KEY env-var fallback disclosed); #4 PASS clean; #5 PASS_WITH_NOTE (role vocabulary retained as legacy). GO for essay material with framing constraints. | |
+| T-AUDIT-PH5-codex | code-review-adversarial | done | T-PLUGIN-10 | high | Heterogeneous third-party audit by codex xhigh via hopper-dispatch --background. VERDICT: REWORK. 7 findings (4 P1 + 3 P2) — all NEW (missed by 12 prior local-scope audit cycles). Codex completed audit at 198k tokens just as misconfigured 300s SIGTERM fired (F2 self-evidence). Output: .hopper/handoffs/T-AUDIT-PH5-codex-output.md. | codex |
+| T-AUDIT-PH5-kimi | code-review-adversarial | failed | T-PLUGIN-10 | high | Kimi vendor dispatched in parallel; **silent failure** — 0-byte log + SIGTERM at 180s default timeout. Heterogeneous parallel structure WORKED (both vendors ran simultaneously via --background), but kimi produced no output. Hypothesis: kimi adapter timeout too short for 4.7k-char prompt + kimi-cli first-token wait stall. Output: .hopper/handoffs/T-AUDIT-PH5-kimi-output.md. | kimi |
 
 ---
 

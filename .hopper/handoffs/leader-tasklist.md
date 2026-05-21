@@ -150,3 +150,73 @@ Brief preview (full specs added post-spike):
 - T-PLUGIN-10: Critic end-to-end verification (3 hard acceptance criteria)
 
 Refer to `F:\workspace\ai\llm-hopper\docs\plans\2026-05-19-hopper-plugin-demo-spec.md` §6 for current draft of each task.
+
+---
+
+## T-AUDIT-PH5-codex (Phase 5 audit by codex xhigh)
+
+Third-party audit of hopper-plugin Phase 5 async dispatch (spec v2.1.0 §14). Repo root: F:/workspace/ai/hopper-plugin. Spec: F:/workspace/ai/llm-hopper/docs/plans/2026-05-19-hopper-plugin-demo-spec.md §14.
+
+Files to audit:
+- cli/src/background.js (frontmatter + isAlive + preflightDispatch + spawnDetached + assertPathSafe)
+- cli/bin/hopper-runner (detached wrapper, single spawn, parseResult on exit)
+- cli/bin/hopper-dispatch (--background --watch --jobs --reap flags)
+- hosts/codex-cli/bin/hopper-codex + hosts/opencode/bin/hopper-opencode (--background passthrough + HOPPER_HOST_VENDOR)
+- hosts/opencode/plugins/hopper-async.ts (OpenCode plugin via prompt_async)
+- tests/integration/runner-single-spawn.test.js + tests/unit/background.test.js
+
+Answer in this structure:
+
+VERDICT: PASS | PASS_WITH_NOTES | REWORK | FAIL
+
+FINDINGS (severity P0/P1/P2):
+- Single-spawn invariant: ONE spawn() per dispatch, no retry?
+- Path safety: assertPathSafe blocks symlink + .. escape?
+- Concurrent dispatch race: TOCTOU window real?
+- parseResult integration: kimi 402 / agy silent-fail correctly classified?
+- Heterogeneous-only warning: actually fires in background path?
+- §14 implementation faithful to spec?
+- Windows risks: codex.cmd resolution? process.kill(pid,0) cross-platform real?
+- Forbidden ops (§14.10): all 5 truly prevented or just policy-stated?
+
+TOP-3 INSIGHTS PRIOR AUDITS MISSED.
+
+STRONGEST HN ATTACK on this Phase 5 work + best rebuttal prep.
+
+Length budget: ~1500 words. Be tough but fair.
+
+---
+
+## T-AUDIT-PH5-kimi (Phase 5 audit by kimi, cross-vendor perspective)
+
+Third-party audit, parallel to T-AUDIT-PH5-codex. Same files, same questions. First real-vendor dogfood of kimi as a hopper-dispatched audit agent.
+
+Files to audit:
+- cli/src/background.js
+- cli/bin/hopper-runner
+- cli/bin/hopper-dispatch (--background, --watch, --jobs, --reap)
+- hosts/codex-cli/bin/hopper-codex + hosts/opencode/bin/hopper-opencode
+- hosts/opencode/plugins/hopper-async.ts
+- Spec: F:/workspace/ai/llm-hopper/docs/plans/2026-05-19-hopper-plugin-demo-spec.md §14
+
+Repo root: F:/workspace/ai/hopper-plugin.
+
+Same audit structure as T-AUDIT-PH5-codex:
+
+VERDICT: PASS | PASS_WITH_NOTES | REWORK | FAIL
+
+FINDINGS (severity P0/P1/P2):
+1. Single-spawn invariant — ONE spawn per dispatch, zero retry?
+2. Path safety — assertPathSafe handles symlinks + .. escape?
+3. Concurrent dispatch race — TOCTOU + tmp clobber actually possible?
+4. parseResult integration in runner — kimi 402 / agy silent-fail correctly classified?
+5. Heterogeneous-only warning — fires in background path or only sync?
+6. §14 vs implementation — every claimed frontmatter field actually written?
+7. Windows risks — codex.cmd resolution, signal 0 cross-platform?
+8. Spec §14.10 forbidden ops — mechanically prevented or just documented?
+
+TOP-3 INSIGHTS prior audits missed.
+
+STRONGEST HN ATTACK on this Phase 5 work + best rebuttal prep.
+
+Length budget: ~1500 words.
