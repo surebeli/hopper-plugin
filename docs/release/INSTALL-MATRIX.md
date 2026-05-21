@@ -39,8 +39,8 @@ Or `npm link` from the repo root (uses the `bin` field in `package.json`).
 
 **Verify**:
 ```bash
-hopper-dispatch --version    # expect: 0.4.0-phase-3
-hopper-dispatch --smoke      # expect: hopper standalone (CLI v0.4.0-phase-3)
+hopper-dispatch --version    # expect: 0.5.0-phase-5a
+hopper-dispatch --smoke      # expect: hopper standalone (CLI v0.5.0-phase-5a)
 hopper-dispatch --vendors    # expect: 5 adapters listed
 ```
 
@@ -70,7 +70,7 @@ New-Item -ItemType SymbolicLink `
 /hopper:smoke
 ```
 
-Expected: `hopper standalone (CLI v0.4.0-phase-3)` banner.
+Expected: `hopper standalone (CLI v0.5.0-phase-5a)` banner.
 
 **Common mistake**: symlinking `hosts/claude-code/` (the README directory) — that leaves `cli/bin/hopper-dispatch` unreachable from `$CLAUDE_PLUGIN_ROOT`. The codex Phase 3 audit caught this layout bug; the fix is documented as P0 in `.hopper/MANIFEST.md`.
 
@@ -394,6 +394,50 @@ The resolver tries `.exe`/`.com` first (CreateProcessW can spawn directly), then
 Each adapter's `capabilities` block declares a `staleAfter` date. After that date, the data should be re-verified against the vendor's official docs (vendors change rapidly). The summary table above is sourced from `docs/research/async-execution/` notes as of the linked dates — re-verify before quoting in essay or release docs.
 
 If a vendor adds a new capability (e.g. agy adds `--resume`), update the adapter's `capabilities.features.sessionResume` block and bump `staleAfter`. Single-file edit per change.
+
+## Live probe + per-machine cache (Phase 6b)
+
+`--capabilities` reports static-baked metadata (what the adapter file declares); `--probe` queries each vendor CLI live, asks for actual installed models and reasoning levels on **this machine**, and caches the result for later querying. Probe is asymmetric — each vendor declares its own `introspection_supported` level.
+
+### `hopper-dispatch --probe [<vendor>]` — live vendor introspection
+
+Spawns the vendor CLI to query model catalog. Costs subprocesses; this is the **only** discovery surface that does. Cached to `~/.hopper/cache/vendor-capabilities.json` (env override: `HOPPER_CACHE_DIR`). Per-machine, not per-project.
+
+| Vendor   | introspection_supported | Cost                | What it returns                                     |
+|----------|-------------------------|---------------------|-----------------------------------------------------|
+| codex    | `full`                  | 2 subprocesses      | `--version` + `debug models --bundled` JSON (.slug) |
+| opencode | `full`                  | 3 subprocesses      | `--version` + `models` + `auth list` (text, ANSI-stripped) |
+| copilot  | `partial`               | 1 subprocess + FS   | `version` + filesystem scan of `~/.copilot/agents/*.agent.md` (model list server-side per-tier, not exposed) |
+| kimi     | `config-only`           | 0 subprocesses      | Reads `~/.kimi/config.{toml,json}` `[models.NAME]` blocks |
+| agy      | `none`                  | 0 subprocesses      | Static (`gemini-3.5-flash` baked into agy itself)   |
+
+```bash
+hopper-dispatch --probe                    # probe all vendors (~6 subprocesses total: codex 2 + opencode 3 + copilot 1; kimi & agy 0)
+hopper-dispatch --probe codex              # probe one vendor only
+```
+
+### `hopper-dispatch --models [<vendor>]` — read cached models
+
+Pure cache read (zero subprocess). Shows model list, reasoning levels, and how recently the cache was refreshed (`6m ago`, `2d ago`).
+
+```bash
+hopper-dispatch --models                   # all vendors from cache
+hopper-dispatch --models opencode          # one vendor only
+```
+
+### Dispatch-time soft-warn
+
+If you pass `--model X` and X is not in the cached list for the resolved vendor, `runDispatch` prints a non-blocking warning + suggests `--probe <vendor>` to refresh. Stale cache (>14 days) also prints a note. Both are advisory — dispatch proceeds either way (vendor may have added a model not yet in cache).
+
+### Carve-out from single-spawn invariant (spec §3 #4)
+
+Spec §3 #4 mandates ONE dispatch = ONE subprocess. Probe explicitly carves itself out:
+
+- `--check` and `--capabilities` stay **zero-spawn** (covered by `tests/unit/discovery.test.js` + `tests/unit/vendor-probe.test.js`)
+- `vendor-probe/*.js` modules are **lazy-imported** by `vendors/index.js` only when `probeVendor()` is called; never loaded for `--check`/`--capabilities`
+- Test enforces `cli/src/vendors/index.js` uses dynamic `await import('../vendor-probe/...')` to prevent accidental eager wiring
+
+This keeps the dispatch hot path identical to v0.4 spawn-budget while giving Phase 6b a budgeted diagnostic surface.
 
 ## Uninstall
 

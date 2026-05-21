@@ -10,6 +10,12 @@ import { kimiAdapter } from './kimi.js';
 import { opencodeAdapter } from './opencode.js';
 import { copilotAdapter } from './copilot.js';
 import { agyAdapter } from './agy.js';
+// Phase 6b probe entry points — each module exports an async probe() fn.
+// Imported lazily by probeVendor() below so that --check / --capabilities
+// (which don't probe) don't pull these subprocess-capable modules into
+// their hot path. The static no-spawn discovery test only scans adapter
+// files + vendors/index.js; vendor-probe/*.js is the carve-out for
+// opt-in --probe spawning per spec §3 #4 + §14.6.
 
 /** @type {Record<string, import('../types.js').VendorAdapter>} */
 const REGISTRY = {
@@ -96,4 +102,29 @@ export function capabilitiesForAdapter(name) {
   const adapter = REGISTRY[name];
   if (!adapter) throw new Error(`No vendor adapter registered for '${name}'`);
   return adapter.capabilities || null;
+}
+
+/**
+ * Phase 6b: opt-in probe. Lazy-imports cli/src/vendor-probe/<name>.js and
+ * calls its probe() function. Returns the standard probe-result shape:
+ *   {
+ *     introspection_supported: 'full' | 'partial' | 'config-only' | 'none',
+ *     binary_path, version, models, models_source, reasoning_levels, notes,
+ *     duration_ms
+ *   }
+ *
+ * Spec §3 #4 carve-out: this MAY spawn vendor subprocesses (one or more per
+ * vendor). Subprocesses are opt-in (user runs --probe), diagnostic (result
+ * cached, not dispatched), single-attempt (no retry on failure).
+ */
+export async function probeVendor(name) {
+  if (!REGISTRY[name]) {
+    throw new Error(`No vendor adapter registered for '${name}'. Known: ${Object.keys(REGISTRY).join(', ')}`);
+  }
+  // Dynamic import — keeps spawn-capable modules off the --check / --capabilities hot path.
+  const mod = await import(`../vendor-probe/${name}.js`);
+  if (typeof mod.probe !== 'function') {
+    throw new Error(`vendor-probe/${name}.js does not export probe()`);
+  }
+  return mod.probe();
 }

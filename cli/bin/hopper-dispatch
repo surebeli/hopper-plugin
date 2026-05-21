@@ -7,7 +7,8 @@
 
 import { resolveDispatch, getStatus, executeDispatch } from '../src/dispatch.js';
 import { listTaskTypes } from '../src/tasks.js';
-import { listAdapters, getAdapter, installCheckForAdapter, capabilitiesForAdapter } from '../src/vendors/index.js';
+import { listAdapters, getAdapter, installCheckForAdapter, capabilitiesForAdapter, probeVendor } from '../src/vendors/index.js';
+import { readCache, readCacheWithDiagnostics, getVendorCache, setVendorCache, isStale, staleness } from '../src/cache.js';
 import { writeOutput } from '../src/output.js';
 import {
   validateTaskId,
@@ -54,7 +55,9 @@ function printUsage() {
   console.log('  hopper-dispatch --task-types                    List available task-type frames');
   console.log('  hopper-dispatch --vendors                       List registered vendor adapters');
   console.log('  hopper-dispatch --check [<vendor>]              Show install + auth status (all, or single vendor)');
-  console.log('  hopper-dispatch --capabilities <vendor>         Show static model/reasoning/feature support for vendor');
+  console.log('  hopper-dispatch --capabilities <vendor>         Show static model/reasoning/feature support + cached data if probed');
+  console.log('  hopper-dispatch --probe [<vendor>]              Run vendor introspection, write cache to ~/.hopper/cache/');
+  console.log('  hopper-dispatch --models [<vendor>]             Show cached model list per vendor (run --probe first)');
   console.log('  hopper-dispatch --help                          Show this message');
   console.log('  hopper-dispatch --version                       Print version');
   console.log('');
@@ -125,6 +128,20 @@ async function main() {
       process.exit(1);
     }
     runCapabilities(target);
+    return;
+  }
+
+  // Phase 6b probe-cache commands
+  if (args.includes('--probe')) {
+    const probeIdx = args.indexOf('--probe');
+    const target = args[probeIdx + 1] && !args[probeIdx + 1].startsWith('-') ? args[probeIdx + 1] : null;
+    await runProbe(target);
+    return;
+  }
+  if (args.includes('--models')) {
+    const modelsIdx = args.indexOf('--models');
+    const target = args[modelsIdx + 1] && !args[modelsIdx + 1].startsWith('-') ? args[modelsIdx + 1] : null;
+    runModels(target);
     return;
   }
 
@@ -244,7 +261,8 @@ async function main() {
  */
 function parseDispatchArgs(args) {
   const META_FLAGS = new Set(['--help', '-h', '--version', '-v', '--smoke', '--status',
-    '--task-types', '--vendors', '--resolve', '--watch', '--jobs', '--reap']);
+    '--task-types', '--vendors', '--resolve', '--watch', '--jobs', '--reap',
+    '--check', '--capabilities', '--probe', '--models']);
   const VALUE_FLAGS = new Set(ALLOWED_DISPATCH_VALUE_FLAGS);
   const BARE_FLAGS = new Set(ALLOWED_DISPATCH_FLAGS);
 
@@ -309,12 +327,40 @@ async function runResolve(hopperDir, taskId) {
   }
 }
 
+/**
+ * P3a-fix: shared soft-warn helper, called from both sync and background dispatch
+ * paths. Non-blocking, advisory only — vendor may have a fresh model not yet
+ * probed. Caller catches any error to ensure dispatch is never blocked.
+ */
+function warnIfModelUnknown(vendor, model) {
+  if (!model) return;
+  const cached = getVendorCache(vendor);
+  if (!cached || !Array.isArray(cached.models) || cached.models.length === 0) return;
+  if (!cached.models.includes(model)) {
+    console.error(`  warn: model '${model}' not in cached list for ${vendor}`);
+    console.error(`  cached models (${staleness(cached.probed_at)}): ${cached.models.slice(0, 8).join(', ')}${cached.models.length > 8 ? '...' : ''}`);
+    console.error(`  proceeding anyway; run \`hopper-dispatch --probe ${vendor}\` to refresh cache if vendor recently added it`);
+  } else if (isStale(cached.probed_at)) {
+    console.error(`  note: cache for ${vendor} is ${staleness(cached.probed_at)}; consider \`hopper-dispatch --probe ${vendor}\` to refresh`);
+  }
+}
+
 async function runDispatch(hopperDir, taskId, { write = false, force = false, adapterOpts = {} } = {}) {
   try {
     const optsSummary = Object.keys(adapterOpts).length > 0
       ? ` [opts: ${Object.entries(adapterOpts).map(([k, v]) => `${k}=${v}`).join(', ')}]`
       : '';
     console.error(`hopper-dispatch v${VERSION} — dispatching ${taskId}${optsSummary}...`);
+
+    // Soft-warn: --model passed but X not in cached list. Non-blocking. Single-
+    // spawn invariant unaffected (resolveDispatch is in-process; cache read is FS).
+    if (adapterOpts.model) {
+      try {
+        const peek = await resolveDispatch({ hopperDir, taskId });
+        warnIfModelUnknown(peek.vendor, adapterOpts.model);
+      } catch (_) { /* never block dispatch */ }
+    }
+
     const startedAt = Date.now();
     const result = await executeDispatch({ hopperDir, taskId, adapterOpts });
     const elapsedMs = Date.now() - startedAt;
@@ -395,6 +441,12 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {} } = {
   } catch (err) {
     console.error(`Error: ${err.message}`);
     process.exit(1);
+  }
+
+  // P3a-fix: soft-warn also fires on --background path. Same warnIfModelUnknown
+  // helper as sync dispatch; advisory only, never blocks.
+  if (adapterOpts.model) {
+    try { warnIfModelUnknown(resolved.vendor, adapterOpts.model); } catch (_) { /* never block */ }
   }
 
   const adapter = getAdapter(resolved.vendor);
@@ -717,6 +769,128 @@ function runCapabilities(vendor) {
   console.log(`  Re-verify quarterly. Source: docs/research/ — see notes above.`);
   console.log('');
   console.log('No vendor subprocess is spawned for this lookup (static data only).');
+
+  // Phase 6b: merge in cached probe data if present
+  const cached = getVendorCache(vendor);
+  if (cached) {
+    console.log('');
+    console.log(`  Cached probe data (${staleness(cached.probed_at)}${isStale(cached.probed_at) ? ' — STALE' : ''}):`);
+    console.log(`    introspection_supported:  ${cached.introspection_supported}`);
+    if (cached.version) console.log(`    version:                  ${cached.version}`);
+    if (cached.binary_path) console.log(`    binary_path:              ${cached.binary_path}`);
+    if (cached.models && cached.models.length > 0) {
+      const preview = cached.models.slice(0, 8).join(', ');
+      const more = cached.models.length > 8 ? ` (+${cached.models.length - 8} more)` : '';
+      console.log(`    models (${cached.models.length}):              ${preview}${more}`);
+    }
+    console.log(`    models_source:            ${cached.models_source}`);
+    if (cached.reasoning_levels && cached.reasoning_levels.length > 0) {
+      console.log(`    reasoning_levels:         ${cached.reasoning_levels.join(' | ')}`);
+    }
+    if (cached.notes && cached.notes.length > 0) {
+      console.log(`    notes:`);
+      for (const n of cached.notes) console.log(`      - ${n}`);
+    }
+    console.log(`    duration_ms:              ${cached.duration_ms}`);
+  } else {
+    console.log('');
+    console.log(`  No cached probe data. Run \`hopper-dispatch --probe ${vendor}\` for live introspection.`);
+  }
+}
+
+// ─── Phase 6b commands ────────────────────────────────────────────────
+
+async function runProbe(target) {
+  const vendors = target ? [target] : listAdapters();
+  if (target && !listAdapters().includes(target)) {
+    console.error(`Error: unknown vendor '${target}'. Known: ${listAdapters().join(', ')}`);
+    process.exit(1);
+  }
+
+  console.log(`hopper-dispatch v${VERSION} — probing ${vendors.length} vendor(s)...`);
+  console.log('Per spec §3 #4 + §14.6 carve-out: --probe is opt-in, diagnostic,');
+  console.log('single-attempt-per-vendor. Results cached at ~/.hopper/cache/vendor-capabilities.json.');
+  console.log('');
+
+  let totalSubprocesses = 0;
+  for (const v of vendors) {
+    process.stderr.write(`  ${v.padEnd(9)} ... `);
+    const start = Date.now();
+    try {
+      const result = await probeVendor(v);
+      setVendorCache(v, { ...result, probed_at: new Date().toISOString() });
+      const elapsed = Date.now() - start;
+      const modelCount = result.models ? result.models.length : 0;
+      process.stderr.write(`${result.introspection_supported} | ${modelCount} model(s) | ${elapsed}ms\n`);
+      totalSubprocesses += estimateSpawns(v, result.introspection_supported);
+    } catch (err) {
+      process.stderr.write(`ERROR: ${err.message}\n`);
+    }
+  }
+
+  console.log('');
+  console.log(`Probe complete. ~${totalSubprocesses} vendor subprocess(es) spawned total.`);
+  console.log(`Run \`hopper-dispatch --models\` or \`--capabilities <vendor>\` to read cached results.`);
+}
+
+function estimateSpawns(vendorName, introspectionSupported) {
+  // N1-fix: per-vendor counts instead of bucketed approximation.
+  // codex: --version + debug models = 2
+  // opencode: --version + models + auth list = 3
+  // copilot: version = 1 (plus zero-spawn FS scan)
+  // kimi: config file read only = 0
+  // agy: static = 0
+  if (vendorName === 'opencode') return 3;
+  if (vendorName === 'codex') return 2;
+  if (vendorName === 'copilot') return 1;
+  // Fall back to the introspection-level approximation for unknown vendors
+  switch (introspectionSupported) {
+    case 'full': return 2;
+    case 'partial': return 1;
+    case 'config-only': return 0;
+    case 'none': return 0;
+    default: return 0;
+  }
+}
+
+function runModels(target) {
+  // P3b-fix: distinguish "no cache yet" from "cache is corrupt" so user knows
+  // whether to run --probe (no cache) vs delete + re-probe (corrupt).
+  const { cache, error } = readCacheWithDiagnostics();
+  if (error) {
+    console.error(`Error reading cache: ${error}`);
+    process.exit(1);
+  }
+  if (!cache) {
+    console.error('No cache found. Run `hopper-dispatch --probe` first to populate it.');
+    process.exit(1);
+  }
+  const vendors = target ? [target] : Object.keys(cache.vendors);
+  if (target && !cache.vendors[target]) {
+    console.error(`No cached entry for vendor '${target}'. Run \`hopper-dispatch --probe ${target}\` first.`);
+    console.error(`Cached vendors: ${Object.keys(cache.vendors).join(', ') || '(none)'}`);
+    process.exit(1);
+  }
+
+  console.log(`hopper-dispatch v${VERSION} — cached models per vendor`);
+  console.log(`Cache: ${cache.probed_at_global} (global) | host: ${cache.host}`);
+  console.log('');
+
+  for (const v of vendors) {
+    const entry = cache.vendors[v];
+    if (!entry) continue;
+    const stale = isStale(entry.probed_at) ? ' [STALE]' : '';
+    console.log(`${v} (${entry.introspection_supported}, ${staleness(entry.probed_at)})${stale}`);
+    if (entry.models && entry.models.length > 0) {
+      for (const m of entry.models) console.log(`  - ${m}`);
+    } else {
+      console.log(`  (no models in cache; source: ${entry.models_source})`);
+    }
+    if (entry.reasoning_levels && entry.reasoning_levels.length > 0) {
+      console.log(`  reasoning: ${entry.reasoning_levels.join(' | ')}`);
+    }
+    console.log('');
+  }
 }
 
 main().catch((err) => {
