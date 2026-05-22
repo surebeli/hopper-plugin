@@ -252,6 +252,10 @@ hopper-dispatch --watch-events --once            # emit first terminal event the
 
 `--watch-events` emits one JSONL line per terminal frontmatter transition and, in v1.1, also attempts a best-effort OS toast. Set `HOPPER_NOTIFY=0` to suppress OS toast while keeping stdout JSONL. Toast delivery is non-authoritative: if the platform tool is missing or times out, the JSONL stream and job state are unchanged.
 
+### `--watch-events --once` semantics
+
+`--once` exits after the **first** terminal event the watcher observes. If two background tasks reach terminal state within the same poll window (`fs.watchFile` 500ms interval), only the first observed event is emitted; the second's terminal event still hits frontmatter + progress.log but the `--once` watcher already exited. For "drain all pending then exit" semantics, omit `--once` and exit the watcher manually after observing the desired count.
+
 Host behavior:
 
 | Host path | Completion wake behavior | Pull fallback |
