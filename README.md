@@ -32,7 +32,11 @@ State remains in plain markdown under `.hopper/` (git-tracked, hand-editable). P
 
 ```
 hopper-plugin/                  ← repo root = plugin install root
+├── .agents/
+│   └── plugins/marketplace.json ← Codex local marketplace manifest
 ├── .claude-plugin/             ← Claude Code plugin manifest (Tier B)
+│   └── plugin.json
+├── .codex-plugin/              ← Codex plugin metadata for root-level inspection
 │   └── plugin.json
 ├── commands/                   ← Claude Code slash command prompt templates (Tier B)
 │   ├── dispatch.md
@@ -47,12 +51,29 @@ hopper-plugin/                  ← repo root = plugin install root
 │   ├── claude-code/README.md   ← Tier B documentation
 │   ├── codex-cli/bin/hopper-codex   ← Tier C #1 wrapper
 │   └── opencode/bin/hopper-opencode ← Tier C #2 wrapper
+├── plugins/
+│   └── hopper-plugin/          ← Codex marketplace plugin source
 ├── tests/                      ← unit + integration tests (270/285 passing)
 ├── docs/                       ← spec, spikes, audit trail
 └── .hopper/                    ← THIS repo's own dogfood protocol state
 ```
 
 Each host route resolves to the same `cli/bin/hopper-dispatch`. Vendor selection comes from `.hopper/AGENTS.md`, not the host. Same task-id → same vendor → same output across all 4 hosts (cross-host equivalence claim per spec §1 #2).
+
+## Web dashboard (side project)
+
+Local read-mostly web dashboard for visualizing the queue, vendor inventory, live log streams, and cost totals. Built as a sidequest (8 phases, 17 commits, zero hard-constraint violations across 8 reviews). Binds `127.0.0.1` only; no auth, no remote access, no server-side persistence.
+
+```bash
+npm install
+npm run dashboard:build
+npm run dashboard:start
+# open http://127.0.0.1:7777
+```
+
+- Full usage guide: `dashboard/README.md`
+- Design contract: `docs/sidequests/web-dashboard/SPEC.md`
+- Build retrospective: `docs/sidequests/web-dashboard/SIDEQUEST-COMPLETE.md`
 
 ## Install
 
@@ -71,6 +92,16 @@ To verify the cross-host equivalence claim without installing all 4 hosts:
 ```bash
 bash scripts/cross-host-verify.sh       # static checks; expect ALL STRUCTURAL CHECKS PASSED
 ```
+
+Codex plugin manager smoke from this repo root:
+
+```bash
+codex plugin marketplace add .
+codex plugin add hopper-plugin@agent-hopper
+codex plugin list --marketplace agent-hopper
+```
+
+The Codex marketplace entry lives at `.agents/plugins/marketplace.json` and points to `plugins/hopper-plugin/`, matching Codex's required local marketplace layout.
 
 ## License
 
