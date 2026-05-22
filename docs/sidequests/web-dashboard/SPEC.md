@@ -1,12 +1,12 @@
 # Sidequest: Hopper Web Dashboard
 
 > **Anchor**: `docs/sidequests/web-dashboard/SPEC.md::root`
-> **Status**: spec — pending pickup
+> **Status**: spec — v2.2 progress timeline sync
 > **Owner**: side-project agent (not in main `.hopper/queue.md`)
 > **Spec authority**: this file (single source of truth for the sidequest)
 > **Parent project**: `hopper-plugin` v0.6.0-phase-6c
 > **Created**: 2026-05-21
-> **Current spec version**: **v2.0** (stack reversal — React/Vite/shadcn). See §修订记录.
+> **Current spec version**: **v2.2** (progress timeline integration). See §修订记录.
 
 ---
 
@@ -47,6 +47,7 @@
 | **FR-007** | P1 | Liveness check：5s 心跳，对 in-progress PID 跑 `process.kill(pid, 0)` | 死进程标记为 `orphan` |
 | **FR-008** | P2 | 关键写操作：从 web 触发 `--probe <vendor>` | 必须二次确认弹窗 |
 | **FR-009** | P3 | Vendor 对垒视图：同 prompt 多 vendor 并排，抓 `duration_ms / exit_code / adapter_status` 出 leaderboard | 仅对 `T-AUDIT-*` 命名前缀 task 启用 |
+| **FR-010** | P1 | Progress timeline：task drawer 展示 progress.log 事件流 | Progress tab 经 SSE 增量更新；terminal event pinned |
 
 ### 2.2 非功能需求（NFR）
 
@@ -699,6 +700,7 @@ project，不在主线 .hopper/queue.md 中。
 | `.hopper/queue.md` | 任务表 | `/events/queue` |
 | `.hopper/handoffs/*.md` | task 结构化输出（frontmatter + body） | `/events/task/:id` |
 | `.hopper/handoffs/*.log` | vendor raw stdout（增量） | `/events/log/:id` |
+| `.hopper/handoffs/*-progress.log` | background progress JSONL（增量） | `/events/progress/:id` |
 | `.hopper/COST-LOG.md` | 成本账本 | `/events/cost` |
 | `.hopper/AGENTS.md` | vendor preference 表 | `/events/agents` |
 | (内部 5s tick) | PID liveness check | `/events/liveness` |
@@ -828,3 +830,4 @@ framer-motion @react-spring/web gsap lottie-react
 | v2.1.2 | 2026-05-22 | §4.3 patch — Task drawer 宽度从 `480px` 改为 `min(720px, calc(100vw - 16px))`。源于 T-WEB-04 review F2：480px 实际塞不下 13 字段 frontmatter 表 + markdown body（含表格 / 代码块）；executor 用 760px 落地但未在 deviations 披露。720px 是承载内容的实际下限，clamp 保证移动端不溢出。Spec 与现实对齐，约束 reviewer 在合理上限内不必判 rework。同时强化"必须去掉 SheetOverlay"措辞，明确实施手段。 |
 | v2.1.3 | 2026-05-22 | §6 T-WEB-06 验收 #2 文字修正 — 把 stale 对比命令从 `--status` 改为 `--models <vendor>`。源于 T-WEB-06 review F1：executor 实施时发现 `--status` 仅输出 queue 摘要不含 vendor cache，实际 stale marker 由 `--models` / `--capabilities` 输出。Spec 与现实对齐。 |
 | v2.1.4 | 2026-05-22 | 收尾 patch — (a) §2.2 NFR-005 改为 main chunk 口径，lazy 不计；(b) §3.3 加入"下游 task 集成测试发现的 hotfix 可作为第 3 commit 用原 task prefix"carve-out。源于 T-WEB-08 review F1+F2。Sidequest closeout 同步发布 SIDEQUEST-COMPLETE.md。 |
+| **v2.2** | **2026-05-22** | **Progress timeline sync** — §2.1 新增 FR-010；附录 A 新增 `.hopper/handoffs/*-progress.log` → `/events/progress/:id`；顶部版本同步到 v2.2。源于 v1.1 R15：dashboard client 开始消费 v1.0 progress notification 数据。 |
