@@ -329,4 +329,69 @@ Per audit pack above. 30min floor (was 120s — the most aggressively misaligned
 
 Per audit pack above. Phase 6c adds `knownInstallPaths` so agy resolves to `~/AppData/Local/agy/bin/agy.exe` even when PATH doesn't include that dir. WARNING: if user hasn't OAuth-authed agy interactively, will hit silent-auth-fail (empty stdout, exit 0; adapter detects via log inspection).
 
+## T-PROG-R14-RESEARCH (R14 dashboard tail research dogfood)
+
+- Task-type: code-impl
+- Vendor: codex
+- Reasoning: xhigh
+- Priority: high
+- Scope: research only; no source edits
+- Dispatch: `hopper-dispatch T-PROG-R14-RESEARCH --background --reasoning xhigh`
+
+### Context
+
+v1.1 R14 connects v1.0 progress notification into the existing dashboard.
+The risky server-side detail is truncate/rotate-aware tailing for files under
+`.hopper/handoffs/`, especially on Windows NTFS where inode semantics differ
+from POSIX. This task is also a dogfood run for v1.0 monitoring: start event,
+frontmatter progress fields, terminal event, `--progress`, and `--watch-events`
+should all reflect the background task lifecycle.
+
+### Assignment
+
+Research chokidar file-change handling plus truncate-aware tail implementation
+idioms across Windows and POSIX. Focus on how to distinguish append, truncate,
+rename/rotate, and cold-start subscriber behavior without re-reading rotated
+archives. Keep the output short and implementation-oriented.
+
+### Output
+
+Write `.hopper/handoffs/T-PROG-R14-RESEARCH-output.md` with:
+
+- Summary in <= 200 words
+- 3-5 key implementation idioms
+- Any Windows-specific caveat for `stat.ino` / `birthtime` / size shrink
+- Recommendation for R14 dashboard tailer tests
+
+## T-PROG-R14-REVIEW-kimi (R14 adversarial review dogfood)
+
+- Task-type: code-review-adversarial
+- Vendor: kimi
+- Priority: high
+- Scope: read-only review after R14 commits exist
+- Dispatch: `hopper-dispatch T-PROG-R14-REVIEW-kimi --background`
+
+### Context
+
+The executor will add dashboard server support for v1.0 progress logs: watcher
+mapping, `/events/progress/:id`, `/api/task/:id/progress`, truncate/rotate tail
+defense, and incremental JSONL broadcast. R15 client UI is explicitly out of
+scope, and v1.0 CLI progress writers are frozen.
+
+### Assignment
+
+After the R14 commits land, review the diff and tests adversarially. Focus on
+G1-G4 from `docs/specs/background-progress-notification-v1.1-should-N1-REVIEW.md`
+and the red lines: no progress writes leaking into sync path, no fallback/retry
+language or behavior, no single-spawn bypass, no `dashboard/client/` changes,
+and no CLI writer changes.
+
+### Output
+
+Write `.hopper/handoffs/T-PROG-R14-REVIEW-kimi-output.md` with:
+
+- Verdict: PASS | PASS_WITH_NOTES | REWORK
+- Findings ordered by P0/P1/P2
+- Evidence from commit diff and focused tests
+- One-line recommendation for N2.wave.dashboard-1 reviewer
 
