@@ -13,6 +13,7 @@ import {
   preflightDispatch, listInProgressJobs, reapStaleJobs,
   ORPHAN_CEILING_HOURS,
 } from '../../cli/src/background.js';
+import { readProgressEvents } from '../../cli/src/progress.js';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -265,6 +266,16 @@ test('preflightDispatch re-classifies stale (>24h) in-progress as orphaned + all
     assert.equal(r.ok, true);
     const fm = readFrontmatter(path);
     assert.equal(fm.status, 'orphaned', '25h-old in-progress must be reclassified');
+    assert.equal(fm.phase, 'orphaned');
+    assert.equal(fm.terminal_event_emitted, true);
+    assert.equal(fm.progress_seq, 1);
+
+    const events = readProgressEvents({ hopperDir, taskId: 'T-stale' });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].terminal, true);
+    assert.equal(events[0].kind, 'terminal');
+    assert.equal(events[0].phase, 'orphaned');
+    assert.equal(events[0].status, 'orphaned');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -285,6 +296,13 @@ test('preflightDispatch re-classifies in-progress + dead-PID as orphaned + allow
     assert.equal(r.ok, true);
     const fm = readFrontmatter(path);
     assert.equal(fm.status, 'orphaned');
+    assert.equal(fm.phase, 'orphaned');
+    assert.equal(fm.terminal_event_emitted, true);
+
+    const events = readProgressEvents({ hopperDir, taskId: 'T-deadpid' });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].terminal, true);
+    assert.equal(events[0].status, 'orphaned');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -356,6 +374,39 @@ test('reapStaleJobs flips stale + dead-PID jobs to orphaned', () => {
     assert.equal(readFrontmatter(join(h, 'T-dead-output.md')).status, 'orphaned');
     assert.equal(readFrontmatter(join(h, 'T-fresh-output.md')).status, 'in-progress',
       'fresh + alive must not be reaped');
+
+    for (const taskId of ['T-stale', 'T-dead']) {
+      const events = readProgressEvents({ hopperDir, taskId });
+      assert.equal(events.length, 1, `${taskId} must get one terminal event`);
+      assert.equal(events[0].terminal, true);
+      assert.equal(events[0].status, 'orphaned');
+      assert.equal(readFrontmatter(join(h, `${taskId}-output.md`)).terminal_event_emitted, true);
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('reapStaleJobs is idempotent for terminal orphan events', () => {
+  const { tmp, hopperDir } = makeTmpHopper();
+  try {
+    const h = join(hopperDir, 'handoffs');
+    writeFrontmatter(join(h, 'T-reap-once-output.md'), {
+      task_id: 'T-reap-once',
+      adapter: 'codex',
+      status: 'in-progress',
+      pid: 999999,
+      start_time: new Date().toISOString(),
+      _body: '',
+    });
+
+    assert.deepEqual(reapStaleJobs(hopperDir), ['T-reap-once']);
+    assert.deepEqual(reapStaleJobs(hopperDir), []);
+
+    const events = readProgressEvents({ hopperDir, taskId: 'T-reap-once' });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].terminal, true);
+    assert.equal(events[0].status, 'orphaned');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

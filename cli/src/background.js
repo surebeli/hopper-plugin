@@ -174,6 +174,64 @@ export function hoursSince(isoString) {
   return (Date.now() - t) / 3.6e6;
 }
 
+function taskIdFromOutputPath(outputMdPath, fm) {
+  return fm.task_id || basename(outputMdPath).replace(/-output\.md$/, '');
+}
+
+function hopperDirFromOutputPath(outputMdPath) {
+  return dirname(dirname(outputMdPath));
+}
+
+function orphanTerminalMessage(reason) {
+  return `Task orphaned: ${reason}`;
+}
+
+function appendOrphanTerminalEvent(outputMdPath, fm, reason, source) {
+  if (fm.terminal_event_emitted) return null;
+  const taskId = taskIdFromOutputPath(outputMdPath, fm);
+  return appendProgressEvent({
+    hopperDir: hopperDirFromOutputPath(outputMdPath),
+    taskId,
+    event: {
+      vendor: fm.adapter || 'unknown',
+      phase: 'orphaned',
+      kind: 'terminal',
+      message: orphanTerminalMessage(reason),
+      source,
+      terminal: true,
+      status: 'orphaned',
+    },
+  });
+}
+
+function orphanFrontmatterPatch(fm, event) {
+  const patch = {
+    ...fm,
+    status: 'orphaned',
+    phase: 'orphaned',
+  };
+  if (event) {
+    patch.last_progress_at = event.ts;
+    patch.last_progress = event.message;
+    patch.progress_seq = event.seq;
+    patch.terminal_event_emitted = true;
+  }
+  return patch;
+}
+
+function markOrphaned(outputMdPath, fm, reason, source, bodyAppend = '') {
+  let event = null;
+  try {
+    event = appendOrphanTerminalEvent(outputMdPath, fm, reason, source);
+  } catch (_) {
+    // Progress writing is best-effort; never strand orphan reclassification.
+  }
+  writeFrontmatter(outputMdPath, {
+    ...orphanFrontmatterPatch(fm, event),
+    _body: (fm._body || '') + bodyAppend,
+  });
+}
+
 /**
  * Preflight check before a new dispatch. Inspects an existing output.md
  * (if any) and decides whether the new dispatch may proceed.
@@ -204,7 +262,12 @@ export function preflightDispatch(outputMdPath) {
 
   const ageH = hoursSince(fm.start_time);
   if (ageH >= ORPHAN_CEILING_HOURS) {
-    writeFrontmatter(outputMdPath, { ...fm, status: 'orphaned' });
+    markOrphaned(
+      outputMdPath,
+      fm,
+      `age ${ageH.toFixed(1)}h exceeds ${ORPHAN_CEILING_HOURS}h ceiling`,
+      'preflight'
+    );
     return { ok: true };
   }
 
@@ -219,7 +282,7 @@ export function preflightDispatch(outputMdPath) {
   }
 
   // PID dead but status still in-progress → orphaned
-  writeFrontmatter(outputMdPath, { ...fm, status: 'orphaned' });
+  markOrphaned(outputMdPath, fm, 'PID not alive', 'preflight');
   return { ok: true };
 }
 
@@ -487,11 +550,16 @@ export function reapStaleJobs(hopperDir) {
     const shouldReap = job.age_hours >= ORPHAN_CEILING_HOURS || !job.alive;
     if (!shouldReap) continue;
     const fm = readFrontmatter(job.path);
-    writeFrontmatter(job.path, {
-      ...fm,
-      status: 'orphaned',
-      _body: (fm._body || '') + `\n## Reaped\n- Reaped at: ${new Date().toISOString()}\n- Reason: ${job.alive ? `age ${job.age_hours.toFixed(1)}h exceeds ${ORPHAN_CEILING_HOURS}h ceiling` : 'PID not alive'}\n`,
-    });
+    const reason = job.alive
+      ? `age ${job.age_hours.toFixed(1)}h exceeds ${ORPHAN_CEILING_HOURS}h ceiling`
+      : 'PID not alive';
+    markOrphaned(
+      job.path,
+      fm,
+      reason,
+      'reaper',
+      `\n## Reaped\n- Reaped at: ${new Date().toISOString()}\n- Reason: ${reason}\n`
+    );
     reaped.push(job.task_id);
   }
   return reaped;

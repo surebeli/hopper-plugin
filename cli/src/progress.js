@@ -86,6 +86,15 @@ function requireString(value, name) {
   return value;
 }
 
+const OPTIONAL_EVENT_FIELDS = [
+  'status',
+  'duration_ms',
+  'exit_code',
+  'signal',
+  'adapter_status',
+  'timed_out',
+];
+
 export function appendProgressEvent({ hopperDir, taskId, event }) {
   const path = pathForTask(hopperDir, taskId);
   mkdirSync(dirname(path), { recursive: true });
@@ -104,6 +113,9 @@ export function appendProgressEvent({ hopperDir, taskId, event }) {
     source: requireString(event.source, 'source'),
     terminal: Boolean(event.terminal),
   };
+  for (const field of OPTIONAL_EVENT_FIELDS) {
+    if (event[field] !== undefined) normalized[field] = event[field];
+  }
 
   appendFileSync(path, `${JSON.stringify(normalized)}\n`, 'utf-8');
   return normalized;
