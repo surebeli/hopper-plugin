@@ -18,6 +18,29 @@ export interface TaskDetail {
   body: string;
 }
 
+export type ProgressEvent = {
+  seq: number;
+  ts: string;
+  task_id: string;
+  vendor: string;
+  phase: string;
+  kind: string;
+  message: string;
+  source: string;
+  terminal: boolean;
+  status?: string;
+  duration_ms?: number;
+  exit_code?: number;
+  signal?: string | null;
+  adapter_status?: string;
+  timed_out?: boolean | null;
+};
+
+export interface TaskProgressResponse {
+  id: string;
+  events: ProgressEvent[];
+}
+
 export interface Vendor {
   name: string;
   installStatus: 'installed' | 'cached' | 'unknown';

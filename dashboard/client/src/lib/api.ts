@@ -1,8 +1,9 @@
-import type { CostResponse, ProbeResponse, Task, TaskDetail, VendorsResponse } from './types';
+import type { CostResponse, ProbeResponse, Task, TaskDetail, TaskProgressResponse, VendorsResponse } from './types';
 
 export const queryKeys = {
   queue: ['queue'] as const,
   task: (id: string) => ['task', id] as const,
+  taskProgress: (id: string) => ['task', id, 'progress'] as const,
   vendors: ['vendors'] as const,
   cost: ['cost'] as const,
 };
@@ -29,6 +30,10 @@ export function fetchQueue() {
 
 export function fetchTask(id: string) {
   return fetchJson<TaskDetail>(`/api/task/${encodeURIComponent(id)}`);
+}
+
+export function fetchTaskProgress(id: string, limit = 20) {
+  return fetchJson<TaskProgressResponse>(`/api/task/${encodeURIComponent(id)}/progress?limit=${limit}`);
 }
 
 export function fetchVendors() {
