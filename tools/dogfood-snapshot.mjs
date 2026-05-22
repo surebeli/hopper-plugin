@@ -42,14 +42,19 @@ function collectSnapshot(hopperDir) {
   const handoffs = hopperDir ? join(hopperDir, 'handoffs') : null;
   const files = safeList(handoffs);
   const outputFiles = files.filter((name) => name.endsWith('-output.md'));
+  let tasksV1Aware = 0;
   signals.rotate_triggered = files.filter((name) => name.endsWith('-progress.log.1')).length;
   for (const name of outputFiles) {
-    const fm = readFrontmatter(join(handoffs, name));
+    let content = '';
+    try { content = readFileSync(join(handoffs, name), 'utf-8'); } catch (_) {}
+    const fm = readFrontmatter(content);
     const taskId = fm.task_id || name.replace(/-output\.md$/, '');
     const vendor = VENDORS.includes(fm.adapter) && fm.adapter !== 'unknown' ? fm.adapter : 'unknown';
     const status = String(fm.status || '');
     const terminal = fm.terminal_event_emitted === true;
     byVendor[vendor] += 1;
+    if (!/^progress_log:/m.test(content)) continue;
+    tasksV1Aware += 1;
     if (status === 'orphaned' && !terminal) signals.partial_write_orphans += 1;
     if (NON_CODEX.has(vendor) && TERMINAL.has(status) && !terminal) signals.non_codex_no_terminal += 1;
     if (status === 'done' && missingOrEmpty(join(handoffs, `${taskId}-progress.log`))) {
@@ -60,7 +65,7 @@ function collectSnapshot(hopperDir) {
   return {
     ts: new Date().toISOString(),
     hopper_dir: hopperDir ? resolve(hopperDir) : 'not found',
-    totals: { tasks: outputFiles.length, by_vendor: byVendor },
+    totals: { tasks: outputFiles.length, tasks_v1_aware: tasksV1Aware, by_vendor: byVendor },
     signals,
     blocker: signals.empty_progress_log_with_done > 0,
     blocker_reasons,
@@ -69,15 +74,13 @@ function collectSnapshot(hopperDir) {
 function safeList(dir) {
   try { return dir && existsSync(dir) ? readdirSync(dir) : []; } catch (_) { return []; }
 }
-function readFrontmatter(path) {
-  try {
-    const match = readFileSync(path, 'utf-8').match(/^---\r?\n([\s\S]*?)\r?\n---/);
-    if (!match) return {};
-    return Object.fromEntries(match[1].split(/\r?\n/).map((line) => {
-      const m = line.match(/^([A-Za-z0-9_]+):\s*(.*)$/);
-      return m ? [m[1], parseScalar(m[2].trim())] : null;
-    }).filter(Boolean));
-  } catch (_) { return {}; }
+function readFrontmatter(content) {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!match) return {};
+  return Object.fromEntries(match[1].split(/\r?\n/).map((line) => {
+    const m = line.match(/^([A-Za-z0-9_]+):\s*(.*)$/);
+    return m ? [m[1], parseScalar(m[2].trim())] : null;
+  }).filter(Boolean));
 }
 function parseScalar(value) {
   if (value === 'true') return true;

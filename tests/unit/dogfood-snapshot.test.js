@@ -15,7 +15,8 @@ function setup() {
 }
 
 function writeOutput(hopperDir, taskId, fields, body = '') {
-  const lines = ['---', ...Object.entries(fields).map(([key, value]) => `${key}: ${value}`), '---', body];
+  const merged = fields.progress_log === null ? fields : { progress_log: `${taskId}-progress.log`, ...fields };
+  const lines = ['---', ...Object.entries(merged).filter(([, value]) => value !== null).map(([key, value]) => `${key}: ${value}`), '---', body];
   writeFileSync(join(hopperDir, 'handoffs', `${taskId}-output.md`), lines.join('\n'), 'utf-8');
 }
 
@@ -45,6 +46,7 @@ test('snapshot reports blocker signals from mixed telemetry fixture', () => {
     assert.equal(json.totals.by_vendor.codex, 1);
     assert.equal(json.totals.by_vendor.kimi, 1);
     assert.equal(json.totals.by_vendor.opencode, 1);
+    assert.equal(json.totals.tasks_v1_aware, 3);
     assert.equal(json.signals.partial_write_orphans, 1);
     assert.equal(json.signals.non_codex_no_terminal, 1);
     assert.equal(json.signals.empty_progress_log_with_done, 1);
@@ -86,6 +88,24 @@ test('--append writes Markdown entry with vendor counts', () => {
     assert.match(markdown, /## Snapshot /);
     assert.match(markdown, /Total tasks: 1 \(codex: 1, kimi: 0, opencode: 0, copilot: 0, agy: 0, unknown: 0\)/);
     assert.match(markdown, /Empty progress\.log w\/ done: 0/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('pre-v1.0 tasks stay visible in totals but do not trigger signals', () => {
+  const { tmp, hopperDir } = setup();
+  try {
+    writeOutput(hopperDir, 'T-OLD', { task_id: 'T-OLD', adapter: 'copilot', status: 'done', progress_log: null });
+    writeOutput(hopperDir, 'T-V1', { task_id: 'T-V1', adapter: 'opencode', status: 'done', terminal_event_emitted: true });
+    writeProgress(hopperDir, 'T-V1', '');
+    const { json } = runSnapshot({ hopperDir });
+    assert.equal(json.totals.tasks, 2);
+    assert.equal(json.totals.tasks_v1_aware, 1);
+    assert.equal(json.totals.by_vendor.copilot, 1);
+    assert.equal(json.signals.non_codex_no_terminal, 0);
+    assert.equal(json.signals.empty_progress_log_with_done, 1);
+    assert.deepEqual(json.blocker_reasons, ['T-V1: status=done but progress.log is missing or empty']);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
