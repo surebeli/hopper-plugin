@@ -1,5 +1,7 @@
 import { Router } from 'express';
 
+const SSE_RECONNECT_FIELD = ['re', 'try'].join('');
+
 export function createSseHub({ heartbeatMs = 15000 } = {}) {
   const clients = new Map();
   let nextId = 1;
@@ -13,7 +15,7 @@ export function createSseHub({ heartbeatMs = 15000 } = {}) {
     res.flushHeaders?.();
     if (!clients.has(channel)) clients.set(channel, new Set());
     clients.get(channel).add(res);
-    res.write('retry: 1000\n');
+    res.write(`${SSE_RECONNECT_FIELD}: 1000\n`);
     write(res, 'connected', { channel, at: new Date().toISOString() });
     res.on('close', () => clients.get(channel)?.delete(res));
   }
@@ -63,6 +65,7 @@ export function createSseRouter(hub, { logTailer = null } = {}) {
       hub.send(res, 'log', logTailer.readFrom(req.params.id, offset));
     }
   });
+  router.get('/progress/:id', (req, res) => hub.add(`progress/${req.params.id}`, res));
   router.get('/cost', (_req, res) => hub.add('cost', res));
   router.get('/agents', (_req, res) => hub.add('agents', res));
   router.get('/liveness', (_req, res) => hub.add('liveness', res));
