@@ -1,0 +1,115 @@
+import { test } from 'node:test';
+import { strict as assert } from 'node:assert';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import {
+  appendProgressEvent,
+  nextProgressSeq,
+  progressLogPath,
+  readProgressEvents,
+  rotateProgressLogIfNeeded,
+} from '../../cli/src/progress.js';
+
+function setup() {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-progress-'));
+  const hopperDir = join(tmp, '.hopper');
+  mkdirSync(join(hopperDir, 'handoffs'), { recursive: true });
+  return { tmp, hopperDir };
+}
+
+test('progressLogPath maps output.md path to progress.log path', () => {
+  const outputMdPath = join('x', '.hopper', 'handoffs', 'T-one-output.md');
+  assert.equal(progressLogPath(outputMdPath), join('x', '.hopper', 'handoffs', 'T-one-progress.log'));
+});
+
+test('appendProgressEvent writes normalized JSONL and readProgressEvents returns recent events', () => {
+  const { tmp, hopperDir } = setup();
+  try {
+    const first = appendProgressEvent({
+      hopperDir,
+      taskId: 'T-prog',
+      event: {
+        vendor: 'codex',
+        phase: 'starting',
+        kind: 'lifecycle',
+        message: 'Task queued.',
+        source: 'runner',
+        terminal: false,
+      },
+    });
+    const second = appendProgressEvent({
+      hopperDir,
+      taskId: 'T-prog',
+      event: {
+        vendor: 'codex',
+        phase: 'running',
+        kind: 'lifecycle',
+        message: 'Task running.',
+        source: 'runner',
+        terminal: false,
+      },
+    });
+
+    assert.equal(first.seq, 1);
+    assert.equal(second.seq, 2);
+    assert.match(first.ts, /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(nextProgressSeq({ hopperDir, taskId: 'T-prog' }), 3);
+
+    const events = readProgressEvents({ hopperDir, taskId: 'T-prog', limit: 1 });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].seq, 2);
+    assert.equal(events[0].message, 'Task running.');
+
+    const raw = readFileSync(join(hopperDir, 'handoffs', 'T-prog-progress.log'), 'utf-8');
+    assert.equal(raw.trim().split(/\r?\n/).length, 2);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('readProgressEvents skips malformed JSONL lines', () => {
+  const { tmp, hopperDir } = setup();
+  try {
+    const logPath = join(hopperDir, 'handoffs', 'T-malformed-progress.log');
+    writeFileSync(logPath, '{"seq":1,"message":"ok"}\nnot json\n{"seq":2,"message":"ok2"}\n', 'utf-8');
+
+    const events = readProgressEvents({ hopperDir, taskId: 'T-malformed' });
+    assert.deepEqual(events.map((event) => event.seq), [1, 2]);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('rotateProgressLogIfNeeded rotates to .1 when size exceeds limit', () => {
+  const { tmp, hopperDir } = setup();
+  try {
+    const logPath = join(hopperDir, 'handoffs', 'T-rotate-progress.log');
+    writeFileSync(logPath, '0123456789', 'utf-8');
+
+    const rotated = rotateProgressLogIfNeeded(logPath, 5);
+
+    assert.equal(rotated, true);
+    assert.equal(existsSync(logPath), false);
+    assert.equal(readFileSync(`${logPath}.1`, 'utf-8'), '0123456789');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('appendProgressEvent rejects unsafe task ids before writing', () => {
+  const { tmp, hopperDir } = setup();
+  try {
+    assert.throws(
+      () => appendProgressEvent({
+        hopperDir,
+        taskId: '../bad',
+        event: { vendor: 'codex', phase: 'starting', kind: 'x', message: 'x', source: 'runner' },
+      }),
+      /invalid task id/i
+    );
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
