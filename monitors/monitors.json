@@ -1,0 +1,7 @@
+[
+  {
+    "name": "hopper-watch-events",
+    "command": "node \"${CLAUDE_PLUGIN_ROOT}/cli/bin/hopper-dispatch\" --watch-events",
+    "description": "Forward hopper terminal task events from .hopper/handoffs to Claude Code notifications"
+  }
+]

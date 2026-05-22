@@ -17,6 +17,7 @@ const __dirname = dirname(__filename);
 const REPO_ROOT = resolve(__dirname, '..', '..');
 const MANIFEST = join(REPO_ROOT, '.claude-plugin', 'plugin.json');
 const COMMANDS_DIR = join(REPO_ROOT, 'commands');
+const MONITORS_CONFIG = join(REPO_ROOT, 'monitors', 'monitors.json');
 
 test('plugin manifest exists at repo-root /.claude-plugin/ (codex P0 F1)', () => {
   assert.ok(existsSync(MANIFEST), `plugin.json missing at ${MANIFEST}`);
@@ -141,6 +142,33 @@ test('plugin manifest does NOT declare commands or entry (old schema removed)', 
   const parsed = JSON.parse(readFileSync(MANIFEST, 'utf-8'));
   assert.equal(parsed.commands, undefined);
   assert.equal(parsed.entry, undefined);
+});
+
+test('Claude Code monitor config lives at plugin root and invokes watch-events', () => {
+  assert.ok(!existsSync(join(REPO_ROOT, '.claude-plugin', 'monitors')),
+    'plugin components must not live inside .claude-plugin/');
+  assert.ok(existsSync(MONITORS_CONFIG), 'monitors/monitors.json must exist at plugin root');
+
+  const monitors = JSON.parse(readFileSync(MONITORS_CONFIG, 'utf-8'));
+  assert.ok(Array.isArray(monitors), 'monitors/monitors.json must be a JSON array');
+  const monitor = monitors.find((entry) => entry.name === 'hopper-watch-events');
+  assert.ok(monitor, 'hopper-watch-events monitor must be declared');
+  assert.match(monitor.command, /\$\{CLAUDE_PLUGIN_ROOT\}.*cli[/\\]bin[/\\]hopper-dispatch/);
+  assert.match(monitor.command, /--watch-events/);
+  assert.match(monitor.description, /terminal/i);
+});
+
+test('Claude Code README documents monitor bridge boundaries', () => {
+  const readmePath = join(REPO_ROOT, 'hosts', 'claude-code', 'README.md');
+  const content = readFileSync(readmePath, 'utf-8');
+  assert.match(content, /monitors\/monitors\.json/);
+  assert.match(content, /hopper-dispatch.*--watch-events/);
+  assert.match(content, /runner terminal state.*authoritative|authoritative.*runner terminal state/i);
+  assert.match(content, /wrapper|subagent/i);
+  assert.match(content, /not.*task completion|not.*authoritative/i);
+  assert.match(content, /only v1\.0 host integration|v1\.0.*only.*host integration/i);
+  assert.match(content, /Codex CLI.*no native wake|no native wake.*Codex CLI/i);
+  assert.match(content, /OpenCode.*no native wake|no native wake.*OpenCode/i);
 });
 
 // ─── codex Phase 3 P2 F6: version drift detector ────────────────────────

@@ -2,7 +2,7 @@
 
 Anchor: `hosts/claude-code/README.md::root`
 
-> **Status (2026-05-20)**: Phase 3 — slash commands wired. Plugin install gate (T-PLUGIN-00 Prong 1) remains blocked-on-user per spec §11 (unified user-action gate). Strategy-as-developer cannot install the plugin on itself.
+> **Status (2026-05-22)**: v1.0 progress monitor wired. Plugin install gate remains blocked-on-user per spec §11 (unified user-action gate). Strategy-as-developer cannot install the plugin on itself.
 
 ## What this is
 
@@ -25,6 +25,7 @@ This is **Tier B** of the cross-host architecture:
 | `/hopper:vendors`       | List registered vendor adapters (codex, kimi, opencode, copilot, agy)            |
 
 Slash command source files: `commands/*.md` at the **repo root** (one prompt template per command).
+The completion monitor lives at `monitors/monitors.json` at the **repo root**.
 
 ## Plugin layout
 
@@ -39,6 +40,8 @@ hopper-plugin/                  ← THIS IS THE PLUGIN ROOT
 │   ├── status.md
 │   ├── smoke.md
 │   └── vendors.md
+├── monitors/
+│   └── monitors.json          ← starts hopper-dispatch --watch-events
 ├── cli/
 │   └── bin/
 │       └── hopper-dispatch     ← invoked by every slash command
@@ -87,12 +90,35 @@ After install + restart, type:
 /hopper:smoke
 ```
 
-Expected: a `hopper standalone (CLI v0.4.0-phase-3)` banner. If you see it, **Prong 1 PASSES** — record this in `.hopper/HOPPER-FEEDBACK.md` per the unified user-action gate (spec §11).
+Expected: a `hopper standalone (CLI v0.6.0-phase-6c)` banner. If you see it, **Prong 1 PASSES** — record this in `.hopper/HOPPER-FEEDBACK.md` per the unified user-action gate (spec §11).
 
 If the slash command is not recognized:
 - The plugin manifest may not match current Claude Code schema. Run `claude --debug` to inspect plugin discovery
 - `$CLAUDE_PLUGIN_ROOT` may not be set. Check via `echo $CLAUDE_PLUGIN_ROOT` inside a Claude Code Bash invocation
 - File a finding in `.hopper/HOPPER-FEEDBACK.md` so this README can be corrected
+
+## Completion monitor
+
+Claude Code v2.1.105+ discovers plugin monitors from `monitors/monitors.json`
+at the plugin root. hopper's v1.0 monitor is `hopper-watch-events`; it runs:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/cli/bin/hopper-dispatch" --watch-events
+```
+
+`hopper-dispatch --watch-events` watches `.hopper/handoffs/*-output.md`
+frontmatter and emits one stdout JSONL line for each terminal task event.
+Claude Code delivers those stdout lines to the interactive session as monitor
+notifications. The monitor is active only in Claude Code hosts where the
+Monitor tool is available.
+
+The runner terminal state is authoritative: a task is complete only when
+`.hopper/handoffs/<task-id>-output.md` reaches a terminal status with
+`terminal_event_emitted: true`. Wrapper completion, background Bash completion,
+or subagent completion is not authoritative task completion; it may only mean a
+wrapper handed off work to hopper.
+
+This Claude Code monitor bridge is the only v1.0 host integration. Codex CLI has no native wake in v1.0, and OpenCode native wake is not enabled in v1.0; those hosts use `hopper-dispatch --progress`, `hopper-dispatch --watch-events`, or later OS notification work.
 
 ## Authentication prerequisites per vendor
 
@@ -115,7 +141,7 @@ Per spec §3 #4 (no harness reaction core):
 - No retry on vendor failure (single subprocess spawn per dispatch)
 - No fallback chains (vendor A failed -> try vendor B)
 - No consensus / multi-vendor voting
-- No streaming output back to Claude Code session (output is captured + surfaced at end)
+- No streaming vendor stdout back to Claude Code session. v1.0 only sends terminal-event JSONL through the monitor.
 - No automatic queue.md / COST-LOG.md mutation (user must approve every edit)
 - No Anthropic Agent SDK / `claude -p` / direct Anthropic SDK usage (sidesteps 2026-06-15 SDK credit policy)
 
