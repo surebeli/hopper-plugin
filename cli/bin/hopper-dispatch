@@ -27,7 +27,7 @@ import {
   hoursSince,
 } from '../src/background.js';
 import { readProgressEvents } from '../src/progress.js';
-import { watchFile, unwatchFile, readFileSync, existsSync, openSync, readSync, closeSync, statSync } from 'node:fs';
+import { watchFile, unwatchFile, readFileSync, existsSync, openSync, readSync, closeSync, statSync, readdirSync } from 'node:fs';
 import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -49,6 +49,7 @@ function printUsage() {
   console.log('  hopper-dispatch <task-id> --reasoning <level>   Override reasoning effort (low|medium|high|xhigh)');
   console.log('  hopper-dispatch --watch <task-id>               Tail-follow a background job until exit');
   console.log('  hopper-dispatch --progress <task-id>            Show background task phase + recent progress events');
+  console.log('  hopper-dispatch --watch-events [--once]         Emit terminal task events as stdout JSONL');
   console.log('  hopper-dispatch --result <task-id>              Print completed task result (verdict body + log tail) to stdout');
   console.log('  hopper-dispatch --jobs                          List all in-progress background jobs');
   console.log('  hopper-dispatch --reap                          Re-classify stale (>24h or dead-PID) jobs as orphaned');
@@ -176,6 +177,10 @@ async function main() {
     runReap(hopperDir);
     return;
   }
+  if (args.includes('--watch-events')) {
+    runWatchEvents(hopperDir, { once: args.includes('--once') });
+    return;
+  }
   const watchIdx = args.indexOf('--watch');
   if (watchIdx !== -1) {
     const taskId = args[watchIdx + 1];
@@ -284,7 +289,7 @@ async function main() {
  */
 function parseDispatchArgs(args) {
   const META_FLAGS = new Set(['--help', '-h', '--version', '-v', '--smoke', '--status',
-    '--task-types', '--vendors', '--resolve', '--watch', '--progress', '--jobs', '--reap',
+    '--task-types', '--vendors', '--resolve', '--watch', '--progress', '--watch-events', '--jobs', '--reap',
     '--check', '--capabilities', '--probe', '--models']);
   const VALUE_FLAGS = new Set(ALLOWED_DISPATCH_VALUE_FLAGS);
   const BARE_FLAGS = new Set(ALLOWED_DISPATCH_FLAGS);
@@ -672,6 +677,99 @@ function runProgress(hopperDir, taskId) {
       console.log(`  #${event.seq} ${event.ts} ${event.phase}/${event.kind}${marker}: ${event.message}${progressEventMeta(event)}`);
     }
   }
+}
+
+const TERMINAL_TASK_STATUSES = new Set(['done', 'failed', 'timeout', 'cancelled', 'orphaned']);
+const WATCH_EVENTS_INTERVAL_MS = 500;
+
+function taskIdFromOutputPath(outputMdPath, fm) {
+  return fm.task_id || basename(outputMdPath).replace(/-output\.md$/, '');
+}
+
+function isTerminalFrontmatter(fm) {
+  return fm.terminal_event_emitted === true && TERMINAL_TASK_STATUSES.has(fm.status);
+}
+
+function listOutputMarkdownFiles(handoffDir) {
+  if (!existsSync(handoffDir)) return [];
+  return readdirSync(handoffDir)
+    .filter((name) => name.endsWith('-output.md'))
+    .sort()
+    .map((name) => join(handoffDir, name));
+}
+
+function terminalPayload(handoffDir, outputMdPath, fm) {
+  const taskId = taskIdFromOutputPath(outputMdPath, fm);
+  return {
+    type: 'hopper.task.terminal',
+    task_id: taskId,
+    status: fm.status,
+    phase: fm.phase || fm.status,
+    vendor: fm.adapter || 'unknown',
+    seq: Number.isInteger(fm.progress_seq) ? fm.progress_seq : null,
+    output_md: outputMdPath,
+    progress_log: pathFromFrontmatter(handoffDir, fm.progress_log, `${taskId}-progress.log`),
+    raw_log: pathFromFrontmatter(handoffDir, fm.raw_log || fm.log, `${taskId}-output.log`),
+  };
+}
+
+function runWatchEvents(hopperDir, { once = false } = {}) {
+  const handoffDir = join(hopperDir, 'handoffs');
+  const watched = new Set();
+  const lastSeenSeq = new Map();
+  let scanTimer = null;
+  let stopped = false;
+
+  function cleanup(code = null) {
+    if (stopped) return;
+    stopped = true;
+    if (scanTimer) clearInterval(scanTimer);
+    for (const outputMdPath of watched) unwatchFile(outputMdPath);
+    if (code !== null) process.exit(code);
+  }
+
+  function maybeEmit(outputMdPath) {
+    if (stopped || !existsSync(outputMdPath)) return;
+
+    let fm;
+    try {
+      fm = readFrontmatter(outputMdPath);
+    } catch (err) {
+      console.error(`watch-events: could not read ${outputMdPath}: ${err.message}`);
+      return;
+    }
+    if (!isTerminalFrontmatter(fm)) return;
+
+    const taskId = taskIdFromOutputPath(outputMdPath, fm);
+    const seq = Number.isInteger(fm.progress_seq) ? fm.progress_seq : 0;
+    const previousSeq = lastSeenSeq.get(taskId);
+    if (previousSeq !== undefined && previousSeq >= seq) return;
+
+    lastSeenSeq.set(taskId, seq);
+    console.log(JSON.stringify(terminalPayload(handoffDir, outputMdPath, fm)));
+    if (once) cleanup(0);
+  }
+
+  function watchOutput(outputMdPath) {
+    if (watched.has(outputMdPath)) return;
+    watched.add(outputMdPath);
+    watchFile(outputMdPath, { interval: WATCH_EVENTS_INTERVAL_MS }, (curr, prev) => {
+      if (curr.mtimeMs === prev.mtimeMs && curr.size === prev.size) return;
+      maybeEmit(outputMdPath);
+    });
+    maybeEmit(outputMdPath);
+  }
+
+  function scanOutputs() {
+    for (const outputMdPath of listOutputMarkdownFiles(handoffDir)) {
+      watchOutput(outputMdPath);
+    }
+  }
+
+  scanOutputs();
+  scanTimer = setInterval(scanOutputs, WATCH_EVENTS_INTERVAL_MS);
+  process.once('SIGINT', () => cleanup(0));
+  process.once('SIGTERM', () => cleanup(0));
 }
 
 /**
