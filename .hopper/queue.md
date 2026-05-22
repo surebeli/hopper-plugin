@@ -50,6 +50,7 @@ Anchor: `.hopper/queue.md::root`
 | T-AUDIT-PH6C-kimi-v2 | code-review-adversarial | done | | high | Phase 6c re-run of kimi WITHOUT --model (corrected per user 2026-05-21: kimi has implicit default; -m only needed for explicit non-default alias). Dispatch: --reasoning high (adapter maps to --thinking; default model implicit). | kimi |
 | T-PROG-R14-RESEARCH | code-impl | pending | | high | Research chokidar truncate/rotate idioms for v1.1 R14 dashboard tail. Dogfood task for v1.0 monitor. | codex |
 | T-PROG-R14-REVIEW-kimi | code-review-adversarial | pending | | high | Adversarial review of v1.1 R14 dashboard progress bridge commits. | kimi |
+| T-PROG-R15-REVIEW-opencode | code-review-adversarial | pending | | high | Adversarial UI review of v1.1 R15 dashboard progress tab, status strip, a11y, perf, and token consistency. | opencode |
 
 ---
 

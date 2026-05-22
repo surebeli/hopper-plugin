@@ -395,3 +395,33 @@ Write `.hopper/handoffs/T-PROG-R14-REVIEW-kimi-output.md` with:
 - Evidence from commit diff and focused tests
 - One-line recommendation for N2.wave.dashboard-1 reviewer
 
+## T-PROG-R15-REVIEW-opencode (R15 adversarial UI review dogfood)
+
+- Task-type: code-review-adversarial
+- Vendor: opencode
+- Priority: high
+- Scope: read-only review after R15 commits exist
+- Dispatch: `hopper-dispatch T-PROG-R15-REVIEW-opencode --background`
+
+### Context
+
+R15 adds client UI for v1.0 progress data surfaced by the R14 server bridge:
+`TaskStatusStrip`, a Progress tab in `TaskDrawer`, `ProgressTimeline`, client
+API/types, sidequest SPEC v2.2 sync, and narrow R14 review cleanups. The client
+must not add dependencies or change CLI/host/command/monitor surfaces.
+
+### Assignment
+
+After the R15 commits land, review the diff adversarially. Focus on keyboard
+navigation and Radix Tabs behavior, focus/ARIA regressions, visual hierarchy for
+pinned terminal events, 50-event timeline render performance, message truncation
+behavior, design-token consistency with `SPEC.md` §4.2, and scope redlines.
+
+### Output
+
+Write `.hopper/handoffs/T-PROG-R15-REVIEW-opencode-output.md` with:
+
+- Verdict: PASS | PASS_WITH_NOTES | REWORK
+- Findings ordered by P0/P1/P2
+- Evidence from commit diff, focused tests, and bundle output
+- One-line recommendation for N2.wave.dashboard-2 reviewer
