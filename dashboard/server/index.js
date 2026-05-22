@@ -7,7 +7,7 @@ import { createCostRouter } from './routes/cost.js';
 import { createSseHub, createSseRouter } from './events/sse.js';
 import { createWatcher } from './events/watcher.js';
 import { findHopperDir } from './lib/hopper-dir.js';
-import { createLogTailer } from './lib/tail.js';
+import { createLogTailer, createProgressTailer } from './lib/tail.js';
 import { createQueueRouter } from './routes/queue.js';
 import { createTaskRouter } from './routes/task.js';
 import vendorsRouter from './routes/vendors.js';
@@ -45,12 +45,14 @@ export function parseServerArgs(argv = process.argv.slice(2)) {
   return opts;
 }
 
-export function createApp({ dev = false, distDir = DEFAULT_DIST, hopperDir = null, sseHub = createSseHub(), logTailer = null } = {}) {
+export function createApp({ dev = false, distDir = DEFAULT_DIST, hopperDir = null, sseHub = createSseHub(), logTailer = null, progressTailer = null } = {}) {
   const app = express();
   const root = hopperDir || findHopperDir();
   const tailer = logTailer || createLogTailer({ hopperDir: root });
+  const progress = progressTailer || createProgressTailer({ hopperDir: root });
   app.locals.sseHub = sseHub;
   app.locals.logTailer = tailer;
+  app.locals.progressTailer = progress;
   app.disable('x-powered-by');
   app.use(express.json());
 
@@ -101,7 +103,12 @@ export function startServer({
       const actualPort = typeof address === 'object' && address ? address.port : port;
       const root = hopperDir || findHopperDir();
       if (watchEvents && root) {
-        watcher = watcherFactory({ hopperDir: root, hub: app.locals.sseHub, logTailer: app.locals.logTailer });
+        watcher = watcherFactory({
+          hopperDir: root,
+          hub: app.locals.sseHub,
+          logTailer: app.locals.logTailer,
+          progressTailer: app.locals.progressTailer,
+        });
       }
       const close = async () => {
         if (closed) return;

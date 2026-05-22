@@ -5,6 +5,7 @@ export function createWatcher({
   hopperDir,
   hub,
   logTailer = null,
+  progressTailer = null,
   livenessIntervalMs = 5000,
   watch = chokidar.watch,
 } = {}) {
@@ -22,6 +23,14 @@ export function createWatcher({
     if (mapped.event === 'log' && logTailer) {
       const chunk = logTailer.readNew(mapped.payload.taskId);
       if (chunk.chunk) hub.publish(mapped.channel, 'log', { ...mapped.payload, ...chunk });
+      return;
+    }
+    if (mapped.event === 'progress' && progressTailer) {
+      const chunk = progressTailer.readNew(mapped.payload.taskId);
+      if (chunk.chunk) {
+        const events = parseProgressEvents(chunk.chunk);
+        if (events.length) hub.publish(mapped.channel, 'progress', { ...mapped.payload, ...chunk, events });
+      }
       return;
     }
     hub.publish(mapped.channel, mapped.event, mapped.payload);
@@ -59,7 +68,11 @@ export function mapFileEvent(hopperDir, type, filePath) {
   if (rel.startsWith('handoffs/') && rel.endsWith('.md')) {
     return withChannel(`task/${taskIdFromHandoff(filePath)}`, 'task', payload);
   }
-  if (rel.startsWith('handoffs/') && rel.endsWith('.log')) {
+  if (rel.startsWith('handoffs/') && rel.endsWith('-progress.log')) {
+    const taskId = basename(filePath, '-progress.log');
+    return withChannel(`progress/${taskId}`, 'progress', { ...payload, taskId });
+  }
+  if (rel.startsWith('handoffs/') && rel.endsWith('-output.log')) {
     const taskId = taskIdFromLog(filePath);
     return withChannel(`log/${taskId}`, 'log', { ...payload, taskId });
   }
@@ -83,10 +96,24 @@ function taskIdFromHandoff(filePath) {
     .replace(/-output$/, '');
 }
 
-function taskIdFromLog(filePath) {
+export function taskIdFromLog(filePath) {
   return basename(filePath, '.log').replace(/-output$/, '');
 }
 
 function withChannel(channel, event, payload) {
   return { channel, event, payload: { channel, ...payload } };
+}
+
+function parseProgressEvents(chunk) {
+  const events = [];
+  for (const line of chunk.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      const parsed = JSON.parse(line);
+      if (parsed && typeof parsed === 'object') events.push(parsed);
+    } catch (_) {
+      // Ignore partial or corrupt JSONL lines while tailing live progress.
+    }
+  }
+  return events;
 }
