@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { fetchCost, queryKeys } from '@/lib/api';
 import { useSSE } from '@/lib/sse';
 import type { CostByVendor, CostRow } from '@/lib/types';
@@ -98,12 +98,14 @@ function CostTable({ rows }: { rows: CostRow[] }) {
                 <TableCell className="overflow-hidden text-ellipsis whitespace-nowrap text-muted-foreground">{row.date}</TableCell>
                 <TableCell className="overflow-hidden text-ellipsis whitespace-nowrap text-foreground">{row.task}</TableCell>
                 <TableCell className="overflow-hidden text-ellipsis whitespace-nowrap text-muted-foreground">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="inline-block max-w-full truncate">{row.vendor}</span>
-                    </TooltipTrigger>
-                    <TooltipContent>{row.model}</TooltipContent>
-                  </Tooltip>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="inline-block max-w-full truncate">{row.vendor}</span>
+                      </TooltipTrigger>
+                      <TooltipContent>{row.model}</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 </TableCell>
                 <TableCell className="text-right text-muted-foreground">{(row.tokensIn + row.tokensOut).toLocaleString()}</TableCell>
                 <TableCell className="text-right text-foreground">{formatUsd(row.approxUsd)}</TableCell>
