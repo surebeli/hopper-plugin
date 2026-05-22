@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import actionsRouter from './routes/actions.js';
-import costRouter from './routes/cost.js';
+import { createCostRouter } from './routes/cost.js';
 import { createSseHub, createSseRouter } from './events/sse.js';
 import { createWatcher } from './events/watcher.js';
 import { findHopperDir } from './lib/hopper-dir.js';
@@ -60,7 +60,7 @@ export function createApp({ dev = false, distDir = DEFAULT_DIST, hopperDir = nul
   app.use('/api', createQueueRouter({ hopperDir: root }));
   app.use('/api/task', createTaskRouter({ hopperDir: root }));
   app.use('/api/vendors', vendorsRouter);
-  app.use('/api/cost', costRouter);
+  app.use('/api/cost', createCostRouter({ hopperDir: root }));
   app.use('/api/action', actionsRouter);
   app.use('/events', createSseRouter(sseHub, { logTailer: tailer }));
 

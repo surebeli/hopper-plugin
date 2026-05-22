@@ -49,8 +49,35 @@ export interface ProbeResponse {
 }
 
 export interface CostRow {
+  date: string;
   task: string;
+  role: string;
+  model: string;
   vendor: string;
-  tokens: number;
-  dollars: number;
+  tokensIn: number;
+  tokensOut: number;
+  approxUsd: number;
+  tier: string;
+  notes: string;
+}
+
+export interface CostTotals {
+  rows: number;
+  tokensIn: number;
+  tokensOut: number;
+  approxUsd: number;
+}
+
+export interface CostByVendor {
+  vendor: string;
+  tokensIn: number;
+  tokensOut: number;
+  approxUsd: number;
+  count: number;
+}
+
+export interface CostResponse {
+  rows: CostRow[];
+  totals: CostTotals;
+  byVendor: CostByVendor[];
 }

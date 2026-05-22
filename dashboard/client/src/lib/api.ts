@@ -1,4 +1,4 @@
-import type { ProbeResponse, Task, TaskDetail, VendorsResponse } from './types';
+import type { CostResponse, ProbeResponse, Task, TaskDetail, VendorsResponse } from './types';
 
 export const queryKeys = {
   queue: ['queue'] as const,
@@ -33,6 +33,10 @@ export function fetchTask(id: string) {
 
 export function fetchVendors() {
   return fetchJson<VendorsResponse>('/api/vendors');
+}
+
+export function fetchCost() {
+  return fetchJson<CostResponse>('/api/cost');
 }
 
 export function probeVendor(vendor: string) {
