@@ -1,0 +1,165 @@
+T-WEB-08 verification log
+Date: 2026-05-22T10:55:00+08:00
+Implementation commit: 028c0a0 [T-WEB-08] implement final polish phase
+Effective source head: 3558b0e [T-WEB-07.5] wrap cost tooltips with provider
+
+1) T-WEB-07.5 polish backlog
+
+Commits:
+  a8f0495 [T-WEB-07.5] fold polish backlog
+  3558b0e [T-WEB-07.5] wrap cost tooltips with provider
+
+Covered:
+  - dynamic frontmatter fields
+  - markdown-body CSS class
+  - 1MB initial log tail cap
+  - LiveLog exponential backoff + lost connection UI
+  - probe failure toast
+  - probe 60s timeout + kill
+  - CostBars SSE refresh
+  - nonzero bar min-width
+  - model tooltip on cost detail vendor cell
+  - cleanVendor fallback unknown
+  - F-05-3 ANSI bg/bold explicitly deferred
+
+2) Targeted dashboard unit suite
+
+Command:
+  node --test tests/unit/dashboard-*.test.js
+
+Result:
+  # tests 33
+  # pass 33
+  # fail 0
+  # skipped 0
+  # duration_ms 5062.5484
+
+3) Full project test in current worktree
+
+Command:
+  npm test
+
+Result:
+  failed due pre-existing unrelated dirty .codex-plugin/plugin.json:
+    expected "hopper"
+    actual   "hopper-plugin"
+
+Follow-up:
+  ran full npm test in clean detached worktree at 3558b0e.
+
+4) Full project test in clean worktree
+
+Command:
+  git worktree add --detach %TEMP%/hopper-webdash-clean-028c0a0-53580 HEAD
+  junction node_modules from main worktree
+  git -C <clean> checkout --detach 3558b0e
+  npm test --prefix <clean>
+
+Result:
+  # tests 376
+  # pass 361
+  # fail 0
+  # skipped 15
+  # duration_ms 10491.4458
+
+5) Dashboard build
+
+Command:
+  npm run dashboard:build --prefix <clean>
+
+Result:
+  dist/index.html                          gzip 0.27 KB
+  dist/assets/index-Crnq23if.css           gzip 4.52 KB
+  dist/assets/ToastHost-DZTpbIH9.js        gzip 0.17 KB
+  dist/assets/index-D2pGAS9V.js            gzip 9.42 KB
+  dist/assets/TaskDetailRoute-COcMWsh0.js  gzip 65.04 KB
+  dist/assets/index-DnAA469m.js            gzip 119.34 KB
+  total gzip: 198.76 KB
+  threshold: < 200 KB
+
+6) Local prod dashboard
+
+Command:
+  node cli/bin/hopper-dashboard --port 7788
+  Invoke-RestMethod http://127.0.0.1:7788/api/health
+
+Result:
+  {"ok":true,"mode":"prod"}
+
+7) Browser/CDP route proof
+
+Screenshots:
+  docs/sidequests/web-dashboard/handoffs/T-WEB-08-queue.png        85283 bytes
+  docs/sidequests/web-dashboard/handoffs/T-WEB-08-task-drawer.png 100099 bytes
+  docs/sidequests/web-dashboard/handoffs/T-WEB-08-vendors.png      41940 bytes
+  docs/sidequests/web-dashboard/handoffs/T-WEB-08-cost.png         69281 bytes
+
+Cost route text after 3558b0e:
+  rows 31
+  tokens 236,860
+  approx $ $1.05
+  vendors: codex, copilot, kimi, gemini, opencode, claude
+
+8) Keyboard shortcut proof
+
+CDP key events:
+  "/" focus check: true
+  "j" then "Enter": /task/T-AUDIT-PH6B-agy
+  "Escape": /
+  "g v": /vendors
+  "g c": /cost
+
+9) Real dispatch proof
+
+Setup:
+  HOPPER_DIR=%TEMP%\hopper-webdash-e2e
+  queue row: T-WEB-08-E2E, code-impl, pending, vendor codex
+  isolated dashboard: node cli/bin/hopper-dashboard --port 7791
+
+Commands:
+  node cli/bin/hopper-dispatch --resolve T-WEB-08-E2E
+  node cli/bin/hopper-dispatch T-WEB-08-E2E --background --reasoning low
+  node cli/bin/hopper-dispatch --watch T-WEB-08-E2E
+  node cli/bin/hopper-dispatch --result T-WEB-08-E2E
+  Invoke-RestMethod http://127.0.0.1:7791/api/task/T-WEB-08-E2E
+
+Result:
+  resolved vendor: codex
+  PID: 2324
+  exit_code: 0
+  adapter_status: success
+  duration_ms: 47811
+  output log size: 100869 bytes
+  dashboard API returned completed frontmatter with adapter_status=success
+
+10) Server shutdown / .hopper side effect proof
+
+Command:
+  Stop dashboard processes on 7788 and 7791
+  git status --short .hopper before/after
+
+Result:
+  before == after:
+    M .hopper/handoffs/leader-tasklist.md
+    M .hopper/queue.md
+    ?? .hopper/handoffs/T-AUDIT-PH6C-V3-kimi-output.md
+    ?? .hopper/handoffs/T-AUDIT-PH6C-V3-mimo-output.md
+
+Interpretation:
+  Existing project .hopper dirty state was unchanged by dashboard server usage.
+
+11) Hard-constraint scans
+
+Commands:
+  git show --name-only --format= 028c0a0 -- .hopper
+  git show --name-only --format= 3558b0e -- .hopper
+  git show --name-only --format= 028c0a0 -- cli hosts commands .claude-plugin .codex-plugin
+  git show --name-only --format= 3558b0e -- cli hosts commands .claude-plugin .codex-plugin
+  rg "executeDispatch|refetchInterval" dashboard/server dashboard/client/src
+  rg package red-line list in package.json
+
+Result:
+  restricted path outputs empty
+  executeDispatch/refetchInterval no hits
+  package red-line scan no hits
+  top-level Radix deps limited to approved alert-dialog/dialog/tabs/tooltip
