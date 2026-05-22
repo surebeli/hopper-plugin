@@ -12,7 +12,9 @@
 
 import { spawn } from 'node:child_process';
 import { openSync, closeSync, readFileSync, existsSync } from 'node:fs';
+import { basename, dirname } from 'node:path';
 import { readFrontmatter, writeFrontmatter } from '../src/background.js';
+import { appendProgressEvent } from '../src/progress.js';
 import { getAdapter } from '../src/vendors/index.js';
 import { killProcessTree } from '../src/subprocess.js';
 import { resolveCommandOnPath, resolveCommandWithKnownPaths } from '../src/path-resolve.js';
@@ -49,16 +51,89 @@ function parseRunnerArgs(argv) {
   return parsed;
 }
 
-function fail(outputMdPath, message) {
+function taskContext(outputMdPath, fm, context) {
+  return {
+    hopperDir: context.hopperDir || dirname(dirname(outputMdPath)),
+    taskId: context.taskId || fm.task_id || basename(outputMdPath).replace(/-output\.md$/, ''),
+    adapterName: context.adapterName || fm.adapter || 'unknown',
+  };
+}
+
+function terminalMessageFor(status, adapterStatus, providedMessage = null) {
+  if (providedMessage) return providedMessage;
+  if (status === 'done') return 'Task completed successfully.';
+  if (adapterStatus === 'timeout') return 'Task timed out.';
+  return 'Task failed.';
+}
+
+function terminalPhaseFor(status, adapterStatus, timedOut) {
+  if (timedOut || adapterStatus === 'timeout') return 'timeout';
+  return status;
+}
+
+function appendRunnerTerminalEvent(outputMdPath, fm, context) {
+  if (fm.terminal_event_emitted) return null;
+  const { hopperDir, taskId, adapterName } = taskContext(outputMdPath, fm, context);
+  return appendProgressEvent({
+    hopperDir,
+    taskId,
+    event: {
+      vendor: fm.adapter || adapterName,
+      phase: context.phase,
+      kind: 'terminal',
+      message: context.message,
+      source: 'runner',
+      terminal: true,
+      status: context.status,
+      duration_ms: context.duration_ms,
+      exit_code: context.exit_code,
+      signal: context.signal || null,
+      adapter_status: context.adapter_status,
+      timed_out: context.timed_out || null,
+    },
+  });
+}
+
+function terminalFrontmatterPatch(fm, event, phase, message) {
+  const patch = { ...fm, phase };
+  if (event) {
+    patch.last_progress_at = event.ts;
+    patch.last_progress = event.message;
+    patch.progress_seq = event.seq;
+    patch.terminal_event_emitted = true;
+  } else if (!fm.terminal_event_emitted) {
+    patch.last_progress = message;
+  }
+  return patch;
+}
+
+function fail(outputMdPath, message, context = {}) {
   // best-effort frontmatter update on early failure
   try {
     const fm = readFrontmatter(outputMdPath);
+    const endTime = new Date().toISOString();
+    const duration_ms = Date.now() - Date.parse(fm.start_time || new Date().toISOString());
+    const phase = 'failed';
+    let event = null;
+    try {
+      event = appendRunnerTerminalEvent(outputMdPath, fm, {
+        ...context,
+        status: 'failed',
+        phase,
+        message,
+        duration_ms,
+        exit_code: -1,
+        adapter_status: 'unknown-fail',
+      });
+    } catch (_) {
+      // Progress writing is best-effort; final frontmatter is still authoritative.
+    }
     writeFrontmatter(outputMdPath, {
-      ...fm,
+      ...terminalFrontmatterPatch(fm, event, phase, message),
       status: 'failed',
-      end_time: new Date().toISOString(),
+      end_time: endTime,
       exit_code: -1,
-      duration_ms: Date.now() - Date.parse(fm.start_time || new Date().toISOString()),
+      duration_ms,
       _body: (fm._body || '') + `\n## Failure (runner)\n${message}\n`,
     });
   } catch (_) {
@@ -83,9 +158,11 @@ async function main() {
     process.exit(2);
   }
 
-  const adapter = getAdapter(adapterName);
-  if (!adapter) {
-    fail(outputMdPath, `Unknown adapter: ${adapterName}`);
+  let adapter;
+  try {
+    adapter = getAdapter(adapterName);
+  } catch (err) {
+    fail(outputMdPath, err.message, { taskId, hopperDir, adapterName });
   }
 
   // Per codex Phase 5 audit F2: deserialize adapter opts from env var so
@@ -109,7 +186,7 @@ async function main() {
     fdOut = openSync(logPath, 'a');
     fdErr = openSync(logPath, 'a');
   } catch (err) {
-    fail(outputMdPath, `Could not open log file ${logPath}: ${err.message}`);
+    fail(outputMdPath, `Could not open log file ${logPath}: ${err.message}`, { taskId, hopperDir, adapterName });
   }
 
   // Per shared cli/src/path-resolve.js: in-process PATH + PATHEXT walk
@@ -207,10 +284,31 @@ async function main() {
 
     try {
       const fm = readFrontmatter(outputMdPath);
+      const endTime = new Date().toISOString();
+      const phase = terminalPhaseFor(status, adapterStatus, timedOut);
+      const message = terminalMessageFor(status, adapterStatus);
+      let event = null;
+      try {
+        event = appendRunnerTerminalEvent(outputMdPath, fm, {
+          taskId,
+          hopperDir,
+          adapterName,
+          status,
+          phase,
+          message,
+          duration_ms,
+          exit_code: code === null ? -1 : code,
+          signal: signal || null,
+          adapter_status: adapterStatus,
+          timed_out: timedOut || null,
+        });
+      } catch (_) {
+        // Progress writing is best-effort; final frontmatter is still authoritative.
+      }
       writeFrontmatter(outputMdPath, {
-        ...fm,
+        ...terminalFrontmatterPatch(fm, event, phase, message),
         status,
-        end_time: new Date().toISOString(),
+        end_time: endTime,
         exit_code: code === null ? -1 : code,
         signal: signal || null,
         timed_out: timedOut || null,
@@ -224,7 +322,7 @@ async function main() {
           (signal ? `- signal: ${signal}\n` : '') +
           (timedOut ? `- timed_out: true\n` : '') +
           `- duration_ms: ${duration_ms}\n` +
-          `- end_time: ${new Date().toISOString()}\n` +
+          `- end_time: ${endTime}\n` +
           (adapterError ? `\n### Adapter error\n\`\`\`\n${adapterError.slice(0, 2000)}\n\`\`\`\n` : '') +
           `- log: see \`${logPath.split(/[\\/]/).pop()}\` for raw output\n`,
       });
@@ -239,7 +337,7 @@ async function main() {
 
   vendor.on('error', (err) => {
     clearTimeout(killTimer);
-    fail(outputMdPath, `Vendor spawn error: ${err.message} (command: ${adapter.command})`);
+    fail(outputMdPath, `Vendor spawn error: ${err.message} (command: ${adapter.command})`, { taskId, hopperDir, adapterName });
   });
 }
 

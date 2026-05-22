@@ -31,6 +31,7 @@ import { tmpdir, platform } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFrontmatter, writeFrontmatter } from '../../cli/src/background.js';
+import { readProgressEvents } from '../../cli/src/progress.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -127,6 +128,55 @@ async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, exitCod
   }
 }
 
+async function runRunnerWithAdapter({ taskId, hopperDir, adapterName, adapterArgv = [] }) {
+  const outputMdPath = join(hopperDir, 'handoffs', `${taskId}-output.md`);
+  const logPath = outputMdPath.replace(/\.md$/, '.log');
+  writeFrontmatter(outputMdPath, {
+    task_id: taskId,
+    adapter: adapterName,
+    status: 'in-progress',
+    pid: null,
+    start_time: new Date().toISOString(),
+    end_time: null,
+    exit_code: null,
+    duration_ms: null,
+    mode: 'background',
+    log: `./${taskId}-output.log`,
+    _body: '',
+  });
+
+  const result = await new Promise((resolveP, rejectP) => {
+    const child = spawn(process.execPath, [
+      RUNNER_PATH,
+      '--task-id', taskId,
+      '--hopper-dir', hopperDir,
+      '--adapter', adapterName,
+      '--output-md', outputMdPath,
+      '--log', logPath,
+      '--',
+      ...adapterArgv,
+    ], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      rejectP(new Error('runner timeout'));
+    }, 15000);
+    child.on('exit', (code, signal) => {
+      clearTimeout(timer);
+      resolveP({ code, signal, stderr });
+    });
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      rejectP(err);
+    });
+  });
+
+  return { outputMdPath, logPath, result };
+}
+
 test('hopper-runner spawns vendor EXACTLY ONCE on success (spec §14.6)', { skip: platform() === 'win32' ? 'PATH-shim .cmd cannot be executed by CreateProcessW; covered by code-inspection test' : false }, async () => {
   const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-once-success-'));
   try {
@@ -175,6 +225,104 @@ test('hopper-runner spawns vendor EXACTLY ONCE on failure (no retry; spec §3 #4
 
     const fm = readFrontmatter(outputMdPath);
     assert.equal(fm.status, 'failed', `non-zero exit must flip status to 'failed'`);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('hopper-runner appends exactly one terminal progress event on success', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-terminal-success-'));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    mkdirSync(join(hopperDir, 'handoffs'), { recursive: true });
+    const counterFile = join(tmp, 'counter.txt');
+
+    const { outputMdPath } = await runRunnerWithFakeVendor({
+      taskId: 'T-terminal-success',
+      hopperDir,
+      counterFile,
+      exitCode: 0,
+    });
+
+    const fm = readFrontmatter(outputMdPath);
+    assert.equal(fm.status, 'done');
+    assert.equal(fm.phase, 'done');
+    assert.equal(fm.terminal_event_emitted, true);
+    assert.equal(fm.progress_seq, 1);
+    assert.equal(fm.last_progress, 'Task completed successfully.');
+
+    const events = readProgressEvents({ hopperDir, taskId: 'T-terminal-success' });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].terminal, true);
+    assert.equal(events[0].kind, 'terminal');
+    assert.equal(events[0].source, 'runner');
+    assert.equal(events[0].status, 'done');
+    assert.equal(events[0].adapter_status, 'success');
+    assert.equal(events[0].exit_code, 0);
+    assert.equal(typeof events[0].duration_ms, 'number');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('hopper-runner appends exactly one terminal progress event on failed vendor result', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-terminal-failed-'));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    mkdirSync(join(hopperDir, 'handoffs'), { recursive: true });
+    const counterFile = join(tmp, 'counter.txt');
+
+    const { outputMdPath } = await runRunnerWithFakeVendor({
+      taskId: 'T-terminal-failed',
+      hopperDir,
+      counterFile,
+      exitCode: 7,
+    });
+
+    const fm = readFrontmatter(outputMdPath);
+    assert.equal(fm.status, 'failed');
+    assert.equal(fm.phase, 'failed');
+    assert.equal(fm.terminal_event_emitted, true);
+    assert.equal(fm.progress_seq, 1);
+    assert.equal(fm.last_progress, 'Task failed.');
+
+    const events = readProgressEvents({ hopperDir, taskId: 'T-terminal-failed' });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].terminal, true);
+    assert.equal(events[0].status, 'failed');
+    assert.equal(events[0].adapter_status, 'unknown-fail');
+    assert.equal(events[0].exit_code, 7);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('hopper-runner early fail appends one terminal progress event when frontmatter exists', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-terminal-early-fail-'));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    mkdirSync(join(hopperDir, 'handoffs'), { recursive: true });
+
+    const { outputMdPath, result } = await runRunnerWithAdapter({
+      taskId: 'T-terminal-early-fail',
+      hopperDir,
+      adapterName: 'missing-vendor',
+    });
+
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /missing-vendor/);
+
+    const fm = readFrontmatter(outputMdPath);
+    assert.equal(fm.status, 'failed');
+    assert.equal(fm.phase, 'failed');
+    assert.equal(fm.terminal_event_emitted, true);
+    assert.equal(fm.progress_seq, 1);
+
+    const events = readProgressEvents({ hopperDir, taskId: 'T-terminal-early-fail' });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].terminal, true);
+    assert.equal(events[0].status, 'failed');
+    assert.match(events[0].message, /missing-vendor/);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
