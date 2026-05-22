@@ -282,6 +282,8 @@ Recommended stdout JSONL shape:
 {"type":"hopper.task.terminal","task_id":"T-EXAMPLE","status":"done","phase":"done","vendor":"codex","output_md":".hopper/handoffs/T-EXAMPLE-output.md","progress_log":".hopper/handoffs/T-EXAMPLE-progress.log","raw_log":".hopper/handoffs/T-EXAMPLE-output.log"}
 ```
 
+Packaging anchor (post-R16 spike): for Claude Code plugin packaging, `monitors/monitors.json` lives at the plugin repo root as a sibling of `commands/` and `cli/`. It does **not** live under `.claude-plugin/`; `.claude-plugin/plugin.json` is metadata only. This keeps `${CLAUDE_PLUGIN_ROOT}/cli/bin/hopper-dispatch --watch-events` resolvable when the repo root is symlinked into Claude Code's plugin directory.
+
 Host bridges (with native-wake capability disclosed):
 
 - **Claude Code** (native wake): plugin monitor starts `hopper-monitor`; each stdout JSONL line is delivered to Claude as a notification via the `monitors/monitors.json` mechanism. This is the only host with native session-wake support today.
