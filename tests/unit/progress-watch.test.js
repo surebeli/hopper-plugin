@@ -3,10 +3,10 @@
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { delimiter, join, dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -65,9 +65,9 @@ function markTerminal(hopperDir, taskId, status = 'done', seq = 1) {
   });
 }
 
-function spawnWatchEvents(hopperDir, args = ['--watch-events', '--once']) {
+function spawnWatchEvents(hopperDir, args = ['--watch-events', '--once'], extraEnv = {}) {
   const child = spawn(process.execPath, [DISPATCH, ...args], {
-    env: { ...process.env, HOPPER_DIR: hopperDir },
+    env: { ...process.env, HOPPER_NOTIFY: '0', HOPPER_DIR: hopperDir, ...extraEnv },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   child.stdout.setEncoding('utf-8');
@@ -93,6 +93,45 @@ function spawnWatchEvents(hopperDir, args = ['--watch-events', '--once']) {
     lines,
     stderr: () => stderr,
   };
+}
+
+function createFakeNotifier(tmp, { exitCode = 0 } = {}) {
+  const bin = join(tmp, 'fake-bin');
+  mkdirSync(bin, { recursive: true });
+  const recordPath = join(tmp, 'notify-record.jsonl');
+  const helperPath = join(bin, 'fake-notifier.js');
+  writeFileSync(helperPath, [
+    "import { appendFileSync } from 'node:fs';",
+    "const record = process.env.HOPPER_NOTIFY_RECORD;",
+    "if (record) appendFileSync(record, `${JSON.stringify({ argv: process.argv.slice(2) })}\\n`, 'utf-8');",
+    "process.exit(Number(process.env.HOPPER_FAKE_NOTIFY_EXIT || '0'));",
+  ].join('\n'));
+
+  if (process.platform === 'win32') {
+    writeFileSync(join(bin, 'powershell.cmd'), `@echo off\r\n"${process.execPath}" "${helperPath}" %*\r\n`);
+  } else {
+    const command = process.platform === 'darwin' ? 'osascript' : 'notify-send';
+    writeFileSync(join(bin, command), `#!/bin/sh\nexec "${process.execPath}" "${helperPath}" "$@"\n`);
+    chmodSync(join(bin, command), 0o755);
+  }
+
+  return {
+    recordPath,
+    env: {
+      HOPPER_NOTIFY: '1',
+      HOPPER_NOTIFY_RECORD: recordPath,
+      HOPPER_FAKE_NOTIFY_EXIT: String(exitCode),
+      PATH: `${bin}${delimiter}${process.env.PATH || ''}`,
+    },
+  };
+}
+
+function readNotifyRecord(recordPath) {
+  if (!existsSync(recordPath)) return [];
+  return readFileSync(recordPath, 'utf-8')
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
 }
 
 async function waitFor(predicate, describe, timeoutMs = 6000) {
@@ -197,6 +236,95 @@ test('--watch-events --once exits after first terminal event from atomic frontma
     assert.equal(await waitForExit(watcher.child), 0, watcher.stderr());
     assert.equal(watcher.lines.length, 1);
     assert.equal(JSON.parse(watcher.lines[0]).status, 'orphaned');
+  } finally {
+    if (watcher) stop(watcher.child);
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('terminal event triggers one OS notify attempt', async () => {
+  const { tmp, hopperDir } = setup();
+  const taskId = 'T-WATCH-NOTIFY';
+  const { runWatchEvents } = await import(pathToFileURL(DISPATCH).href);
+  const lines = [];
+  const notifications = [];
+  let cleanup;
+  try {
+    writeTask(hopperDir, taskId);
+    cleanup = runWatchEvents(hopperDir, {
+      notifyFn: async (payload) => { notifications.push(payload); return { ok: true }; },
+      writeLine: (line) => lines.push(line),
+      exitFn: () => {},
+    });
+
+    await delay(800);
+    markTerminal(hopperDir, taskId, 'done', 4);
+
+    await waitFor(() => lines[0] && notifications.length === 1, 'terminal JSONL and notify call');
+
+    assert.equal(JSON.parse(lines[0]).task_id, taskId);
+    assert.equal(notifications[0].title, 'hopper: T-WATCH-NOTIFY');
+    assert.match(notifications[0].message, /codex/);
+    assert.match(notifications[0].message, /done/);
+
+    markTerminal(hopperDir, taskId, 'done', 4);
+    await delay(1200);
+    assert.equal(notifications.length, 1);
+  } finally {
+    if (cleanup) cleanup();
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('notify failure does not block stdout JSONL output', async () => {
+  const { tmp, hopperDir } = setup();
+  const taskId = 'T-WATCH-NOTIFY-FAIL';
+  const { runWatchEvents } = await import(pathToFileURL(DISPATCH).href);
+  const lines = [];
+  let exitCode = null;
+  let cleanup;
+  try {
+    writeTask(hopperDir, taskId);
+    cleanup = runWatchEvents(hopperDir, {
+      once: true,
+      notifyFn: async () => { throw new Error('notify boom'); },
+      writeLine: (line) => lines.push(line),
+      exitFn: (code) => { exitCode = code; },
+    });
+
+    await delay(800);
+    markTerminal(hopperDir, taskId, 'failed', 5);
+
+    const line = await waitFor(() => lines[0], 'terminal JSONL despite notify failure');
+    assert.equal(JSON.parse(line).status, 'failed');
+    await waitFor(() => exitCode === 0 ? true : null, 'watcher once cleanup');
+    assert.equal(exitCode, 0);
+  } finally {
+    if (cleanup) cleanup();
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('HOPPER_NOTIFY=0 keeps watcher JSONL but skips notifier spawn', async () => {
+  const { tmp, hopperDir } = setup();
+  const taskId = 'T-WATCH-NOTIFY-OFF';
+  const fake = createFakeNotifier(tmp);
+  let watcher;
+  try {
+    writeTask(hopperDir, taskId);
+    watcher = spawnWatchEvents(hopperDir, ['--watch-events', '--once'], {
+      ...fake.env,
+      HOPPER_NOTIFY: '0',
+    });
+
+    await delay(800);
+    markTerminal(hopperDir, taskId, 'done', 6);
+
+    const line = await waitFor(() => watcher.lines[0], 'terminal JSONL with notify disabled');
+    assert.equal(JSON.parse(line).task_id, taskId);
+    assert.equal(await waitForExit(watcher.child), 0, watcher.stderr());
+    await delay(200);
+    assert.deepEqual(readNotifyRecord(fake.recordPath), []);
   } finally {
     if (watcher) stop(watcher.child);
     rmSync(tmp, { recursive: true, force: true });
