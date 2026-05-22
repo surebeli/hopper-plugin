@@ -1,22 +1,86 @@
 {
   "name": "agent-hopper",
+  "displayName": "Hopper",
+  "version": "0.6.0-phase-6c",
+  "description": "Vendor-neutral background dispatch for AI agent tasks using the llm-hopper file protocol.",
+  "category": "Coding",
+  "tags": [
+    "multi-vendor",
+    "background-dispatch",
+    "agent-orchestration",
+    "file-protocol"
+  ],
+  "keywords": [
+    "llm",
+    "multi-llm",
+    "hopper",
+    "protocol",
+    "vendor-neutral",
+    "background-dispatch"
+  ],
+  "homepage": "https://github.com/surebeli/hopper-plugin",
+  "repository": "https://github.com/surebeli/hopper-plugin",
+  "license": "Apache-2.0",
+  "screenshots": [
+    {
+      "path": "docs/assets/banner.png",
+      "caption": "hopper-plugin banner"
+    },
+    {
+      "path": "docs/assets/architecture.png",
+      "caption": "System architecture"
+    },
+    {
+      "path": "docs/assets/data-flow.png",
+      "caption": "Background dispatch data flow"
+    }
+  ],
   "owner": {
     "name": "surebeli (litianyi)",
     "email": "surebeli@gmail.com"
   },
-  "description": "Thin multi-LLM coordination protocol — dispatches task-typed work to vendor CLIs (codex, kimi, opencode, copilot, agy) without a harness reaction core. State lives in plain markdown under .hopper/.",
   "plugins": [
     {
       "name": "hopper",
+      "displayName": "Hopper",
       "source": "./",
-      "description": "Thin plugin layer over the llm-hopper file-based protocol. Dispatches task-typed work to vendor CLI subprocesses. No harness core; vendor CLIs bring their own runtime.",
+      "description": "Thin plugin layer over the llm-hopper file protocol. Dispatches task-typed work to vendor CLIs and reports progress through file-backed terminal events.",
       "version": "0.6.0-phase-6c",
+      "category": "Coding",
+      "tags": [
+        "multi-vendor",
+        "background-dispatch",
+        "agent-orchestration",
+        "file-protocol"
+      ],
       "author": {
         "name": "surebeli (litianyi)"
       },
       "homepage": "https://github.com/surebeli/hopper-plugin",
+      "repository": "https://github.com/surebeli/hopper-plugin",
       "license": "Apache-2.0",
-      "keywords": ["llm", "multi-llm", "hopper", "protocol", "vendor-neutral"]
+      "keywords": [
+        "llm",
+        "multi-llm",
+        "hopper",
+        "protocol",
+        "vendor-neutral",
+        "background-dispatch"
+      ],
+      "screenshots": [
+        {
+          "path": "docs/assets/banner.png",
+          "caption": "hopper-plugin banner"
+        },
+        {
+          "path": "docs/assets/architecture.png",
+          "caption": "System architecture"
+        },
+        {
+          "path": "docs/assets/data-flow.png",
+          "caption": "Background dispatch data flow"
+        }
+      ]
     }
   ]
 }

@@ -1,7 +1,7 @@
 {
   "name": "hopper",
   "version": "0.6.0-phase-6c",
-  "description": "Reference implementation of llm-hopper protocol as a thin plugin layer. No harness reaction core; vendor CLIs bring their own runtime.",
+  "description": "Vendor-neutral background dispatch for AI agent tasks using the llm-hopper file protocol.",
   "author": {
     "name": "surebeli (litianyi)",
     "url": "https://github.com/surebeli"
@@ -15,12 +15,13 @@
     "hopper",
     "protocol",
     "vendor-neutral",
-    "codex"
+    "codex",
+    "background-dispatch"
   ],
   "interface": {
     "displayName": "Hopper",
     "shortDescription": "Dispatch llm-hopper tasks from Codex and other AI CLI hosts.",
-    "longDescription": "Hopper is a thin plugin layer over the file-based llm-hopper protocol. It keeps state in .hopper markdown files and dispatches task-typed work to vendor CLIs such as Codex, Kimi, OpenCode, Copilot, and Agy without adding a harness reaction core.",
+    "longDescription": "Hopper is a thin plugin layer over the file-based llm-hopper protocol. It keeps state in .hopper markdown and JSONL files, dispatches task-typed work to Codex, Kimi, OpenCode, Copilot, and Agy vendor CLIs, and reports background progress through terminal events without adding a harness reaction core.",
     "developerName": "surebeli (litianyi)",
     "category": "Coding",
     "capabilities": [
@@ -32,11 +33,24 @@
     "privacyPolicyURL": "https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement",
     "termsOfServiceURL": "https://docs.github.com/en/site-policy/github-terms/github-terms-of-service",
     "defaultPrompt": [
-      "Check Hopper vendor status.",
-      "Dispatch a Hopper task by ID.",
-      "Show Hopper install diagnostics."
+      "Dispatch Hopper task T-PROG-REVIEW in the background and show me the progress path.",
+      "Show Hopper queue status and list any in-progress background jobs.",
+      "Probe Hopper vendor capabilities for codex and then show cached models."
     ],
-    "brandColor": "#111111",
-    "screenshots": []
+    "brandColor": "#3DDC97",
+    "screenshots": [
+      {
+        "path": "docs/assets/banner.png",
+        "caption": "hopper-plugin banner"
+      },
+      {
+        "path": "docs/assets/architecture.png",
+        "caption": "System architecture"
+      },
+      {
+        "path": "docs/assets/data-flow.png",
+        "caption": "Background dispatch data flow"
+      }
+    ]
   }
 }
