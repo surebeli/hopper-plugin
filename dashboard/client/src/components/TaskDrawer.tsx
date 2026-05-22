@@ -16,6 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
 import { fetchTask, queryKeys } from '@/lib/api';
 import { useSSE } from '@/lib/sse';
+import { truncate } from '@/lib/utils';
 import type { FrontmatterValue, TaskDetail, TaskStatus } from '@/lib/types';
 
 export const baseFrontmatterFields = [
@@ -145,7 +146,9 @@ export function TaskDetailPanel({
 export function TaskStatusStrip({ frontmatter = {} }: { frontmatter?: TaskDetail['frontmatter'] }) {
   const status = statusValue(frontmatter.status);
   const phase = formatValue(frontmatter.phase);
-  const last = formatValue(frontmatter.last_progress);
+  const rawLast = frontmatter.last_progress === null || frontmatter.last_progress === undefined
+    ? ''
+    : String(frontmatter.last_progress);
   const lastAt = typeof frontmatter.last_progress_at === 'string' ? frontmatter.last_progress_at : '';
   const terminal = typeof frontmatter.terminal_event_emitted === 'boolean'
     ? (frontmatter.terminal_event_emitted ? 'yes' : 'no')
@@ -158,8 +161,8 @@ export function TaskStatusStrip({ frontmatter = {} }: { frontmatter?: TaskDetail
         {status ? <StatusPill status={status} /> : <span>—</span>}
       </span>
       <span>Phase: <span className="text-foreground">{phase}</span></span>
-      <span className="min-w-0 flex-1 truncate" title={last === '—' ? undefined : last}>
-        Last: <span className="text-foreground">{truncate(last, 80)}</span>
+      <span className="min-w-0 flex-1 truncate" title={rawLast || undefined}>
+        Last: <span className="text-foreground">{truncate(rawLast || '—', 80)}</span>
         {lastAt ? <span> ({relativeTime(lastAt)})</span> : null}
       </span>
       <span>
@@ -197,10 +200,6 @@ function statusValue(value: FrontmatterValue | undefined): TaskStatus | null {
   return value === 'pending' || value === 'in-progress' || value === 'done' || value === 'failed' || value === 'removed'
     ? value
     : null;
-}
-
-function truncate(value: string, limit: number) {
-  return value.length > limit ? `${value.slice(0, limit - 1)}…` : value;
 }
 
 function withLineNumbers(html: string) {

@@ -1,8 +1,8 @@
-import { useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchTaskProgress, queryKeys } from '@/lib/api';
 import { useSSE } from '@/lib/sse';
-import { cn } from '@/lib/utils';
+import { cn, truncate } from '@/lib/utils';
 import type { ProgressEvent, TaskProgressResponse } from '@/lib/types';
 
 const MAX_ROWS = 5;
@@ -36,7 +36,7 @@ export function ProgressTimelineRows({ events }: { events: ProgressEvent[] }) {
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto bg-background p-3 font-mono text-xs leading-5">
+    <div role="list" aria-label="Progress timeline" className="min-h-0 flex-1 overflow-auto bg-background p-3 font-mono text-xs leading-5">
       {rows.map((event) => (
         <ProgressEventRow key={`${event.seq}-${event.ts}`} event={event} />
       ))}
@@ -70,14 +70,15 @@ export function prepareProgressRows(events: ProgressEvent[]) {
   return rows;
 }
 
-function ProgressEventRow({ event }: { event: ProgressEvent }) {
+const ProgressEventRow = React.memo(function ProgressEventRow({ event }: { event: ProgressEvent }) {
   const message = truncate(event.message, MESSAGE_LIMIT);
   const metadata = formatMetadata(event);
 
   return (
     <div
+      role="listitem"
       className={cn(
-        'grid grid-cols-[48px_72px_112px_minmax(0,1fr)] items-start gap-2 border-b border-border py-1.5 text-foreground',
+        'grid grid-cols-[64px_80px_120px_minmax(0,1fr)] items-start gap-2 border-b border-border py-1.5 text-foreground',
         event.terminal && 'border-l-2 border-l-primary pl-2 text-primary',
       )}
       data-progress-row={event.seq}
@@ -91,7 +92,7 @@ function ProgressEventRow({ event }: { event: ProgressEvent }) {
       </span>
     </div>
   );
-}
+});
 
 function formatMetadata(event: ProgressEvent) {
   const fields = [];
@@ -101,10 +102,6 @@ function formatMetadata(event: ProgressEvent) {
   if (event.adapter_status !== undefined) fields.push(`adapter_status=${event.adapter_status}`);
   if (event.timed_out !== undefined && event.timed_out !== null) fields.push(`timed_out=${event.timed_out}`);
   return fields.join(' ');
-}
-
-function truncate(value: string, limit: number) {
-  return value.length > limit ? `${value.slice(0, limit - 1)}…` : value;
 }
 
 export function relativeTime(ts: string) {

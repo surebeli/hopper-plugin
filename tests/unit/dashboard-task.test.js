@@ -191,6 +191,21 @@ test('TaskStatusStrip renders phase, last progress, terminal flag, and missing f
   assert.doesNotMatch(fallback, /undefined|null/);
 });
 
+test('TaskStatusStrip title uses raw last_progress text', async () => {
+  const { TaskStatusStrip } = await vite.ssrLoadModule('/src/components/TaskDrawer.tsx');
+  const rawLast = 'x'.repeat(120);
+  const html = renderToStaticMarkup(React.createElement(TaskStatusStrip, {
+    frontmatter: {
+      status: 'in-progress',
+      last_progress: rawLast,
+    },
+  }));
+
+  assert.match(html, new RegExp(`title="${rawLast}"`));
+  assert.doesNotMatch(html, new RegExp(`title="${rawLast.slice(0, 79)}…"`));
+});
+
+
 test('TaskDetailPanel includes Progress tab between Output and Live log', async () => {
   const { TaskDetailPanel } = await vite.ssrLoadModule('/src/components/TaskDrawer.tsx');
   const html = renderToStaticMarkup(React.createElement(TaskDetailPanel, {
@@ -228,6 +243,9 @@ test('Progress timeline rows limit to five events and pin terminal event first',
   const html = renderToStaticMarkup(React.createElement(ProgressTimelineRows, { events }));
 
   assert.equal((html.match(/data-progress-row=/g) || []).length, 5);
+  assert.match(html, /role="list"/);
+  assert.match(html, /aria-label="Progress timeline"/);
+  assert.equal((html.match(/role="listitem"/g) || []).length, 5);
   assert.ok(html.indexOf('#6') < html.indexOf('#5'));
   assert.match(html, /done\/terminal/);
   assert.match(html, /status=done/);
