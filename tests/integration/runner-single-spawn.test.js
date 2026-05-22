@@ -46,14 +46,16 @@ const RUNNER_PATH = join(REPO_ROOT, 'cli', 'bin', 'hopper-runner');
  * codex.bat per PATHEXT. We write codex.cmd on Win, plain codex (chmod +x)
  * on Unix.
  */
-async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, exitCode = 0, extraEnv = {} }) {
+async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, exitCode = 0, sleepMs = 0, extraEnv = {} }) {
   const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-fake-'));
   try {
     const isWin = platform() === 'win32';
     const shimDir = join(tmp, 'shim');
     mkdirSync(shimDir);
 
-    // Fake "codex" command: increments counter, prints OK to stdout, exits with given code
+    // Fake "codex" command: increments counter, prints OK to stdout, exits with given code.
+    // sleepMs lets timeout tests exercise runner killProcessTree without waiting
+    // for a real vendor adapter's production timeout.
     const fakeScript = join(tmp, 'fake-vendor.js');
     writeFileSync(fakeScript, `
       const fs = require('node:fs');
@@ -61,7 +63,12 @@ async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, exitCod
       const cur = fs.existsSync(file) ? parseInt(fs.readFileSync(file, 'utf-8')) : 0;
       fs.writeFileSync(file, String(cur + 1));
       console.log('FAKE_VENDOR_OK invocation ' + (cur + 1));
-      process.exit(${exitCode});
+      const sleepMs = ${sleepMs};
+      if (sleepMs > 0) {
+        setTimeout(() => process.exit(${exitCode}), sleepMs);
+      } else {
+        process.exit(${exitCode});
+      }
     `, 'utf-8');
 
     // Create shim: 'codex' on PATH → node fakeScript
@@ -292,6 +299,47 @@ test('hopper-runner appends exactly one terminal progress event on failed vendor
     assert.equal(events[0].status, 'failed');
     assert.equal(events[0].adapter_status, 'unknown-fail');
     assert.equal(events[0].exit_code, 7);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('hopper-runner appends exactly one timeout terminal progress event', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-terminal-timeout-'));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    mkdirSync(join(hopperDir, 'handoffs'), { recursive: true });
+    const counterFile = join(tmp, 'counter.txt');
+
+    const { outputMdPath } = await runRunnerWithFakeVendor({
+      taskId: 'T-terminal-timeout',
+      hopperDir,
+      counterFile,
+      exitCode: 0,
+      sleepMs: 1000,
+      extraEnv: { HOPPER_TEST_ONLY_TIMEOUT_MS: '100' },
+    });
+
+    const finalCount = parseInt(readFileSync(counterFile, 'utf-8'));
+    assert.equal(finalCount, 1, 'timeout path must not retry or respawn vendor');
+
+    const fm = readFrontmatter(outputMdPath);
+    assert.equal(fm.status, 'failed');
+    assert.equal(fm.phase, 'timeout');
+    assert.equal(fm.adapter_status, 'timeout');
+    assert.equal(fm.timed_out, true);
+    assert.equal(fm.terminal_event_emitted, true);
+    assert.equal(fm.progress_seq, 1);
+    assert.equal(fm.last_progress, 'Task timed out.');
+
+    const events = readProgressEvents({ hopperDir, taskId: 'T-terminal-timeout' });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].terminal, true);
+    assert.equal(events[0].status, 'failed');
+    assert.equal(events[0].phase, 'timeout');
+    assert.equal(events[0].adapter_status, 'timeout');
+    assert.equal(events[0].timed_out, true);
+    assert.equal(events[0].message, 'Task timed out.');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

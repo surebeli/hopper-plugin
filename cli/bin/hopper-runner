@@ -224,7 +224,11 @@ async function main() {
   let timedOut = false;
   // Per codex Phase 5 audit F2: pass adapter opts to timeoutMs so --reasoning xhigh
   // actually gets 900s instead of the default 300s.
-  const timeoutMs = adapter.timeoutMs({ ...adapterOpts, background: true });
+  let timeoutMs = adapter.timeoutMs({ ...adapterOpts, background: true });
+  if (process.env.HOPPER_TEST_ONLY_TIMEOUT_MS) {
+    const testTimeoutMs = Number.parseInt(process.env.HOPPER_TEST_ONLY_TIMEOUT_MS, 10);
+    if (Number.isFinite(testTimeoutMs) && testTimeoutMs > 0) timeoutMs = testTimeoutMs;
+  }
   const killTimer = setTimeout(() => {
     timedOut = true;
     // Per codex Phase 5 audit F1 + recheck: process-tree kill (not just
