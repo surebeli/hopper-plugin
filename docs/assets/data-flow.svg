@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="900" viewBox="0 0 1280 900" role="img" aria-label="Hopper background dispatch data flow">
+  <rect width="1280" height="900" fill="#0b1020"/>
+  <style>.h{font:700 24px Segoe UI,Arial;fill:#f7faf9}.lane{font:700 15px Segoe UI,Arial;fill:#dce7ef}.note{font:13px Consolas,monospace;fill:#a8b3c2}.msg{font:14px Consolas,monospace;fill:#e8eef4}.line{stroke:#425066;stroke-width:1}.arr{stroke:#3DDC97;stroke-width:2;fill:none}.box{fill:#111827;stroke:#506072;stroke-width:1.5}.term{fill:#0f2a23;stroke:#3DDC97;stroke-width:2}</style>
+  <defs><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3DDC97"/></marker></defs>
+  <text x="48" y="52" class="h">Background dispatch data flow</text><text x="48" y="80" class="note">One task, one vendor spawn, file-backed progress, terminal notification fan-out</text>
+  <g><text x="70" y="124" class="lane">User</text><text x="220" y="124" class="lane">Host</text><text x="390" y="124" class="lane">Dispatch</text><text x="570" y="124" class="lane">Runner</text><text x="750" y="124" class="lane">Vendor</text><text x="930" y="124" class="lane">Watcher</text><text x="1090" y="124" class="lane">Notification</text></g>
+  <g class="line"><path d="M100 140V850"/><path d="M250 140V850"/><path d="M430 140V850"/><path d="M610 140V850"/><path d="M790 140V850"/><path d="M970 140V850"/><path d="M1130 140V850"/></g>
+  <g class="arr" marker-end="url(#a)"><path d="M100 170H250"/><path d="M250 230H430"/><path d="M430 290H610"/><path d="M610 410H790"/><path d="M790 500H610"/><path d="M610 630H970"/><path d="M970 700H1130"/><path d="M970 754H1130"/><path d="M970 808H1130"/></g>
+  <text x="120" y="160" class="msg">1. /hopper:dispatch T-X --background</text><text x="270" y="220" class="msg">2. read queue.md + AGENTS.md</text><text x="450" y="280" class="msg">3. spawn detached hopper-runner</text>
+  <rect x="520" y="315" width="310" height="72" rx="10" class="box"/><text x="540" y="344" class="msg">4. write frontmatter</text><text x="540" y="368" class="note">status=in-progress, phase=starting</text>
+  <text x="628" y="400" class="msg">5. single vendor spawn</text><text x="810" y="490" class="msg">6. vendor exits</text>
+  <rect x="520" y="532" width="330" height="80" rx="10" class="term"/><text x="540" y="562" class="msg">7. append terminal event</text><text x="540" y="586" class="note">progress.log + terminal_event_emitted=true</text>
+  <text x="770" y="654" class="msg">8. watch-events / SSE / monitor</text>
+  <rect x="1040" y="676" width="190" height="44" rx="8" class="box"/><text x="1056" y="704" class="msg">9a Claude wake</text><rect x="1040" y="730" width="190" height="44" rx="8" class="box"/><text x="1056" y="758" class="msg">9b OS toast</text><rect x="1040" y="784" width="190" height="44" rx="8" class="box"/><text x="1056" y="812" class="msg">9c Dashboard SSE</text>
+</svg>
