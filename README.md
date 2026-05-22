@@ -1,115 +1,141 @@
+![hopper-plugin banner](docs/assets/banner.png)
+
 # hopper-plugin
 
-> Reference implementation of [llm-hopper](https://github.com/surebeli/llm-hopper) protocol as a thin plugin layer. Demo-stage; see `docs/plans/2026-05-19-hopper-plugin-demo-spec.md` in the llm-hopper repo for the full spec.
+> Vendor-neutral background dispatch for AI agents
 
-**Status (2026-05-20)**: Phase 4 complete. T-PLUGIN-10 Critic verdict PASS_WITH_NOTES; demo cleared for essay material with framing constraints noted below.
+![License](https://img.shields.io/badge/license-Apache--2.0-blue)
+![Version](https://img.shields.io/badge/version-0.6.0--phase--6c-3DDC97)
+![Tests](https://img.shields.io/badge/tests-434%20total%20%2F%200%20fail-3DDC97)
+![Hosts](https://img.shields.io/badge/hosts-Claude%20Code%20%7C%20Codex%20CLI%20%7C%20OpenCode%20%7C%20Standalone-111827)
 
-- **Hosts (4)**: Tier A standalone CLI + Tier B Claude Code (4 slash commands) + Tier C #1 Codex CLI wrapper + Tier C #2 OpenCode wrapper. Cross-host equivalence verified structurally; live 4-host demo is a user-action exercise.
-- **Async dispatch (spec v2.1.0 §14, added 2026-05-21)**: `--background` opt-in keeps caller session responsive for long-running tasks. Native-preferred paths: Claude Code via Bash run_in_background + Monitor; OpenCode via bundled plugin + `prompt_async`. Codex CLI / Kimi / Copilot / Agy use the `hopper-runner` detached fallback. State in `output.md` frontmatter.
-- **Progress notifications (v1.0/v1.1)**: background jobs expose `--progress`, `--watch-events`, progress JSONL sidecars, OS toast, and dashboard SSE. See `docs/release/INSTALL-MATRIX.md` §Progress and completion notifications.
-- **Vendors (5 registered)**: codex, kimi, opencode, copilot, agy. **4 live-smoke-verified**; agy code-complete with live OAuth-gated smoke pending (T-PLUGIN-05e). Spec required ≥3 live-smoked; demo exceeds with 4.
-- **PASS materials**: see `docs/release/PASS-RATIONALE.md` (5 hard criteria self-assessment) + `docs/release/INSTALL-MATRIX.md` (install patterns + Phase 6a self-diagnostics) + `scripts/cross-host-verify.sh` (structural equivalence proof — all PASS).
-- **Self-diagnostics (Phase 6a)**: `hopper-dispatch --check` shows install + auth status per vendor (binary on PATH? auth configured?); `hopper-dispatch --capabilities <vendor>` shows what each adapter accepts (`--model` / `--reasoning` / features). Zero subprocess spawned — pure PATH walk + adapter static metadata. See INSTALL-MATRIX.md §Self-diagnostics.
-- **Test suite**: 270/285 passing (15 Windows skips by design). **12 codex audit cycles** cleared (8 phase + T-10 Critic + final strict + flags audit + Phase 5 audit).
-- **Open user-action gates (do not block code/test-based verdict; required for live release)**: T-PLUGIN-00 Prong 1 (Claude Code plugin install + `/hopper:smoke`), T-PLUGIN-05e (agy interactive OAuth + post-OAuth smoke).
-- **Deferred**: T-PLUGIN-09 screencast — defer per user directive 2026-05-20.
+## What
 
-**Protocol-vs-tool positioning**: hopper-plugin is a CONVENIENCE LAYER for the llm-hopper protocol, NOT a runtime. Remove the plugin and the same `.hopper/` directory remains operable via manual CLI sessions.
+hopper-plugin is a thin plugin layer over the llm-hopper file protocol. It lets Claude Code, Codex CLI, OpenCode, or a standalone shell dispatch task-typed work to vendor CLIs such as codex, kimi, opencode, copilot, and agy. State stays in `.hopper/` markdown and JSONL files: no hidden database, no harness reaction core, and no automatic vendor retry or fallback.
 
-## What this is
+## Architecture
 
-A thin CLI + host adapters that automate the manual dispatch step in llm-hopper protocol. Without the plugin you open a CLI session and paste a task spec; with the plugin you type `/hopper:dispatch T07` from inside Claude Code (or any future host adapter) and the plugin handles subprocess spawning + output capture.
+![hopper-plugin architecture](docs/assets/architecture.svg)
 
-State remains in plain markdown under `.hopper/` (git-tracked, hand-editable). Plugin owns convenience; protocol owns truth.
+Four host routes converge on `hopper-dispatch`. The dispatcher reads `.hopper/queue.md` and `.hopper/AGENTS.md`, resolves the vendor, and starts `hopper-runner` for background jobs. Vendor model catalogs remain owned by each vendor account. The dashboard is a read-only consumer of the same `.hopper/` state, while `monitors/monitors.json` bridges terminal events into Claude Code native session wake.
 
-## What this is NOT
+## Data Flow
 
-- NOT a multi-agent orchestrator (see [claude-octopus](https://github.com/nyldn/claude-octopus) for that style)
-- NOT a tmux/Zellij multiplexer
-- NOT a replacement for the file-based protocol — works in addition to it
-- NOT polished — this is a demo built to validate an essay's claim
+![hopper-plugin background dispatch data flow](docs/assets/data-flow.svg)
 
-## Architecture (per spec §3 #2 Tier model)
+A background dispatch writes `output.md`, `output.log`, and `progress.log`. The runner appends progress JSONL events during execution and exactly one terminal event when the vendor exits. `--progress`, `--watch-events`, the Claude monitor, OS toast, and dashboard SSE all read from that same file-backed state.
 
-```
-hopper-plugin/                  ← repo root = plugin install root
-├── .agents/
-│   └── plugins/marketplace.json ← Codex local marketplace manifest
-├── .claude-plugin/             ← Claude Code plugin manifest (Tier B)
-│   └── plugin.json
-├── .codex-plugin/              ← Codex plugin metadata for root-level inspection
-│   └── plugin.json
-├── commands/                   ← Claude Code slash command prompt templates (Tier B)
-│   ├── dispatch.md
-│   ├── status.md
-│   ├── smoke.md
-│   └── vendors.md
-├── cli/
-│   ├── bin/
-│   │   └── hopper-dispatch     ← Tier A standalone CLI (host-agnostic)
-│   └── src/                    ← dispatcher core + vendor adapters
-├── hosts/
-│   ├── claude-code/README.md   ← Tier B documentation
-│   ├── codex-cli/bin/hopper-codex   ← Tier C #1 wrapper
-│   └── opencode/bin/hopper-opencode ← Tier C #2 wrapper
-├── plugins/
-│   └── hopper-plugin/          ← Codex marketplace plugin source
-├── tests/                      ← unit + integration tests (270/285 passing)
-├── docs/                       ← spec, spikes, audit trail
-└── .hopper/                    ← THIS repo's own dogfood protocol state
-```
+## Quick Start
 
-Each host route resolves to the same `cli/bin/hopper-dispatch`. Vendor selection comes from `.hopper/AGENTS.md`, not the host. Same task-id → same vendor → same output across all 4 hosts (cross-host equivalence claim per spec §1 #2).
+### Scenario 1: Dispatch to specific vendor + model
 
-## Web dashboard (side project)
-
-Local read-mostly web dashboard for visualizing the queue, vendor inventory, live log streams, and cost totals. Built as a sidequest (8 phases, 17 commits, zero hard-constraint violations across 8 reviews). Binds `127.0.0.1` only; no auth, no remote access, no server-side persistence.
+Use a task that resolves to codex, then request high reasoning from the codex adapter:
 
 ```bash
-npm install
-npm run dashboard:build
-npm run dashboard:start
-# open http://127.0.0.1:7777
+hopper-dispatch T-PROG-AUDIT --background --reasoning xhigh
+hopper-dispatch --progress T-PROG-AUDIT
+hopper-dispatch --result T-PROG-AUDIT
 ```
 
-- Full usage guide: `dashboard/README.md`
-- Design contract: `docs/sidequests/web-dashboard/SPEC.md`
-- Build retrospective: `docs/sidequests/web-dashboard/SIDEQUEST-COMPLETE.md`
+For vendor adapters that honor `--model`:
+
+```bash
+hopper-dispatch T-PROG-REVIEW --background --model kimi-thinking
+hopper-dispatch T-PROG-UI --background --model deepseek/v4-flash
+```
+
+### Scenario 2: Background dispatch + watch via dashboard
+
+```bash
+hopper-dispatch T-PROG-REVIEW --background
+npm run dashboard:build
+npm run dashboard:start
+# open http://127.0.0.1:7777 and select the task's Progress tab
+```
+
+Claude Code users also get terminal events through the plugin monitor. Standalone and Codex CLI users can keep a watcher running:
+
+```bash
+hopper-dispatch --watch-events
+```
+
+### Scenario 3: Cross-host equivalence
+
+The same task ID resolves through the same `.hopper/` routing tables regardless of host:
+
+```bash
+hopper-dispatch --resolve T-PROG-REVIEW
+# Claude Code: /hopper:dispatch T-PROG-REVIEW --background
+hopper-codex T-PROG-REVIEW --background
+hopper-opencode T-PROG-REVIEW --background
+```
+
+## Core Skills
+
+| Command | Purpose |
+|---|---|
+| `/hopper:dispatch` | Dispatch a task to its preferred vendor. |
+| `/hopper:status` | Show queue summary. |
+| `/hopper:result` | Fetch a completed task verdict and log tail. |
+| `/hopper:models` | List cached vendor models. |
+| `/hopper:probe` | Refresh vendor capability cache. |
+| `/hopper:vendors` | List registered vendor adapters. |
+| `/hopper:smoke` | Run the installation smoke test. |
+| `hopper-watch-events` | Claude monitor that delivers terminal events. |
+
+See [docs/cookbook.md](docs/cookbook.md) for complete workflows.
 
 ## Install
 
-See `docs/release/INSTALL-MATRIX.md` for the full per-host install patterns + symlink targets + verification steps.
+Detailed host-by-host installation is in [docs/release/INSTALL-MATRIX.md](docs/release/INSTALL-MATRIX.md).
 
-Quick start (Tier A standalone CLI):
-
-```bash
-git clone https://github.com/surebeli/hopper-plugin
-cd hopper-plugin
-node cli/bin/hopper-dispatch --smoke    # expect: hopper standalone (CLI v0.4.0-phase-3)
-```
-
-To verify the cross-host equivalence claim without installing all 4 hosts:
+Claude Code users:
 
 ```bash
-bash scripts/cross-host-verify.sh       # static checks; expect ALL STRUCTURAL CHECKS PASSED
+mkdir -p ~/.claude/plugins
+ln -s "$(pwd)" ~/.claude/plugins/hopper
 ```
 
-Codex plugin manager smoke from this repo root:
+Windows PowerShell:
+
+```powershell
+New-Item -ItemType SymbolicLink `
+  -Path "$HOME\.claude\plugins\hopper" `
+  -Target "F:\absolute\path\to\hopper-plugin"
+```
+
+Codex CLI users:
 
 ```bash
-codex plugin marketplace add .
-codex plugin add hopper-plugin@agent-hopper
-codex plugin list --marketplace agent-hopper
+chmod +x /absolute/path/to/hopper-plugin/hosts/codex-cli/bin/hopper-codex
+ln -s /absolute/path/to/hopper-plugin/hosts/codex-cli/bin/hopper-codex ~/.local/bin/hopper-codex
 ```
 
-The Codex marketplace entry lives at `.agents/plugins/marketplace.json` and points to `plugins/hopper-plugin/`, matching Codex's required local marketplace layout.
+Standalone:
+
+```bash
+npm link
+hopper-dispatch --smoke
+hopper-dispatch --vendors
+```
+
+## Cookbook
+
+Start with [docs/cookbook.md](docs/cookbook.md) for dispatch, progress, notification, dashboard, probe, stale-job cleanup, and multi-vendor review recipes.
+
+## Documentation
+
+- PRD: [docs/specs/background-progress-notification-prd-trd.md](docs/specs/background-progress-notification-prd-trd.md)
+- Install matrix: [docs/release/INSTALL-MATRIX.md](docs/release/INSTALL-MATRIX.md)
+- Dashboard: [dashboard/README.md](dashboard/README.md)
+- Telemetry manual: [docs/specs/background-progress-notification-dogfood-telemetry-MANUAL.md](docs/specs/background-progress-notification-dogfood-telemetry-MANUAL.md)
+
+## Status
+
+- v1.0 (progress + terminal notifications): GA
+- v1.1 (dashboard integration + OS toast + docs): GA
+- v1.2 (pipe+tee + stream-parser + advanced providers): planned
 
 ## License
 
-Apache-2.0. See `LICENSE`.
-
-## Related
-
-- Protocol spec: https://github.com/surebeli/llm-hopper (PING.md + USAGE-GUIDE.md)
-- Demo design spec: https://github.com/surebeli/llm-hopper/blob/main/docs/plans/2026-05-19-hopper-plugin-demo-spec.md
-- Essay (pending): publishes 2026-06-15 → 2026-06-29 window
+Apache-2.0. See [LICENSE](LICENSE).
