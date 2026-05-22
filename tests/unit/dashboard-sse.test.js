@@ -80,6 +80,38 @@ test('dashboard exposes seven SSE subscription routes', async () => {
   }
 });
 
+test('progress SSE route streams events arrays to a client subscriber', async () => {
+  const hub = createSseHub({ heartbeatMs: 0 });
+  const app = createApp({ dev: true, sseHub: hub });
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolveListen) => server.once('listening', resolveListen));
+  const { port } = server.address();
+  const controller = new AbortController();
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/events/progress/T-PROG`, { signal: controller.signal });
+    const reader = response.body.getReader();
+    let text = '';
+    while (!text.includes('event: connected')) {
+      text += new TextDecoder().decode((await reader.read()).value);
+    }
+    hub.publish('progress/T-PROG', 'progress', {
+      channel: 'progress/T-PROG',
+      taskId: 'T-PROG',
+      events: [{ seq: 1, task_id: 'T-PROG', message: 'queued' }],
+    });
+    while (!text.includes('\nevent: progress\n')) {
+      text += new TextDecoder().decode((await reader.read()).value);
+    }
+    const json = text.split('\nevent: progress\n')[1].match(/data: (.*)\n/)[1];
+    assert.deepEqual(JSON.parse(json).events.map((event) => event.seq), [1]);
+  } finally {
+    controller.abort();
+    await closeServer(server);
+    hub.close();
+  }
+});
+
 test('watcher maps chokidar events to SSE channels', async () => {
   const hopperDir = 'F:\\repo\\.hopper';
   const events = [];
