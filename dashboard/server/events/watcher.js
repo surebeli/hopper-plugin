@@ -96,6 +96,7 @@ function taskIdFromHandoff(filePath) {
     .replace(/-output$/, '');
 }
 
+/** Only valid for *-output.log paths; mapFileEvent handles *-progress.log before calling this. */
 export function taskIdFromLog(filePath) {
   return basename(filePath, '.log').replace(/-output$/, '');
 }
