@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   flexRender,
@@ -8,7 +8,7 @@ import {
   type Row,
 } from '@tanstack/react-table';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { fetchQueue, queryKeys } from '@/lib/api';
@@ -27,8 +27,11 @@ const columns: ColumnDef<Task>[] = [
 
 export function QueueTable({ rows: providedRows }: { rows?: Task[] }) {
   const { id: routeTaskId } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [keyboardSelectedId, setKeyboardSelectedId] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
   const { data = [], isLoading, isError } = useQuery({
     queryKey: queryKeys.queue,
     queryFn: fetchQueue,
@@ -46,24 +49,60 @@ export function QueueTable({ rows: providedRows }: { rows?: Task[] }) {
     });
   }, [data, providedRows]);
 
-  const table = useReactTable({ data: sortedRows, columns, getCoreRowModel: getCoreRowModel() });
+  const visibleRows = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return sortedRows;
+    return sortedRows.filter((row) => [row.id, row.taskType, row.vendor || '', row.brief].some((value) => value.toLowerCase().includes(needle)));
+  }, [search, sortedRows]);
+  const selectedId = routeTaskId || keyboardSelectedId || visibleRows[0]?.id;
+  const table = useReactTable({ data: visibleRows, columns, getCoreRowModel: getCoreRowModel() });
   const groups = useMemo(() => {
     const rows = table.getRowModel().rows;
     return statusOrder
       .map((status) => ({ status, rows: rows.filter((row) => row.original.status === status) }))
       .filter((group) => group.rows.length > 0);
-  }, [sortedRows, table]);
+  }, [visibleRows, table]);
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+      if (event.key !== 'j' && event.key !== 'k' && event.key !== 'Enter') return;
+      if (visibleRows.length === 0) return;
+      if (event.key === 'Enter') {
+        if (selectedId) {
+          event.preventDefault();
+          navigate(`/task/${selectedId}`);
+        }
+        return;
+      }
+      event.preventDefault();
+      const nextId = nextQueueSelectionId(visibleRows, selectedId, event.key === 'j' ? 1 : -1);
+      setKeyboardSelectedId(nextId);
+      if (location.pathname.startsWith('/task/')) navigate(`/task/${nextId}`);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [location.pathname, navigate, selectedId, visibleRows]);
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between gap-3">
         <CardTitle>Queue</CardTitle>
+        <input
+          aria-label="Search queue"
+          className="h-7 w-56 rounded-sm border border-border bg-background px-2 font-mono text-xs text-foreground outline-none focus:border-primary"
+          data-queue-search
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="search"
+          value={search}
+        />
       </CardHeader>
       <CardContent className="p-0">
         {isLoading && !providedRows ? <div className="p-3 font-mono text-sm text-muted-foreground">[··· ] loading queue</div> : null}
         {isError ? <div className="p-3 font-mono text-sm text-destructive">queue request failed</div> : null}
         {!isLoading && sortedRows.length === 0 ? <div className="p-3 font-mono text-sm text-muted-foreground">[··· ] queue empty</div> : null}
-        {sortedRows.length > 0 ? (
+        {!isLoading && sortedRows.length > 0 && visibleRows.length === 0 ? <div className="p-3 font-mono text-sm text-muted-foreground">no matching tasks</div> : null}
+        {visibleRows.length > 0 ? (
           <Table className="table-fixed font-mono">
             <TableHeader>
               {table.getHeaderGroups().map((headerGroup) => (
@@ -83,10 +122,13 @@ export function QueueTable({ rows: providedRows }: { rows?: Task[] }) {
                   <FragmentGroup
                     key={group.status}
                     group={group}
-                    selectedId={routeTaskId}
+                    selectedId={selectedId}
                     collapsed={isCollapsed}
                     onToggle={() => setCollapsed((next) => ({ ...next, [group.status]: !isCollapsed }))}
-                    onSelect={(taskId) => navigate(`/task/${taskId}`)}
+                    onSelect={(taskId) => {
+                      setKeyboardSelectedId(taskId);
+                      navigate(`/task/${taskId}`);
+                    }}
                   />
                 );
               })}
@@ -96,6 +138,14 @@ export function QueueTable({ rows: providedRows }: { rows?: Task[] }) {
       </CardContent>
     </Card>
   );
+}
+
+export function nextQueueSelectionId(rows: Task[], currentId: string | null | undefined, delta: 1 | -1) {
+  if (rows.length === 0) return '';
+  const currentIndex = rows.findIndex((row) => row.id === currentId);
+  const fallback = delta > 0 ? 0 : rows.length - 1;
+  const nextIndex = currentIndex === -1 ? fallback : Math.min(rows.length - 1, Math.max(0, currentIndex + delta));
+  return rows[nextIndex].id;
 }
 
 function FragmentGroup({

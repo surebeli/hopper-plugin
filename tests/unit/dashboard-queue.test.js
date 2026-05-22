@@ -98,13 +98,15 @@ test('dashboard queue route returns parsed queue rows', async () => {
 });
 
 test('QueueTable renders fixed-height rows and selected primary bar', async () => {
-  const { QueueTable } = await vite.ssrLoadModule('/src/components/QueueTable.tsx');
+  const { QueueTable, nextQueueSelectionId } = await vite.ssrLoadModule('/src/components/QueueTable.tsx');
   const rows = [
     { id: 'T-WEB-A', taskType: 'code-impl', status: 'pending', depends: [], priority: 'normal', brief: 'Build table', vendor: 'codex' },
     { id: 'T-WEB-B', taskType: 'code-review-adversarial', status: 'in-progress', depends: [], priority: 'high', brief: 'Review table', vendor: null },
   ];
   const html = renderWithProviders(React.createElement(QueueTable, { rows }), '/task/T-WEB-A', '/task/:id');
 
+  assert.equal(nextQueueSelectionId(rows, 'T-WEB-A', 1), 'T-WEB-B');
+  assert.equal(nextQueueSelectionId(rows, 'T-WEB-B', -1), 'T-WEB-A');
   assert.match(html, /T-WEB-A/);
   assert.match(html, /code-review-adversarial/);
   assert.match(html, /hover:bg-muted\/40/);
@@ -112,6 +114,15 @@ test('QueueTable renders fixed-height rows and selected primary bar', async () =
   assert.match(html, /h-8/);
   assert.match(html, /ID/);
   assert.match(html, /Vendor/);
+  assert.match(html, /Search queue/);
+});
+
+test('App shortcutDestination maps g-chord routes', async () => {
+  const { shortcutDestination } = await vite.ssrLoadModule('/src/App.tsx');
+  assert.equal(shortcutDestination('q'), '/');
+  assert.equal(shortcutDestination('v'), '/vendors');
+  assert.equal(shortcutDestination('c'), '/cost');
+  assert.equal(shortcutDestination('x'), null);
 });
 
 test('StatusPill maps five statuses to glyph and color classes', async () => {

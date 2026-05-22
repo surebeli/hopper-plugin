@@ -126,6 +126,17 @@ test('probeErrorMessage formats vendor mutation failures', async () => {
   assert.equal(probeErrorMessage(new Error('network down'), 'codex'), 'probe codex failed: network down');
 });
 
+test('ErrorBoundary exposes dashboard error copy', async () => {
+  const { ErrorBoundary, errorDialogCopy } = await vite.ssrLoadModule('/src/components/ErrorBoundary.tsx');
+  const state = ErrorBoundary.getDerivedStateFromError(new Error('boom'));
+  const copy = errorDialogCopy(new Error('boom'));
+
+  assert.equal(state.error.message, 'boom');
+  assert.equal(copy.title, 'Dashboard error');
+  assert.equal(copy.message, 'boom');
+  assert.equal(copy.action, 'Reload page');
+});
+
 test('renderMarkdown outputs table, code line numbers, list, and link markup', async () => {
   const { renderMarkdown } = await vite.ssrLoadModule('/src/components/TaskDrawer.tsx');
   const html = renderMarkdown([
