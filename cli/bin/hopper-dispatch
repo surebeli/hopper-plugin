@@ -27,6 +27,7 @@ import {
   hoursSince,
 } from '../src/background.js';
 import { readProgressEvents } from '../src/progress.js';
+import { notify } from '../src/notify.js';
 import { watchFile, unwatchFile, readFileSync, existsSync, openSync, readSync, closeSync, statSync, readdirSync } from 'node:fs';
 import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -713,7 +714,15 @@ function terminalPayload(handoffDir, outputMdPath, fm) {
   };
 }
 
-function runWatchEvents(hopperDir, { once = false } = {}) {
+export function runWatchEvents(
+  hopperDir,
+  {
+    once = false,
+    notifyFn = notify,
+    writeLine = (line) => console.log(line),
+    exitFn = (code) => process.exit(code),
+  } = {},
+) {
   const handoffDir = join(hopperDir, 'handoffs');
   const watched = new Set();
   const lastSeenSeq = new Map();
@@ -725,7 +734,7 @@ function runWatchEvents(hopperDir, { once = false } = {}) {
     stopped = true;
     if (scanTimer) clearInterval(scanTimer);
     for (const outputMdPath of watched) unwatchFile(outputMdPath);
-    if (code !== null) process.exit(code);
+    if (code !== null) exitFn(code);
   }
 
   function maybeEmit(outputMdPath) {
@@ -746,7 +755,13 @@ function runWatchEvents(hopperDir, { once = false } = {}) {
     if (previousSeq !== undefined && previousSeq >= seq) return;
 
     lastSeenSeq.set(taskId, seq);
-    console.log(JSON.stringify(terminalPayload(handoffDir, outputMdPath, fm)));
+    const payload = terminalPayload(handoffDir, outputMdPath, fm);
+    writeLine(JSON.stringify(payload));
+    notifyFn({
+      title: `hopper: ${taskId}`,
+      message: `${fm.adapter || 'unknown'} → ${fm.status}${fm.duration_ms ? ` (${(fm.duration_ms / 1000).toFixed(1)}s)` : ''}`,
+      taskId,
+    }).catch(() => {});
     if (once) cleanup(0);
   }
 
@@ -770,6 +785,7 @@ function runWatchEvents(hopperDir, { once = false } = {}) {
   scanTimer = setInterval(scanOutputs, WATCH_EVENTS_INTERVAL_MS);
   process.once('SIGINT', () => cleanup(0));
   process.once('SIGTERM', () => cleanup(0));
+  return () => cleanup();
 }
 
 /**
@@ -1211,7 +1227,9 @@ function runModels(target) {
   }
 }
 
-main().catch((err) => {
-  console.error(`Fatal: ${err.message}`);
-  process.exit(1);
-});
+if (process.argv[1] && resolve(process.argv[1]) === __filename) {
+  main().catch((err) => {
+    console.error(`Fatal: ${err.message}`);
+    process.exit(1);
+  });
+}
