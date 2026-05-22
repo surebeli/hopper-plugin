@@ -26,6 +26,7 @@ import {
   isAlive,
   hoursSince,
 } from '../src/background.js';
+import { readProgressEvents } from '../src/progress.js';
 import { watchFile, unwatchFile, readFileSync, existsSync, openSync, readSync, closeSync, statSync } from 'node:fs';
 import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -47,6 +48,7 @@ function printUsage() {
   console.log('  hopper-dispatch <task-id> --model <name>        Override vendor model (e.g. gpt-5.5, claude-opus-4-7)');
   console.log('  hopper-dispatch <task-id> --reasoning <level>   Override reasoning effort (low|medium|high|xhigh)');
   console.log('  hopper-dispatch --watch <task-id>               Tail-follow a background job until exit');
+  console.log('  hopper-dispatch --progress <task-id>            Show background task phase + recent progress events');
   console.log('  hopper-dispatch --result <task-id>              Print completed task result (verdict body + log tail) to stdout');
   console.log('  hopper-dispatch --jobs                          List all in-progress background jobs');
   console.log('  hopper-dispatch --reap                          Re-classify stale (>24h or dead-PID) jobs as orphaned');
@@ -184,6 +186,16 @@ async function main() {
     await runWatch(hopperDir, taskId);
     return;
   }
+  const progressIdx = args.indexOf('--progress');
+  if (progressIdx !== -1) {
+    const taskId = args[progressIdx + 1];
+    if (!taskId || taskId.startsWith('-')) {
+      console.error('Error: --progress requires a task-id.');
+      process.exit(2);
+    }
+    runProgress(hopperDir, taskId);
+    return;
+  }
   const resultIdx = args.indexOf('--result');
   if (resultIdx !== -1) {
     const taskId = args[resultIdx + 1];
@@ -272,7 +284,7 @@ async function main() {
  */
 function parseDispatchArgs(args) {
   const META_FLAGS = new Set(['--help', '-h', '--version', '-v', '--smoke', '--status',
-    '--task-types', '--vendors', '--resolve', '--watch', '--jobs', '--reap',
+    '--task-types', '--vendors', '--resolve', '--watch', '--progress', '--jobs', '--reap',
     '--check', '--capabilities', '--probe', '--models']);
   const VALUE_FLAGS = new Set(ALLOWED_DISPATCH_VALUE_FLAGS);
   const BARE_FLAGS = new Set(ALLOWED_DISPATCH_FLAGS);
@@ -578,6 +590,88 @@ function runReap(hopperDir) {
   }
   console.log(`Reaped ${reaped.length} job(s) to status=orphaned:`);
   for (const id of reaped) console.log(`  - ${id}`);
+}
+
+function pathFromFrontmatter(handoffDir, value, fallbackName) {
+  if (!value) return join(handoffDir, fallbackName);
+  if (value.startsWith('./')) return join(handoffDir, value.slice(2));
+  if (value.includes('/') || value.includes('\\')) return resolve(handoffDir, value);
+  return join(handoffDir, value);
+}
+
+function formatMs(ms) {
+  if (!Number.isFinite(ms)) return 'n/a';
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s (${ms}ms)`;
+}
+
+function progressEventMeta(event) {
+  const meta = [];
+  if (event.status) meta.push(`status=${event.status}`);
+  if (event.adapter_status) meta.push(`adapter_status=${event.adapter_status}`);
+  if (event.exit_code !== undefined) meta.push(`exit_code=${event.exit_code}`);
+  if (event.duration_ms !== undefined) meta.push(`duration_ms=${event.duration_ms}`);
+  return meta.length > 0 ? ` [${meta.join(' ')}]` : '';
+}
+
+function runProgress(hopperDir, taskId) {
+  try { validateTaskId(taskId); }
+  catch (err) { console.error(`Error: ${err.message}`); process.exit(2); }
+
+  const handoffDir = join(hopperDir, 'handoffs');
+  const outputMdPath = join(handoffDir, `${taskId}-output.md`);
+  if (!existsSync(outputMdPath)) {
+    console.error(`Error: no output file at ${outputMdPath}. Has this task been dispatched?`);
+    process.exit(1);
+  }
+
+  let fm;
+  try { fm = readFrontmatter(outputMdPath); }
+  catch (err) { console.error(`Error reading frontmatter: ${err.message}`); process.exit(1); }
+
+  let events = [];
+  try { events = readProgressEvents({ hopperDir, taskId, limit: 5 }); }
+  catch (err) { console.error(`Error reading progress events: ${err.message}`); process.exit(1); }
+
+  const now = Date.now();
+  const startMs = Date.parse(fm.start_time || '');
+  const endMs = Date.parse(fm.end_time || '');
+  const elapsedMs = Number.isFinite(startMs)
+    ? (Number.isFinite(endMs) ? endMs - startMs : now - startMs)
+    : NaN;
+  const durationMs = Number.isFinite(fm.duration_ms) ? fm.duration_ms : elapsedMs;
+  const rawLogPath = pathFromFrontmatter(handoffDir, fm.raw_log || fm.log, `${taskId}-output.log`);
+  const progressLogPath = pathFromFrontmatter(handoffDir, fm.progress_log, `${taskId}-progress.log`);
+
+  console.log(`=== ${taskId} - PROGRESS ===`);
+  console.log(`Task:          ${taskId}`);
+  console.log(`Vendor:        ${fm.adapter || 'unknown'}`);
+  console.log(`Status:        ${fm.status || 'unknown'}`);
+  console.log(`Phase:         ${fm.phase || fm.status || 'unknown'}`);
+  console.log(`PID:           ${fm.pid || 'n/a'}${fm.pid ? ` (${isAlive(fm.pid) ? 'alive' : 'not alive'})` : ''}`);
+  console.log(`Started:       ${fm.start_time || 'n/a'}`);
+  if (fm.end_time) console.log(`Ended:         ${fm.end_time}`);
+  console.log(`Elapsed:       ${formatMs(elapsedMs)}`);
+  if (fm.status !== 'in-progress') console.log(`Duration:      ${formatMs(durationMs)}`);
+  console.log(`Last progress: ${fm.last_progress || '(none)'}`);
+  if (fm.last_progress_at) console.log(`Last update:   ${fm.last_progress_at}`);
+  console.log(`Progress seq:  ${fm.progress_seq ?? '(none)'}`);
+  console.log(`Terminal:      ${fm.terminal_event_emitted ? 'yes' : 'no'}`);
+  console.log('');
+  console.log('Paths:');
+  console.log(`  Output:      ${outputMdPath}`);
+  console.log(`  Raw log:     ${rawLogPath}`);
+  console.log(`  Progress:    ${progressLogPath}`);
+  console.log('');
+  console.log('Recent events:');
+  if (events.length === 0) {
+    console.log('  (none)');
+  } else {
+    for (const event of events) {
+      const marker = event.terminal ? ' terminal' : '';
+      console.log(`  #${event.seq} ${event.ts} ${event.phase}/${event.kind}${marker}: ${event.message}${progressEventMeta(event)}`);
+    }
+  }
 }
 
 /**
