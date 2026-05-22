@@ -329,6 +329,72 @@ Per audit pack above. 30min floor (was 120s — the most aggressively misaligned
 
 Per audit pack above. Phase 6c adds `knownInstallPaths` so agy resolves to `~/AppData/Local/agy/bin/agy.exe` even when PATH doesn't include that dir. WARNING: if user hasn't OAuth-authed agy interactively, will hit silent-auth-fail (empty stdout, exit 0; adapter detects via log inspection).
 
+## T-PROG-R07-RESEARCH-codex (R07 OS notification research dogfood)
+
+- Task-type: code-impl
+- Vendor: codex
+- Reasoning: xhigh
+- Priority: high
+- Scope: research only; no source edits
+- Dispatch: `hopper-dispatch T-PROG-R07-RESEARCH-codex --background --reasoning xhigh`
+
+### Context
+
+v1.1 R07 adds an OS-level toast helper for `hopper-dispatch --watch-events`.
+This is the wake surface for hosts without native session wake, especially
+Codex CLI and standalone shells. The implementation must remain best-effort:
+toast failures and timeouts must never affect stdout JSONL or watcher exit.
+
+### Assignment
+
+Research native toast invocation idioms for Windows, macOS, and Linux:
+PowerShell BurntToast, `System.Windows.Forms` MessageBox fallback,
+`osascript -e 'display notification ...'`, and `notify-send`. Focus on shell
+quoting, injection prevention, spawn timeout behavior, and headless failure
+modes. Keep recommendations directly usable for `cli/src/notify.js`.
+
+### Output
+
+Write `.hopper/handoffs/T-PROG-R07-RESEARCH-codex-output.md` with:
+
+- Summary in <= 200 words
+- Recommended command shapes for the three platforms
+- Quoting / escaping rules and one injection test case
+- Timeout / failure handling notes
+- One implementation recommendation for the R07 executor
+
+## T-PROG-R07-REVIEW-opencode (R07 adversarial review dogfood)
+
+- Task-type: code-review-adversarial
+- Vendor: opencode
+- Priority: high
+- Scope: read-only review after R07 commits exist
+- Dispatch: `hopper-dispatch T-PROG-R07-REVIEW-opencode --background`
+
+### Context
+
+R07 adds `cli/src/notify.js` and wires it into `hopper-dispatch --watch-events`.
+The helper is allowed to spawn platform-native notification commands only; it
+must not add dependencies, mutate caller exit status, or touch v1.0 frozen
+progress/background/runner code.
+
+### Assignment
+
+After the R07 commits land, review the diff and tests adversarially. Focus on
+shell injection escaping across platforms, `HOPPER_NOTIFY=0`, spawn timeout and
+kill behavior, best-effort error swallowing, one-notification-per-terminal
+event, and red lines: no dashboard/commands/monitors/hosts changes, no package
+dependency changes, and no retry/fallback vendor logic.
+
+### Output
+
+Write `.hopper/handoffs/T-PROG-R07-REVIEW-opencode-output.md` with:
+
+- Verdict: PASS | PASS_WITH_NOTES | REWORK
+- Findings ordered by P0/P1/P2
+- Evidence from commit diff and focused tests
+- One-line recommendation for R07 closeout reviewer
+
 ## T-PROG-R14-RESEARCH (R14 dashboard tail research dogfood)
 
 - Task-type: code-impl
