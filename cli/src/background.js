@@ -19,6 +19,7 @@ import {
 } from 'node:fs';
 import { resolve, dirname, basename, join, sep } from 'node:path';
 import { validateTaskId } from './validation.js';
+import { appendProgressEvent, progressLogPath } from './progress.js';
 
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/;
 
@@ -244,11 +245,13 @@ export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, run
   const handoffDir = join(hopperDir, 'handoffs');
   const outputMdPath = join(handoffDir, `${taskId}-output.md`);
   const logPath = outputMdPath.replace(/\.md$/, '.log');
+  const progressPath = progressLogPath(outputMdPath);
   const lockPath = join(handoffDir, `${taskId}.dispatching`);
 
   // Per codex Phase 5 audit P1 #3: enforce path safety BEFORE preflight write.
   assertPathSafe(outputMdPath, hopperDir);
   assertPathSafe(logPath, hopperDir);
+  assertPathSafe(progressPath, hopperDir);
 
   // Ensure handoffs/ exists before we try the atomic lock.
   if (!existsSync(handoffDir)) mkdirSync(handoffDir, { recursive: true });
@@ -340,6 +343,18 @@ export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, run
   }
 
   const startTime = new Date().toISOString();
+  const initialProgress = appendProgressEvent({
+    hopperDir,
+    taskId,
+    event: {
+      vendor: adapterName,
+      phase: 'starting',
+      kind: 'lifecycle',
+      message: 'Background task queued.',
+      source: 'runner',
+      terminal: false,
+    },
+  });
 
   // Seed frontmatter BEFORE spawn. PID will be patched in after spawn returns.
   writeFrontmatter(outputMdPath, {
@@ -352,6 +367,14 @@ export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, run
     exit_code: null,
     duration_ms: null,
     mode: 'background',
+    phase: initialProgress.phase,
+    last_progress_at: initialProgress.ts,
+    last_progress: initialProgress.message,
+    progress_seq: initialProgress.seq,
+    progress_log: `./${basename(progressPath)}`,
+    raw_log: `./${basename(logPath)}`,
+    vendor_session_id: null,
+    terminal_event_emitted: false,
     host_native: hostNative,
     session_id: null,
     log: `./${basename(logPath)}`,

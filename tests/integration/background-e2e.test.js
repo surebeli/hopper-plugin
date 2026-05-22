@@ -119,6 +119,16 @@ test('spawnDetached writes initial in-progress frontmatter + PID + start_time', 
     assert.ok(fm.start_time);
     assert.ok(fm.log);
     assert.match(fm.log, /\.log$/);
+    assert.equal(fm.phase, 'starting');
+    assert.equal(fm.last_progress, 'Background task queued.');
+    assert.equal(fm.progress_seq, 1);
+    assert.equal(fm.progress_log, './T-spawn-seed-progress.log');
+    assert.equal(fm.raw_log, './T-spawn-seed-output.log');
+    assert.equal(fm.vendor_session_id, null);
+    assert.equal(fm.terminal_event_emitted, false);
+    assert.ok(fm.last_progress_at);
+    assert.ok(existsSync(result.outputMdPath.replace(/-output\.md$/, '-progress.log')),
+      'background dispatch must create a progress log sidecar');
 
     // PID assertion: either the wrapper PID we recorded (if frontmatter
     // patch raced and won) OR null (if runner finished and flipped before
@@ -320,4 +330,3 @@ test('F2 + F3: spawnDetached releases lock after PID seeded', async () => {
     rmSync(tmp, { recursive: true, force: true });
   }
 });
-

@@ -83,6 +83,37 @@ test('readFrontmatter returns _body=full text when no frontmatter', () => {
   }
 });
 
+test('readFrontmatter remains compatible with old background output without progress fields', () => {
+  const { tmp } = makeTmpHopper();
+  try {
+    const path = join(tmp, 'x.md');
+    writeFileSync(path, [
+      '---',
+      'task_id: T-old',
+      'adapter: codex',
+      'status: in-progress',
+      'pid: 123',
+      'mode: background',
+      '---',
+      '# old output',
+      '',
+    ].join('\n'), 'utf-8');
+
+    const fm = readFrontmatter(path);
+    assert.equal(fm.task_id, 'T-old');
+    assert.equal(fm.status, 'in-progress');
+    assert.equal(fm.last_progress_at, undefined);
+    assert.equal(fm.last_progress, undefined);
+    assert.equal(fm.progress_seq, undefined);
+    assert.equal(fm.progress_log, undefined);
+    assert.equal(fm.raw_log, undefined);
+    assert.equal(fm.vendor_session_id, undefined);
+    assert.equal(fm.terminal_event_emitted, undefined);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('writeFrontmatter writes atomically + roundtrips', () => {
   const { tmp } = makeTmpHopper();
   try {
