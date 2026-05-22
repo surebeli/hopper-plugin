@@ -56,7 +56,7 @@
 | **NFR-002** | SSE 增量推送延迟 | < 1s（log append → 浏览器渲染） |
 | **NFR-003** | 后台 Node 进程内存 | < 100 MB（10 task / 1MB log 规模） |
 | **NFR-004** | Vite dev server 冷启动 | < 2s，HMR < 200ms |
-| **NFR-005** | Prod bundle 大小（client） | gzipped < 200 KB |
+| **NFR-005** | Prod bundle main chunk（首屏加载） | gzipped < 200 KB；lazy chunks 单独不计入此阈值，但总 lazy chunks 累计也应 < 250 KB（防止首屏后 prefetch 爆炸） |
 | **NFR-006** | 单测覆盖率（server 模块） | ≥ 70%，沿用 `node --test` |
 | **NFR-007** | Windows + macOS + Linux 三平台跑通 | CI 暂不强制，本机 Windows 11 必须可跑 |
 
@@ -124,7 +124,7 @@
     `docs/sidequests/web-dashboard/handoffs/T-WEB-XX-output.md` + `.log` + 截图等
     doc 资产；**禁止**夹带源码、配置或依赖变更。消息推荐
     `[T-WEB-XX] add handoff evidence`
-  - ≥ 3 个 commit / 单 task 视为 rework 触发；不 `git push`、不 `--amend`、不 `--no-verify`
+  - ≥ 3 个 commit / 单 task 视为 rework 触发，**例外**：在下游 task 集成测试中发现的 hotfix 可以用原 task 的 prefix 追加第 3 个 src commit（每个 originating task 累计 ≤ 3 commits）。messaging 推荐 `[T-WEB-XX] <verb> <hotfix description>` 形式，便于 audit 追溯。不 `git push`、不 `--amend`、不 `--no-verify`
   - 单 commit 路线（实现 + 产出合并）仍然合法且推荐；2-commit 拆分是允许的优化，不是强制
 - 新增依赖必须在 §B.3 白名单内；超出白名单需在 commit body justify
 
@@ -827,3 +827,4 @@ framer-motion @react-spring/web gsap lottie-react
 | v2.1.1 | 2026-05-22 | §3.3 patch — codify "impl + handoff-artifacts" 2-commit split per task。源于 T-WEB-03 review F1：executor 在 T-WEB-03 用 2 commits（`b0785da` impl + `425549d` handoff），文字 spec 说"一个 commit"但 split 实际改善了 impl-commit 的 diff 聚焦度与审计可追溯性。新约束：(a) 最多 2 commit/task；(b) 都带 `[T-WEB-XX]` prefix；(c) 第二个 commit 必须**纯 doc-only**（仅 `T-WEB-XX-output.md/.log/截图`，不夹源码/依赖）；(d) 单 commit 路线仍合法且推荐。 |
 | v2.1.2 | 2026-05-22 | §4.3 patch — Task drawer 宽度从 `480px` 改为 `min(720px, calc(100vw - 16px))`。源于 T-WEB-04 review F2：480px 实际塞不下 13 字段 frontmatter 表 + markdown body（含表格 / 代码块）；executor 用 760px 落地但未在 deviations 披露。720px 是承载内容的实际下限，clamp 保证移动端不溢出。Spec 与现实对齐，约束 reviewer 在合理上限内不必判 rework。同时强化"必须去掉 SheetOverlay"措辞，明确实施手段。 |
 | v2.1.3 | 2026-05-22 | §6 T-WEB-06 验收 #2 文字修正 — 把 stale 对比命令从 `--status` 改为 `--models <vendor>`。源于 T-WEB-06 review F1：executor 实施时发现 `--status` 仅输出 queue 摘要不含 vendor cache，实际 stale marker 由 `--models` / `--capabilities` 输出。Spec 与现实对齐。 |
+| v2.1.4 | 2026-05-22 | 收尾 patch — (a) §2.2 NFR-005 改为 main chunk 口径，lazy 不计；(b) §3.3 加入"下游 task 集成测试发现的 hotfix 可作为第 3 commit 用原 task prefix"carve-out。源于 T-WEB-08 review F1+F2。Sidequest closeout 同步发布 SIDEQUEST-COMPLETE.md。 |
