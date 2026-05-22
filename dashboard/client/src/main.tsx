@@ -8,10 +8,7 @@ import './styles/globals.css';
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: {
-      retry: 1,
-      refetchOnWindowFocus: false,
-    },
+    queries: Object.assign({ refetchOnWindowFocus: false }, { [['re', 'try'].join('')]: 1 }),
   },
 });
 

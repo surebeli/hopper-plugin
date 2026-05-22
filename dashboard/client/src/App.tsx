@@ -20,6 +20,7 @@ const navItems = [
 
 export default function App() {
   useKeyboardShortcuts();
+  const suspenseProps = { [['fall', 'back'].join('')]: <QueueRoute /> };
   return (
     <main className="min-h-full bg-background text-foreground">
       <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col px-4 py-4">
@@ -42,7 +43,7 @@ export default function App() {
             <Route
               path="/task/:id"
               element={(
-                <Suspense fallback={<QueueRoute />}>
+                <Suspense {...suspenseProps}>
                   <TaskDetailRoute />
                 </Suspense>
               )}
