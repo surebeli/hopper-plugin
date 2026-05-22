@@ -9,17 +9,20 @@ import markdownLanguage from 'highlight.js/lib/languages/markdown';
 import typescript from 'highlight.js/lib/languages/typescript';
 import { useNavigate } from 'react-router-dom';
 import { LiveLog } from '@/components/LiveLog';
+import { ProgressTimeline, relativeTime } from '@/components/ProgressTimeline';
+import { StatusPill } from '@/components/StatusPill';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
 import { fetchTask, queryKeys } from '@/lib/api';
 import { useSSE } from '@/lib/sse';
-import type { FrontmatterValue, TaskDetail } from '@/lib/types';
+import type { FrontmatterValue, TaskDetail, TaskStatus } from '@/lib/types';
 
 export const baseFrontmatterFields = [
   'task_id',
   'adapter',
   'status',
+  'phase',
   'pid',
   'start_time',
   'end_time',
@@ -29,6 +32,13 @@ export const baseFrontmatterFields = [
   'host_native',
   'session_id',
   'log',
+  'progress_log',
+  'raw_log',
+  'last_progress',
+  'last_progress_at',
+  'progress_seq',
+  'terminal_event_emitted',
+  'vendor_session_id',
   'started_by_pid',
 ] as const;
 export const frontmatterFields = baseFrontmatterFields;
@@ -78,6 +88,7 @@ export function TaskDrawer({ id }: { id: string }) {
           <SheetTitle>{id || 'task detail'}</SheetTitle>
           <SheetDescription>frontmatter and output body</SheetDescription>
         </SheetHeader>
+        <TaskStatusStrip frontmatter={data?.frontmatter || {}} />
         <TaskDetailPanel detail={data} id={id} isError={isError} isLoading={isLoading} />
       </SheetContent>
     </Sheet>
@@ -108,6 +119,7 @@ export function TaskDetailPanel({
     <Tabs defaultValue="output">
       <TabsList>
         <TabsTrigger value="output">Output</TabsTrigger>
+        <TabsTrigger value="progress">Progress</TabsTrigger>
         <TabsTrigger value="live-log">Live log</TabsTrigger>
         <TabsTrigger value="frontmatter">Frontmatter</TabsTrigger>
       </TabsList>
@@ -117,6 +129,9 @@ export function TaskDetailPanel({
           dangerouslySetInnerHTML={{ __html: bodyHtml || '<p class="text-muted-foreground">—</p>' }}
         />
       </TabsContent>
+      <TabsContent value="progress" className="flex">
+        <ProgressTimeline id={id || detail?.id || ''} />
+      </TabsContent>
       <TabsContent value="live-log" className="flex">
         <LiveLog id={id || detail?.id || ''} />
       </TabsContent>
@@ -124,6 +139,33 @@ export function TaskDetailPanel({
         <FrontmatterTable frontmatter={detail?.frontmatter || {}} />
       </TabsContent>
     </Tabs>
+  );
+}
+
+export function TaskStatusStrip({ frontmatter = {} }: { frontmatter?: TaskDetail['frontmatter'] }) {
+  const status = statusValue(frontmatter.status);
+  const phase = formatValue(frontmatter.phase);
+  const last = formatValue(frontmatter.last_progress);
+  const lastAt = typeof frontmatter.last_progress_at === 'string' ? frontmatter.last_progress_at : '';
+  const terminal = typeof frontmatter.terminal_event_emitted === 'boolean'
+    ? (frontmatter.terminal_event_emitted ? 'yes' : 'no')
+    : '—';
+
+  return (
+    <div className="flex items-center gap-3 border-b border-border px-3 py-2 font-mono text-xs text-muted-foreground">
+      <span className="flex items-center gap-1">
+        <span>Status:</span>
+        {status ? <StatusPill status={status} /> : <span>—</span>}
+      </span>
+      <span>Phase: <span className="text-foreground">{phase}</span></span>
+      <span className="min-w-0 flex-1 truncate" title={last === '—' ? undefined : last}>
+        Last: <span className="text-foreground">{truncate(last, 80)}</span>
+        {lastAt ? <span> ({relativeTime(lastAt)})</span> : null}
+      </span>
+      <span>
+        Terminal: <span className={terminal === 'yes' ? 'text-primary' : 'text-foreground'}>{terminal}</span>
+      </span>
+    </div>
   );
 }
 
@@ -149,6 +191,16 @@ export function renderMarkdown(source: string) {
 function formatValue(value: FrontmatterValue | undefined) {
   if (value === null || value === undefined || value === '') return '—';
   return String(value);
+}
+
+function statusValue(value: FrontmatterValue | undefined): TaskStatus | null {
+  return value === 'pending' || value === 'in-progress' || value === 'done' || value === 'failed' || value === 'removed'
+    ? value
+    : null;
+}
+
+function truncate(value: string, limit: number) {
+  return value.length > limit ? `${value.slice(0, limit - 1)}…` : value;
 }
 
 function withLineNumbers(html: string) {
