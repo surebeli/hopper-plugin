@@ -64,7 +64,7 @@ export function rotateProgressLogIfNeeded(path, maxBytes = PROGRESS_LOG_MAX_BYTE
 
 export function readProgressEvents({ hopperDir, taskId, limit = Infinity }) {
   const path = pathForTask(hopperDir, taskId);
-  const events = readEventsFromPath(path);
+  const events = [...readEventsFromPath(`${path}.1`), ...readEventsFromPath(path)];
   return Number.isFinite(limit) ? events.slice(-limit) : events;
 }
 

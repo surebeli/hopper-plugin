@@ -122,7 +122,36 @@ test('nextProgressSeq stays monotonic across rotate', () => {
 
     assert.equal(afterRotate.seq, 4);
     assert.equal(nextProgressSeq({ hopperDir, taskId }), 5);
-    assert.deepEqual(readProgressEvents({ hopperDir, taskId }).map((item) => item.seq), [4]);
+    assert.deepEqual(readProgressEvents({ hopperDir, taskId }).map((item) => item.seq), [1, 2, 3, 4]);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('readProgressEvents returns recent events across rotated and current logs', () => {
+  const { tmp, hopperDir } = setup();
+  try {
+    const taskId = 'T-rotate-read';
+    const event = (message) => ({
+      vendor: 'codex',
+      phase: 'running',
+      kind: 'lifecycle',
+      message,
+      source: 'runner',
+      terminal: false,
+    });
+
+    for (const message of ['one', 'two', 'three', 'four']) {
+      appendProgressEvent({ hopperDir, taskId, event: event(message) });
+    }
+    const logPath = join(hopperDir, 'handoffs', `${taskId}-progress.log`);
+    assert.equal(rotateProgressLogIfNeeded(logPath, 1), true);
+    for (const message of ['five', 'six', 'seven']) {
+      appendProgressEvent({ hopperDir, taskId, event: event(message) });
+    }
+
+    const events = readProgressEvents({ hopperDir, taskId, limit: 5 });
+    assert.deepEqual(events.map((item) => item.seq), [3, 4, 5, 6, 7]);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
