@@ -232,12 +232,47 @@ hopper-dispatch --watch T-PLUGIN-05a   # tail-follow until done
 hopper-dispatch --jobs                 # one-line summary of all in-progress
 ```
 
+## Progress and completion notifications (v1.0 / v1.1)
+
+Background jobs write three observable artifacts under `.hopper/handoffs/`:
+
+| Artifact | Purpose | Reader |
+|---|---|---|
+| `<task-id>-output.md` | authoritative frontmatter state (`status`, `phase`, `progress_seq`, `last_progress`, `terminal_event_emitted`) + final handoff body | `--watch`, `--progress`, dashboard |
+| `<task-id>-progress.log` | JSONL sidecar with lifecycle/progress/terminal events | `--progress`, dashboard `/api/task/:id/progress` |
+| `<task-id>-output.log` | raw vendor stdout/stderr capture | `--watch`, dashboard Live log |
+
+Useful commands:
+
+```bash
+hopper-dispatch --progress T-PLUGIN-05a          # snapshot: phase, latest frontmatter fields, recent progress events
+hopper-dispatch --watch-events                   # stream terminal events as stdout JSONL
+hopper-dispatch --watch-events --once            # emit first terminal event then exit
+```
+
+`--watch-events` emits one JSONL line per terminal frontmatter transition and, in v1.1, also attempts a best-effort OS toast. Set `HOPPER_NOTIFY=0` to suppress OS toast while keeping stdout JSONL. Toast delivery is non-authoritative: if the platform tool is missing or times out, the JSONL stream and job state are unchanged.
+
+Host behavior:
+
+| Host path | Completion wake behavior | Pull fallback |
+|---|---|---|
+| Claude Code plugin | Native session wake via repo-root `monitors/monitors.json` running `hopper-dispatch --watch-events` | `/hopper:result <id>` or `hopper-dispatch --progress <id>` |
+| Codex CLI wrapper | No native hopper-terminal wake; OS toast only if a monitor/watch-events process is running | `hopper-dispatch --progress <id>` / `--result <id>` |
+| OpenCode wrapper path | No native `session.idle` wake; behaves like standalone | `--progress <id>` / `--result <id>` |
+| OpenCode native plugin path | OpenCode `session.idle` for opencode-only async jobs | dashboard / frontmatter |
+| Standalone shell | OS toast + stdout JSONL from a user-run `--watch-events` process | `--watch <id>` / `--progress <id>` |
+| Dashboard | SSE push from the same progress/output files; no OS toast | browser refresh / API snapshot |
+
 ### Async caveats
 
 - **Concurrent dispatch protection**: trying to dispatch a task that's already `in-progress` with an alive PID → refused. Use `--watch` to follow or wait. After 24h, the job is auto-classified as `orphaned` and re-dispatch is allowed (PID-reuse mitigation).
 - **stdin-piping adapters**: not supported in background mode (would require a pipe surviving parent exit — fragile cross-platform). Codex/Kimi/OpenCode/Copilot/Agy all use argv-mode prompts, so this doesn't affect existing vendors.
 - **Heterogeneous-only**: invoking from Codex CLI host to dispatch back to codex vendor triggers a soft warning. Set `HOPPER_ALLOW_SAME_VENDOR=1` to suppress.
 - **No auto-retry**: failed jobs stay `status: failed`. User re-dispatches manually if desired. Spec §14.10 forbids any retry logic in this layer.
+
+### Test-only environment variables
+
+`HOPPER_TEST_ONLY_*` environment variables are reserved for automated tests and should not be set in production shells. In particular, `HOPPER_TEST_ONLY_TIMEOUT_MS` shortens runner timeout only for timeout-path tests; leaving it unset preserves normal adapter timeouts.
 
 ## Self-diagnostics (Phase 6a discovery API)
 
