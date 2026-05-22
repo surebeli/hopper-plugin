@@ -1,0 +1,145 @@
+T-WEB-07 verification log
+Date: 2026-05-22T09:33:12+08:00
+Commit under test: 80359ec [T-WEB-07] implement cost log view
+
+0) Spec prerequisite
+
+Commit:
+  ac74941 [T-WEB-06.5] spec sync — stale comparison command
+
+Evidence:
+  docs/sidequests/web-dashboard/SPEC.md §6 T-WEB-06 acceptance now references
+  hopper-dispatch --models <vendor> for stale comparison.
+
+1) Targeted unit tests
+
+Command:
+  node --test tests/unit/dashboard-cost.test.js
+
+Result:
+  # tests 4
+  # pass 4
+  # fail 0
+  # skipped 0
+  # duration_ms 300.9361
+
+Covered:
+  - parse estimated tokens and dollars
+  - aggregate by inferred vendor
+  - tolerate old audit rows and missing optional columns
+  - route returns parsed COST-LOG.md
+
+2) Dashboard unit suite
+
+Command:
+  node --test tests/unit/dashboard-*.test.js
+
+Result:
+  # tests 25
+  # pass 25
+  # fail 0
+  # skipped 0
+  # duration_ms 4711.9495
+
+3) Live COST-LOG parse + manual sum
+
+Command:
+  node --input-type=module -e "parseCostLog('.hopper/COST-LOG.md') + independent reduce"
+
+Result:
+  totals:
+    rows:      31
+    tokensIn:  221200
+    tokensOut: 15660
+    approxUsd: 1.0521
+  manual:
+    rows:      31
+    tokensIn:  221200
+    tokensOut: 15660
+    approxUsd: 1.0521
+  top vendors:
+    codex:    $0.99,   202000/15550 tokens, count 8
+    copilot:  $0.06,   18900/30 tokens, count 1
+    kimi:     $0.001,  150/20 tokens, count 2
+    gemini:   $0.001,  50/10 tokens, count 1
+    opencode: $0.0001, 100/50 tokens, count 1
+
+4) Browser/CDP proof
+
+Target:
+  http://127.0.0.1:7817/cost
+
+Result:
+  {
+    "screenshot": "F:\\workspace\\ai\\hopper-plugin\\docs\\sidequests\\web-dashboard\\handoffs\\T-WEB-07-screenshot.png",
+    "bars": 6,
+    "rows": 31,
+    "hasTotals": true,
+    "chartImports": []
+  }
+
+5) Clean full test + build
+
+Command:
+  git -c core.autocrlf=false worktree add --detach %TEMP%/hopper-tweb07-lf-* HEAD
+  git -C <worktree> config core.autocrlf false
+  git -C <worktree> reset --hard HEAD
+  npm ci --ignore-scripts
+  npm test
+  npm run dashboard:build
+  git worktree remove <worktree>
+
+Result:
+  npm test:
+    # tests 368
+    # pass 353
+    # fail 0
+    # skipped 15
+    # duration_ms 15690.8798
+
+  npm run dashboard:build:
+    dist/index.html                         gzip:   0.27 kB
+    dist/assets/index-DA__wa9w.css          gzip:   4.65 kB
+    dist/assets/TaskDetailRoute-DDyn_1BY.js gzip:  65.12 kB
+    dist/assets/index-HPyPFWc6.js           gzip: 117.59 kB
+    total gzip: 187.63 kB
+
+6) Hard checks
+
+Chart grep:
+  rg 'recharts|chart\\.js|d3|echarts|visx|victory|plotly' dashboard package.json tests/unit/dashboard-cost.test.js
+  => no chart library imports
+
+Package scan:
+  {
+    "bannedHits": [],
+    "badRadix": []
+  }
+
+Dashboard source scan:
+  rg "executeDispatch|refetchInterval|0\\.0\\.0\\.0" dashboard/server dashboard/client/src cli/bin/hopper-dashboard package.json
+  => no executeDispatch/refetchInterval/non-loopback hits
+
+Forbidden flag literal scan:
+  rg "\"--background\"|'--background'|\"--dispatch\"|'--dispatch'" dashboard/server dashboard/client/src
+  => no forbidden spawn flag literals in dashboard source
+
+Emoji scan:
+  no emoji pictographs in changed UI files
+
+Design token hashes:
+  globals.css SHA256 789046FC976A7FC387D77BD64AC6EADA56014AEBF3EC9E31CC621454C423462C
+  tailwind.config.ts SHA256 D0E34ECFADDF4F035C3AA551530A57C41DFB36530F5AC5295D24FA34E299704C
+
+Line counts:
+  dashboard/server/lib/cost.js:167
+  dashboard/server/routes/cost.js:21
+  dashboard/server/index.js:126
+  dashboard/client/src/components/CostBars.tsx:98
+  dashboard/client/src/lib/api.ts:36
+  dashboard/client/src/lib/types.ts:73
+  tests/unit/dashboard-cost.test.js:81
+
+Audit:
+  npm audit --omit=dev --json
+  prod vulnerabilities: total 0
