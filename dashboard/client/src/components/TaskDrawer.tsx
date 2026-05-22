@@ -129,7 +129,7 @@ export function TaskDetailPanel({
           dangerouslySetInnerHTML={{ __html: bodyHtml || '<p class="text-muted-foreground">—</p>' }}
         />
       </TabsContent>
-      <TabsContent value="progress" className="flex">
+      <TabsContent value="progress" className="flex flex-col overflow-auto p-3">
         <ProgressTimeline id={id || detail?.id || ''} />
       </TabsContent>
       <TabsContent value="live-log" className="flex">

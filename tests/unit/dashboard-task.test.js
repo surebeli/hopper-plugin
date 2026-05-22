@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { QueryClient } from '@tanstack/react-query';
 import { createServer as createViteServer } from 'vite';
 import { createApp } from '../../dashboard/server/index.js';
 
@@ -204,6 +205,16 @@ test('TaskDetailPanel includes Progress tab between Output and Live log', async 
   assert.ok(html.indexOf('Progress') < html.indexOf('Live log'));
 });
 
+test('Progress tab content owns overflow for long timelines', async () => {
+  const { TaskDetailPanel } = await vite.ssrLoadModule('/src/components/TaskDrawer.tsx');
+  const html = renderToStaticMarkup(React.createElement(TaskDetailPanel, {
+    detail: { id: 'T-PROG', frontmatter: {}, body: '# Done' },
+    id: 'T-PROG',
+  }));
+
+  assert.match(html, /id="[^"]+-content-progress"[^>]+class="[^"]*overflow-auto[^"]*"/);
+});
+
 test('Progress timeline rows limit to five events and pin terminal event first', async () => {
   const { ProgressTimelineRows } = await vite.ssrLoadModule('/src/components/ProgressTimeline.tsx');
   const events = [
@@ -233,6 +244,24 @@ test('Progress timeline rows truncate long messages and keep full title', async 
 
   assert.match(html, new RegExp(`title="${longMessage}"`));
   assert.doesNotMatch(html, new RegExp(`>${longMessage}<`));
+});
+
+test('Progress SSE payload merge updates query cache and dedups by seq', async () => {
+  const { mergeProgressEvents } = await vite.ssrLoadModule('/src/components/ProgressTimeline.tsx');
+  const client = new QueryClient();
+  client.setQueryData(taskProgressKey('T-PROG'), {
+    id: 'T-PROG',
+    events: [progressEvent(1, 'running', 'lifecycle', 'one'), progressEvent(2, 'running', 'lifecycle', 'two')],
+  });
+
+  client.setQueryData(taskProgressKey('T-PROG'), (prev) => mergeProgressEvents('T-PROG', prev, [
+    progressEvent(2, 'running', 'lifecycle', 'two updated'),
+    progressEvent(3, 'done', 'terminal', 'done', true),
+  ]));
+
+  const cache = client.getQueryData(taskProgressKey('T-PROG'));
+  assert.deepEqual(cache.events.map((event) => event.seq), [1, 2, 3]);
+  assert.equal(cache.events[1].message, 'two updated');
 });
 
 test('FrontmatterTable renders sidequest dynamic fields after base fields', async () => {
@@ -267,6 +296,10 @@ function progressEvent(seq, phase, kind, message, terminal = false, extra = {}) 
     terminal,
     ...extra,
   };
+}
+
+function taskProgressKey(id) {
+  return ['task', id, 'progress'];
 }
 
 test('LiveLog reconnect delay uses exponential backoff with cap', async () => {
