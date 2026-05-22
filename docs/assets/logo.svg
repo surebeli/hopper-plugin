@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="Hopper logo">
+  <rect width="256" height="256" rx="48" fill="#08110f"/>
+  <path d="M62 72h60c24 0 42 16 42 38 0 21-18 37-42 37H98v39H62V72Zm36 29v18h22c7 0 12-3 12-9s-5-9-12-9H98Z" fill="#f7faf9"/>
+  <path d="M122 146c34-5 55-21 66-49" fill="none" stroke="#3DDC97" stroke-width="14" stroke-linecap="round"/>
+  <path d="M191 92l1 38 31-23-32-15Z" fill="#3DDC97"/>
+  <path d="M67 199h122" stroke="#3DDC97" stroke-width="8" stroke-linecap="round" opacity="0.75"/>
+</svg>
