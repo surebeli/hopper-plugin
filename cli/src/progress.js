@@ -35,18 +35,7 @@ function pathForTask(hopperDir, taskId) {
   return join(hopperDir, 'handoffs', `${taskId}-progress.log`);
 }
 
-export function rotateProgressLogIfNeeded(path, maxBytes = PROGRESS_LOG_MAX_BYTES) {
-  if (!existsSync(path)) return false;
-  const stat = statSync(path);
-  if (stat.size <= maxBytes) return false;
-  const rotated = `${path}.1`;
-  if (existsSync(rotated)) unlinkSync(rotated);
-  renameSync(path, rotated);
-  return true;
-}
-
-export function readProgressEvents({ hopperDir, taskId, limit = Infinity }) {
-  const path = pathForTask(hopperDir, taskId);
+function readEventsFromPath(path) {
   if (!existsSync(path)) return [];
 
   const events = [];
@@ -60,14 +49,32 @@ export function readProgressEvents({ hopperDir, taskId, limit = Infinity }) {
       // Ignore corrupt or partially-written lines; progress is best-effort.
     }
   }
+  return events;
+}
+
+export function rotateProgressLogIfNeeded(path, maxBytes = PROGRESS_LOG_MAX_BYTES) {
+  if (!existsSync(path)) return false;
+  const stat = statSync(path);
+  if (stat.size <= maxBytes) return false;
+  const rotated = `${path}.1`;
+  if (existsSync(rotated)) unlinkSync(rotated);
+  renameSync(path, rotated);
+  return true;
+}
+
+export function readProgressEvents({ hopperDir, taskId, limit = Infinity }) {
+  const path = pathForTask(hopperDir, taskId);
+  const events = readEventsFromPath(path);
   return Number.isFinite(limit) ? events.slice(-limit) : events;
 }
 
 export function nextProgressSeq({ hopperDir, taskId }) {
-  const events = readProgressEvents({ hopperDir, taskId });
+  const path = pathForTask(hopperDir, taskId);
   let maxSeq = 0;
-  for (const event of events) {
-    if (Number.isInteger(event.seq) && event.seq > maxSeq) maxSeq = event.seq;
+  for (const candidate of [`${path}.1`, path]) {
+    for (const event of readEventsFromPath(candidate)) {
+      if (Number.isInteger(event.seq) && event.seq > maxSeq) maxSeq = event.seq;
+    }
   }
   return maxSeq + 1;
 }

@@ -98,6 +98,36 @@ test('rotateProgressLogIfNeeded rotates to .1 when size exceeds limit', () => {
   }
 });
 
+test('nextProgressSeq stays monotonic across rotate', () => {
+  const { tmp, hopperDir } = setup();
+  try {
+    const taskId = 'T-rotate-seq';
+    const event = (message) => ({
+      vendor: 'codex',
+      phase: 'running',
+      kind: 'lifecycle',
+      message,
+      source: 'runner',
+      terminal: false,
+    });
+
+    appendProgressEvent({ hopperDir, taskId, event: event('one') });
+    appendProgressEvent({ hopperDir, taskId, event: event('two') });
+    appendProgressEvent({ hopperDir, taskId, event: event('three') });
+
+    const logPath = join(hopperDir, 'handoffs', `${taskId}-progress.log`);
+    assert.equal(rotateProgressLogIfNeeded(logPath, 1), true);
+
+    const afterRotate = appendProgressEvent({ hopperDir, taskId, event: event('four') });
+
+    assert.equal(afterRotate.seq, 4);
+    assert.equal(nextProgressSeq({ hopperDir, taskId }), 5);
+    assert.deepEqual(readProgressEvents({ hopperDir, taskId }).map((item) => item.seq), [4]);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('appendProgressEvent rejects unsafe task ids before writing', () => {
   const { tmp, hopperDir } = setup();
   try {
