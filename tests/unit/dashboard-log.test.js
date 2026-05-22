@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ansiToHtml, createAnsiState } from '../../dashboard/client/src/lib/ansi.ts';
 import { createApp } from '../../dashboard/server/index.js';
-import { createLogTailer, readLogChunk } from '../../dashboard/server/lib/tail.js';
+import { createLogTailer, MAX_INITIAL_CHUNK, readLogChunk } from '../../dashboard/server/lib/tail.js';
 
 function makeHopper() {
   const root = mkdtempSync(join(tmpdir(), 'hopper-dashboard-log-'));
@@ -31,6 +31,20 @@ test('readLogChunk reads only bytes after offset', () => {
   assert.equal(second.chunk, '');
   assert.equal(third.chunk, 'again\n');
   assert.equal(third.offset, first.nextOffset);
+});
+
+test('readLogChunk caps initial read to 1MB tail', () => {
+  const hopperDir = makeHopper();
+  const logPath = join(hopperDir, 'handoffs', 'T-CAP-output.log');
+  const content = `${'a'.repeat(MAX_INITIAL_CHUNK + 128)}tail`;
+  writeFileSync(logPath, content);
+
+  const chunk = readLogChunk({ hopperDir, id: 'T-CAP', offset: 0 });
+
+  assert.equal(chunk.chunk.length, MAX_INITIAL_CHUNK);
+  assert.equal(chunk.offset, content.length - MAX_INITIAL_CHUNK);
+  assert.equal(chunk.nextOffset, content.length);
+  assert.equal(chunk.chunk.endsWith('tail'), true);
 });
 
 test('log tailer readNew advances offset without duplicates', () => {

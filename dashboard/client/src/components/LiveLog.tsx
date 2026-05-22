@@ -8,6 +8,11 @@ interface LogChunk {
 }
 
 const MAX_LINES = 10000;
+const MAX_RETRIES = 10;
+
+export function logReconnectDelay(retryCount: number) {
+  return Math.min(500 * 2 ** retryCount, 30_000);
+}
 
 export function LiveLog({ id }: { id: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -15,6 +20,7 @@ export function LiveLog({ id }: { id: string }) {
   const offsetRef = useRef(0);
   const ansiRef = useRef(createAnsiState());
   const reconnectRef = useRef<number | null>(null);
+  const retryCountRef = useRef(0);
   const [offset, setOffset] = useState(0);
   const [follow, setFollow] = useState(true);
   const [state, setState] = useState('connecting');
@@ -25,6 +31,7 @@ export function LiveLog({ id }: { id: string }) {
     container.textContent = '';
     lineRef.current = null;
     offsetRef.current = 0;
+    retryCountRef.current = 0;
     ansiRef.current = createAnsiState();
     setFollow(true);
     let closed = false;
@@ -33,16 +40,21 @@ export function LiveLog({ id }: { id: string }) {
     const connect = () => {
       setState('connecting');
       source = new EventSource(`/events/log/${encodeURIComponent(id)}?offset=${offsetRef.current}`);
-      source.onopen = () => setState('live');
+      source.onopen = () => {
+        retryCountRef.current = 0;
+        setState('live');
+      };
       source.onerror = () => {
         source?.close();
-        if (!closed && reconnectRef.current == null) {
+        if (!closed && reconnectRef.current == null && retryCountRef.current < MAX_RETRIES) {
+          const delay = logReconnectDelay(retryCountRef.current);
+          retryCountRef.current += 1;
           reconnectRef.current = window.setTimeout(() => {
             reconnectRef.current = null;
             connect();
-          }, 500);
+          }, delay);
         }
-        setState('retrying');
+        setState(retryCountRef.current >= MAX_RETRIES ? 'disconnected' : 'retrying');
       };
       source.addEventListener('log', (event) => {
         try {
@@ -69,7 +81,7 @@ export function LiveLog({ id }: { id: string }) {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-8 items-center justify-between border-b border-border px-3 font-mono text-xs text-muted-foreground">
         <span>offset {offset}</span>
-        <span>{follow ? 'follow' : 'locked'} · {state}</span>
+        <span>{state === 'disconnected' ? '[ × ] lost connection - reload page' : `${follow ? 'follow' : 'locked'} · ${state}`}</span>
       </div>
       <div
         ref={containerRef}

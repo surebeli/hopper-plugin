@@ -1,6 +1,8 @@
 import { closeSync, existsSync, openSync, readSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
+export const MAX_INITIAL_CHUNK = 1024 * 1024;
+
 export function createTailState(offset = 0) {
   return { offset };
 }
@@ -33,17 +35,19 @@ export function readLogChunk({ hopperDir, id, offset = 0 } = {}) {
 
   const size = statSync(path).size;
   const start = Number.isFinite(offset) && offset >= 0 && offset <= size ? Math.floor(offset) : 0;
-  const length = size - start;
+  const requestedLength = size - start;
+  const effectiveStart = requestedLength > MAX_INITIAL_CHUNK ? size - MAX_INITIAL_CHUNK : start;
+  const length = size - effectiveStart;
   if (length <= 0) return emptyChunk(id, size);
 
   const fd = openSync(path, 'r');
   try {
     const buffer = Buffer.allocUnsafe(length);
-    const bytesRead = readSync(fd, buffer, 0, length, start);
+    const bytesRead = readSync(fd, buffer, 0, length, effectiveStart);
     return {
       taskId: id,
-      offset: start,
-      nextOffset: start + bytesRead,
+      offset: effectiveStart,
+      nextOffset: effectiveStart + bytesRead,
       chunk: buffer.subarray(0, bytesRead).toString('utf8'),
     };
   } finally {

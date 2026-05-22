@@ -59,6 +59,16 @@ test('parseCostLogContent tolerates old audit rows and missing optional columns'
   assert.equal(result.rows[1].notes, '');
 });
 
+test('parseCostLogContent maps short unknown model names to unknown vendor', () => {
+  const result = parseCostLogContent([
+    '| Date | Task | Role | Model | Tokens In/Out | Approx $ | Tier | Notes |',
+    '|------|------|------|-------|---------------|----------|------|-------|',
+    '| 2026-05-22 | T-X | role | n/a | 1/1 | $0 | n/a | short model |',
+  ].join('\n'));
+
+  assert.equal(result.rows[0].vendor, 'unknown');
+});
+
 test('cost route returns parsed COST-LOG.md', async () => {
   const root = mkdtempSync(join(tmpdir(), 'hopper-dashboard-cost-'));
   const hopperDir = join(root, '.hopper');

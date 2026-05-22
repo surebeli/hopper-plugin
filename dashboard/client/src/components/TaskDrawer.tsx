@@ -16,7 +16,7 @@ import { fetchTask, queryKeys } from '@/lib/api';
 import { useSSE } from '@/lib/sse';
 import type { FrontmatterValue, TaskDetail } from '@/lib/types';
 
-export const frontmatterFields = [
+export const baseFrontmatterFields = [
   'task_id',
   'adapter',
   'status',
@@ -31,6 +31,12 @@ export const frontmatterFields = [
   'log',
   'started_by_pid',
 ] as const;
+export const frontmatterFields = baseFrontmatterFields;
+
+export function effectiveFrontmatterFields(frontmatter: Record<string, FrontmatterValue>) {
+  const dynamic = Object.keys(frontmatter).filter((field) => !baseFrontmatterFields.includes(field as typeof baseFrontmatterFields[number]));
+  return [...baseFrontmatterFields, ...dynamic];
+}
 
 hljs.registerLanguage('bash', bash);
 hljs.registerLanguage('js', javascript);
@@ -107,7 +113,7 @@ export function TaskDetailPanel({
       </TabsList>
       <TabsContent value="output" className="overflow-auto p-3">
         <div
-          className="font-mono text-sm leading-6 text-foreground [&_a]:text-primary [&_a]:underline [&_code]:rounded-sm [&_code]:bg-muted/50 [&_code]:px-1 [&_li]:ml-5 [&_ol]:list-decimal [&_p]:mb-3 [&_pre]:mb-3 [&_pre]:overflow-auto [&_pre]:rounded-sm [&_pre]:border [&_pre]:border-border [&_pre]:bg-background [&_pre]:p-2 [&_table]:mb-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-border [&_th]:px-2 [&_th]:py-1 [&_ul]:list-disc [&_.hljs-line-code]:min-w-0 [&_.hljs-line-number]:select-none [&_.hljs-line-number]:pr-3 [&_.hljs-line-number]:text-right [&_.hljs-line-number]:text-muted-foreground [&_.hljs-line]:grid [&_.hljs-line]:grid-cols-[2rem_minmax(0,1fr)]"
+          className="markdown-body font-mono text-sm leading-6 text-foreground"
           dangerouslySetInnerHTML={{ __html: bodyHtml || '<p class="text-muted-foreground">—</p>' }}
         />
       </TabsContent>
@@ -125,7 +131,7 @@ export function FrontmatterTable({ frontmatter }: { frontmatter: TaskDetail['fro
   return (
     <Table className="font-mono text-xs">
       <TableBody>
-        {frontmatterFields.map((field) => (
+        {effectiveFrontmatterFields(frontmatter).map((field) => (
           <TableRow key={field} className="h-8">
             <TableCell className="h-8 w-40 text-muted-foreground">{field}</TableCell>
             <TableCell className="h-8 truncate text-foreground">{formatValue(frontmatter[field])}</TableCell>

@@ -94,6 +94,38 @@ test('TaskDetailPanel renders 13 frontmatter fields with missing-value fallback'
   assert.doesNotMatch(html, /undefined|null/);
 });
 
+test('FrontmatterTable renders sidequest dynamic fields after base fields', async () => {
+  const { FrontmatterTable, effectiveFrontmatterFields } = await vite.ssrLoadModule('/src/components/TaskDrawer.tsx');
+  const frontmatter = {
+    task_id: 'T-WEB-08',
+    status: 'done',
+    spec_version: '2.1.3',
+    review_status: 'pending',
+  };
+  const fields = effectiveFrontmatterFields(frontmatter);
+  const html = renderToStaticMarkup(React.createElement(FrontmatterTable, { frontmatter }));
+
+  assert.equal(fields.includes('spec_version'), true);
+  assert.equal(fields.includes('review_status'), true);
+  assert.equal(fields.indexOf('spec_version') > fields.indexOf('started_by_pid'), true);
+  assert.match(html, /spec_version/);
+  assert.match(html, /review_status/);
+  assert.match(html, /2\.1\.3/);
+});
+
+test('LiveLog reconnect delay uses exponential backoff with cap', async () => {
+  const { logReconnectDelay } = await vite.ssrLoadModule('/src/components/LiveLog.tsx');
+  assert.equal(logReconnectDelay(0), 500);
+  assert.equal(logReconnectDelay(1), 1000);
+  assert.equal(logReconnectDelay(6), 30000);
+  assert.equal(logReconnectDelay(20), 30000);
+});
+
+test('probeErrorMessage formats vendor mutation failures', async () => {
+  const { probeErrorMessage } = await vite.ssrLoadModule('/src/routes/VendorsRoute.tsx');
+  assert.equal(probeErrorMessage(new Error('network down'), 'codex'), 'probe codex failed: network down');
+});
+
 test('renderMarkdown outputs table, code line numbers, list, and link markup', async () => {
   const { renderMarkdown } = await vite.ssrLoadModule('/src/components/TaskDrawer.tsx');
   const html = renderMarkdown([

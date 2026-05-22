@@ -1,10 +1,18 @@
-import { useQuery } from '@tanstack/react-query';
+import { useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { fetchCost, queryKeys } from '@/lib/api';
+import { useSSE } from '@/lib/sse';
 import type { CostByVendor, CostRow } from '@/lib/types';
 
 export function CostBars() {
+  const queryClient = useQueryClient();
+  const refreshCost = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.cost });
+  }, [queryClient]);
+  useSSE('/events/cost', refreshCost);
   const { data, isError, isLoading } = useQuery({
     queryKey: queryKeys.cost,
     queryFn: fetchCost,
@@ -59,7 +67,7 @@ function CostBar({ row, max }: { row: CostByVendor; max: number }) {
     <div className="flex items-center gap-2 font-mono text-xs">
       <span className="w-24 truncate text-muted-foreground">{row.vendor}</span>
       <div className="h-4 flex-1 rounded-sm bg-muted/40" data-cost-bar={row.vendor}>
-        <div className="h-4 rounded-sm bg-primary" style={{ width: `${pct.toFixed(1)}%` }} />
+        <div className="h-4 rounded-sm bg-primary" style={{ width: pct > 0 ? `max(${pct.toFixed(1)}%, 2px)` : '0' }} />
       </div>
       <span className="w-20 text-right text-foreground">{formatUsd(row.approxUsd)}</span>
     </div>
@@ -89,7 +97,14 @@ function CostTable({ rows }: { rows: CostRow[] }) {
               <TableRow key={`${row.date}-${row.task}-${index}`} className="hover:bg-muted/40">
                 <TableCell className="overflow-hidden text-ellipsis whitespace-nowrap text-muted-foreground">{row.date}</TableCell>
                 <TableCell className="overflow-hidden text-ellipsis whitespace-nowrap text-foreground">{row.task}</TableCell>
-                <TableCell className="overflow-hidden text-ellipsis whitespace-nowrap text-muted-foreground">{row.vendor}</TableCell>
+                <TableCell className="overflow-hidden text-ellipsis whitespace-nowrap text-muted-foreground">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-block max-w-full truncate">{row.vendor}</span>
+                    </TooltipTrigger>
+                    <TooltipContent>{row.model}</TooltipContent>
+                  </Tooltip>
+                </TableCell>
                 <TableCell className="text-right text-muted-foreground">{(row.tokensIn + row.tokensOut).toLocaleString()}</TableCell>
                 <TableCell className="text-right text-foreground">{formatUsd(row.approxUsd)}</TableCell>
                 <TableCell className="overflow-hidden text-ellipsis whitespace-nowrap text-muted-foreground">{row.notes || row.model}</TableCell>

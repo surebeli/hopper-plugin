@@ -180,7 +180,8 @@ function inferVendor(model) {
 }
 
 function cleanVendor(value) {
-  return value.replace(/[^a-z0-9_-]/g, '') || 'unknown';
+  const cleaned = value.replace(/[^a-z0-9_-]/g, '');
+  return cleaned.length >= 3 ? cleaned : 'unknown';
 }
 
 function roundUsd(value) {

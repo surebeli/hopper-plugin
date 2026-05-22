@@ -105,3 +105,43 @@ test('probe action returns 409 while same vendor is already running', async () =
     await closeServer(server);
   }
 });
+
+test('probe action times out and kills hung child', async () => {
+  let killed = false;
+  const app = express();
+  app.use(express.json());
+  app.use('/api/action', createActionsRouter({
+    probeTimeoutMs: 5,
+    spawnProbeImpl: () => {
+      const child = new EventEmitter();
+      child.stdout = new PassThrough();
+      child.stderr = new PassThrough();
+      child.kill = () => {
+        killed = true;
+        child.emit('exit', null, 'SIGTERM');
+      };
+      return child;
+    },
+  }));
+  app.use((err, _req, res, _next) => {
+    res.status(err.status || 500).json({ error: err.message });
+  });
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolveListen) => server.once('listening', resolveListen));
+  const { port } = server.address();
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/action/probe`, {
+      body: JSON.stringify({ vendor: 'codex' }),
+      headers: { 'Content-Type': 'application/json' },
+      method: 'POST',
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 504);
+    assert.equal(body.error, 'probe timed out after 60s');
+    assert.equal(killed, true);
+  } finally {
+    await closeServer(server);
+  }
+});

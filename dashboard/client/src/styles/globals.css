@@ -32,3 +32,19 @@
 
 html, body, #root { height: 100%; background: hsl(var(--background)); color: hsl(var(--foreground)); }
 body { font-family: theme('fontFamily.sans'); font-size: 13px; line-height: 1.5; }
+
+@layer components {
+  .markdown-body p { @apply mb-3; }
+  .markdown-body a { @apply text-primary underline; }
+  .markdown-body table { @apply mb-3 w-full border-collapse; }
+  .markdown-body th,
+  .markdown-body td { @apply border border-border px-2 py-1; }
+  .markdown-body ul { @apply list-disc; }
+  .markdown-body ol { @apply list-decimal; }
+  .markdown-body li { @apply ml-5; }
+  .markdown-body code { @apply rounded-sm bg-muted/50 px-1; }
+  .markdown-body pre { @apply mb-3 overflow-auto rounded-sm border border-border bg-background p-2; }
+  .markdown-body .hljs-line { @apply grid grid-cols-[2rem_minmax(0,1fr)]; }
+  .markdown-body .hljs-line-number { @apply select-none pr-3 text-right text-muted-foreground; }
+  .markdown-body .hljs-line-code { @apply min-w-0; }
+}
