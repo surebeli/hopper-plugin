@@ -4,6 +4,7 @@
 import { spawn as defaultSpawn } from 'node:child_process';
 
 const NOTIFY_TIMEOUT_MS = 5000;
+let burntToastAvailable = null;
 
 /**
  * Best-effort OS-level toast notification.
@@ -45,16 +46,23 @@ export async function notify({
 }
 
 async function notifyWindows(payload, spawnImpl, timeoutMs) {
-  const burntToast = await runCommand(spawnImpl, 'powershell', [
-    '-NoProfile',
-    '-NonInteractive',
-    '-Command',
-    [
-      'Import-Module BurntToast -ErrorAction Stop;',
-      `New-BurntToastNotification -Text ${quotePowerShell(payload.title)},${quotePowerShell(payload.message)} -ErrorAction Stop`,
-    ].join(' '),
-  ], timeoutMs);
-  if (burntToast.ok) return { ok: true, platform: 'win32', mechanism: 'burnt-toast' };
+  let burntToast;
+  if (burntToastAvailable !== false) {
+    burntToast = await runCommand(spawnImpl, 'powershell', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      [
+        'Import-Module BurntToast -ErrorAction Stop;',
+        `New-BurntToastNotification -Text ${quotePowerShell(payload.title)},${quotePowerShell(payload.message)} -ErrorAction Stop`,
+      ].join(' '),
+    ], timeoutMs);
+    if (burntToast.ok) {
+      burntToastAvailable = true;
+      return { ok: true, platform: 'win32', mechanism: 'burnt-toast' };
+    }
+    if (burntToastAvailable === null) burntToastAvailable = false;
+  }
 
   const messageBox = await runCommand(spawnImpl, 'powershell', [
     '-NoProfile',
@@ -71,8 +79,12 @@ async function notifyWindows(payload, spawnImpl, timeoutMs) {
     ok: false,
     platform: 'win32',
     mechanism: 'unsupported',
-    error: messageBox.error || burntToast.error || 'notification command failed',
+    error: messageBox.error || burntToast?.error || 'notification command failed',
   };
+}
+
+export function _resetBurntToastCache() {
+  burntToastAvailable = null;
 }
 
 async function notifyMac(payload, spawnImpl, timeoutMs) {

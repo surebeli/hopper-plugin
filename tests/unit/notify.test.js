@@ -5,9 +5,10 @@ import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { EventEmitter } from 'node:events';
 
-import { notify, quoteAppleScript, quotePowerShell } from '../../cli/src/notify.js';
+import { _resetBurntToastCache, notify, quoteAppleScript, quotePowerShell } from '../../cli/src/notify.js';
 
 test('Windows: spawns PowerShell BurntToast command', async () => {
+  _resetBurntToastCache();
   const spawn = mockSpawn([{ code: 0 }]);
   const result = await notify({
     title: 'hopper: T-1',
@@ -24,6 +25,7 @@ test('Windows: spawns PowerShell BurntToast command', async () => {
 });
 
 test('Windows: falls through from BurntToast failure to MessageBox', async () => {
+  _resetBurntToastCache();
   const spawn = mockSpawn([{ code: 1, stderr: 'missing module' }, { code: 0 }]);
   const result = await notify({
     title: 'hopper: T-2',
@@ -37,6 +39,32 @@ test('Windows: falls through from BurntToast failure to MessageBox', async () =>
   assert.equal(spawn.calls.length, 2);
   assert.match(spawn.calls[1].args.join(' '), /System\.Windows\.Forms/);
   assert.match(spawn.calls[1].args.join(' '), /MessageBox/);
+});
+
+test('Windows: skips BurntToast after first unavailable result', async () => {
+  _resetBurntToastCache();
+  const firstSpawn = mockSpawn([{ code: 1, stderr: 'missing module' }, { code: 0 }]);
+  const first = await notify({
+    title: 'hopper: T-cache',
+    message: 'codex done',
+    _platform: 'win32',
+    _spawn: firstSpawn,
+  });
+  assert.equal(first.mechanism, 'powershell-mbox');
+  assert.equal(firstSpawn.calls.length, 2);
+
+  const secondSpawn = mockSpawn([{ code: 0 }]);
+  const second = await notify({
+    title: 'hopper: T-cache',
+    message: 'codex done again',
+    _platform: 'win32',
+    _spawn: secondSpawn,
+  });
+
+  assert.equal(second.mechanism, 'powershell-mbox');
+  assert.equal(secondSpawn.calls.length, 1);
+  assert.doesNotMatch(secondSpawn.calls[0].args.join(' '), /New-BurntToastNotification/);
+  assert.match(secondSpawn.calls[0].args.join(' '), /MessageBox/);
 });
 
 test('macOS: spawns osascript with escaped notification script', async () => {
