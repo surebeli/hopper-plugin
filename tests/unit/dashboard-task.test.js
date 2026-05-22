@@ -66,6 +66,66 @@ test('dashboard task route returns frontmatter and body', async () => {
   }
 });
 
+test('dashboard task progress route returns limited progress events in append order', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'hopper-dashboard-task-progress-'));
+  const handoffs = join(root, '.hopper', 'handoffs');
+  mkdirSync(handoffs, { recursive: true });
+  writeFileSync(join(handoffs, 'T-PROG-progress.log'), [
+    '{"seq":1,"task_id":"T-PROG","message":"one"}',
+    'malformed json',
+    '{"seq":2,"task_id":"T-PROG","message":"two"}',
+    '{"seq":3,"task_id":"T-PROG","message":"three"}',
+    '',
+  ].join('\n'));
+
+  const app = createApp({ dev: true, hopperDir: join(root, '.hopper') });
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolveListen) => server.once('listening', resolveListen));
+  const { port } = server.address();
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/task/T-PROG/progress?limit=2`);
+    const json = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(json.id, 'T-PROG');
+    assert.deepEqual(json.events.map((event) => event.seq), [2, 3]);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test('dashboard task progress route rejects unsafe task ids', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'hopper-dashboard-task-progress-unsafe-'));
+  mkdirSync(join(root, '.hopper', 'handoffs'), { recursive: true });
+  const app = createApp({ dev: true, hopperDir: join(root, '.hopper') });
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolveListen) => server.once('listening', resolveListen));
+  const { port } = server.address();
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/task/BAD..ID/progress`);
+    assert.equal(response.status, 400);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test('dashboard task progress route returns 404 when progress log is absent', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'hopper-dashboard-task-progress-missing-'));
+  mkdirSync(join(root, '.hopper', 'handoffs'), { recursive: true });
+  const app = createApp({ dev: true, hopperDir: join(root, '.hopper') });
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolveListen) => server.once('listening', resolveListen));
+  const { port } = server.address();
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/task/T-MISSING/progress`);
+    assert.equal(response.status, 404);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test('TaskDetailPanel renders 13 frontmatter fields with missing-value fallback', async () => {
   const { FrontmatterTable, frontmatterFields } = await vite.ssrLoadModule('/src/components/TaskDrawer.tsx');
   const detail = {

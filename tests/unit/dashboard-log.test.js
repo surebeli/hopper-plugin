@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, renameSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ansiToHtml, createAnsiState } from '../../dashboard/client/src/lib/ansi.ts';
@@ -57,6 +57,42 @@ test('log tailer readNew advances offset without duplicates', () => {
   assert.equal(tailer.readNew('T-TAIL').chunk, '');
   appendFileSync(logPath, 'two\n');
   assert.equal(tailer.readNew('T-TAIL').chunk, 'two\n');
+});
+
+test('log tailer resets offset when a file is truncated mid-stream', () => {
+  const hopperDir = makeHopper();
+  const logPath = join(hopperDir, 'handoffs', 'T-TRUNC-output.log');
+  const tailer = createLogTailer({ hopperDir });
+  writeFileSync(logPath, 'first\nsecond\n');
+
+  assert.equal(tailer.readNew('T-TRUNC').chunk, 'first\nsecond\n');
+  writeFileSync(logPath, 'new\n');
+  assert.equal(tailer.readNew('T-TRUNC').chunk, 'new\n');
+  assert.equal(tailer.readNew('T-TRUNC').chunk, '');
+});
+
+test('log tailer resets offset when the current file rotates', () => {
+  const hopperDir = makeHopper();
+  const logPath = join(hopperDir, 'handoffs', 'T-ROT-output.log');
+  const tailer = createLogTailer({ hopperDir });
+  writeFileSync(logPath, 'old\n');
+
+  assert.equal(tailer.readNew('T-ROT').chunk, 'old\n');
+  renameSync(logPath, `${logPath}.1`);
+  writeFileSync(logPath, 'new\n');
+
+  assert.equal(tailer.readNew('T-ROT').chunk, 'new\n');
+  assert.equal(tailer.readNew('T-ROT').chunk, '');
+});
+
+test('log tailer cold-start after rotate reads only the current file', () => {
+  const hopperDir = makeHopper();
+  const logPath = join(hopperDir, 'handoffs', 'T-COLD-output.log');
+  writeFileSync(`${logPath}.1`, 'rotated\n');
+  writeFileSync(logPath, 'current\n');
+
+  const tailer = createLogTailer({ hopperDir });
+  assert.equal(tailer.readNew('T-COLD').chunk, 'current\n');
 });
 
 test('SSE log route honors reconnect offset', async () => {

@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
 import { createApp, startServer } from '../../dashboard/server/index.js';
 import { createSseHub } from '../../dashboard/server/events/sse.js';
-import { createWatcher } from '../../dashboard/server/events/watcher.js';
+import { createWatcher, mapFileEvent, taskIdFromLog } from '../../dashboard/server/events/watcher.js';
 
 function fakeRes() {
   const res = new EventEmitter();
@@ -57,12 +57,12 @@ test('SSE hub supports retry, multi-client publish, and close', () => {
   assert.equal(second.ended, true);
 });
 
-test('dashboard exposes six SSE subscription routes', async () => {
+test('dashboard exposes seven SSE subscription routes', async () => {
   const app = createApp({ dev: true, sseHub: createSseHub({ heartbeatMs: 0 }) });
   const server = app.listen(0, '127.0.0.1');
   await new Promise((resolveListen) => server.once('listening', resolveListen));
   const { port } = server.address();
-  const paths = ['/events/queue', '/events/task/T-1', '/events/log/T-1', '/events/cost', '/events/agents', '/events/liveness'];
+  const paths = ['/events/queue', '/events/task/T-1', '/events/log/T-1', '/events/progress/T-1', '/events/cost', '/events/agents', '/events/liveness'];
 
   try {
     for (const path of paths) {
@@ -115,6 +115,57 @@ test('watcher maps chokidar events to SSE channels', async () => {
   assert.equal(mock.watcher.options.ignoreInitial, true);
   await watcher.close();
   assert.equal(mock.watcher.closed, true);
+});
+
+test('watcher maps progress logs to progress channel before output logs', () => {
+  const hopperDir = 'F:\\repo\\.hopper';
+  const progress = mapFileEvent(hopperDir, 'change', join(hopperDir, 'handoffs', 'T-PROG-progress.log'));
+  const output = mapFileEvent(hopperDir, 'change', join(hopperDir, 'handoffs', 'T-PROG-output.log'));
+
+  assert.equal(progress.channel, 'progress/T-PROG');
+  assert.equal(progress.event, 'progress');
+  assert.equal(progress.payload.taskId, 'T-PROG');
+  assert.equal(output.channel, 'log/T-PROG');
+  assert.equal(output.event, 'log');
+  assert.equal(taskIdFromLog(join(hopperDir, 'handoffs', 'T-PROG-output.log')), 'T-PROG');
+  assert.equal(taskIdFromLog(join(hopperDir, 'handoffs', 'T-PROG-progress.log')), 'T-PROG-progress');
+});
+
+test('watcher publishes parsed progress JSONL chunks from a dedicated tailer', async () => {
+  const hopperDir = 'F:\\repo\\.hopper';
+  const events = [];
+  const mock = createMockWatch();
+  const progressTailer = {
+    readNew(id) {
+      assert.equal(id, 'T-PROG');
+      return {
+        taskId: id,
+        offset: 0,
+        nextOffset: 96,
+        chunk: [
+          '{"seq":1,"task_id":"T-PROG","message":"one"}',
+          'not json',
+          '{"seq":2,"task_id":"T-PROG","terminal":true,"message":"done"}',
+          '',
+        ].join('\n'),
+      };
+    },
+  };
+  const watcher = createWatcher({
+    hopperDir,
+    hub: { publish: (channel, event, payload) => events.push({ channel, event, payload }) },
+    livenessIntervalMs: 0,
+    progressTailer,
+    watch: mock.watch,
+  });
+
+  mock.watcher.emit('all', 'change', join(hopperDir, 'handoffs', 'T-PROG-progress.log'));
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0].channel, 'progress/T-PROG');
+  assert.equal(events[0].event, 'progress');
+  assert.deepEqual(events[0].payload.events.map((event) => event.seq), [1, 2]);
+  await watcher.close();
 });
 
 test('startServer close shuts down watcher and SSE hub', async () => {
