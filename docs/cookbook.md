@@ -173,7 +173,7 @@ Every route eventually invokes the same dispatcher and reads the same `.hopper/A
 
 **Scenario**: Refresh per-machine model inventory before choosing a model override.
 **Hosts**: standalone, Claude Code through slash commands
-**Vendors involved**: codex, kimi, opencode, copilot, agy
+**Vendors involved**: codex, kimi, opencode, copilot, agy, grok
 
 ### Steps
 
@@ -238,7 +238,7 @@ hopper-dispatch --result T-PROG-STALE
 
 **Scenario**: Ask two vendors to review the same spec from different angles, then compare their handoff files.
 **Hosts**: standalone, Claude Code
-**Vendors involved**: codex, kimi, opencode, copilot, agy
+**Vendors involved**: codex, kimi, opencode, copilot, agy, grok
 
 ### Steps
 

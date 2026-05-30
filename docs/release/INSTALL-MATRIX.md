@@ -41,7 +41,7 @@ Or `npm link` from the repo root (uses the `bin` field in `package.json`).
 ```bash
 hopper-dispatch --version    # expect: 0.6.0-phase-6c
 hopper-dispatch --smoke      # expect: hopper standalone (CLI v0.6.0-phase-6c)
-hopper-dispatch --vendors    # expect: 5 adapters listed
+hopper-dispatch --vendors    # expect: 6 adapters listed
 ```
 
 ## Tier B — Claude Code
@@ -339,7 +339,7 @@ $ hopper-dispatch --capabilities codex
   Capability data stale after: 2026-08-21
 ```
 
-### Capability summary across all 5 vendors
+### Capability summary across all 6 vendors
 
 For quick reference (re-verify quarterly per each adapter's `staleAfter` date):
 
@@ -350,11 +350,13 @@ For quick reference (re-verify quarterly per each adapter's `staleAfter` date):
 | **opencode** | freeform (`<provider>/<model>`) | IGNORED | ✓ (per-machine session IDs; NOT cross-OS) | ✗ | ✓ |
 | **copilot** | freeform | IGNORED | partial (`--resume` picker; UNCONFIRMED ID arg) | ✗ | ✓ |
 | **agy** | IGNORED | IGNORED | UNCONFIRMED | ✗ (`--log-file` is diagnostic, not answer) | ✓ |
+| **grok** | freeform (`-m`; default `grok-build-0.1`) | IGNORED (no CLI flag) | ✓ (`-s` / `-r` / `-c`) | ✗ (stdout only) | ✓ (`--output-format streaming-json`) |
 
 **Honest gotchas surfaced by the capability data**:
 
-- Only **codex** honors `--reasoning`. Passing `--reasoning xhigh` to kimi/opencode/copilot/agy is silently ignored by their adapters.
-- Only **kimi / opencode / copilot** accept `--model`. Passing `--model X` to codex or agy is silently ignored.
+- Only **codex** honors `--reasoning`. Passing `--reasoning xhigh` to kimi/opencode/copilot/agy/grok is silently ignored by their adapters.
+- Only **kimi / opencode / copilot / grok** accept `--model`. Passing `--model X` to codex or agy is silently ignored.
+- **grok** has a binary-name collision: xAI's official "Grok Build" CLI and the third-party `superagent-ai/grok-cli` both install a binary named `grok`. The adapter targets the official one (`XAI_API_KEY`, `~/.grok/`); it never reads `GROK_API_KEY` (the third-party var). Authored from docs research, not yet live-dogfooded.
 - No vendor accepts BOTH `--model` and `--reasoning` in the current adapter set.
 - Hopper does NOT validate model names against `knownGood` — it stays freeform (validation regex is shell-safety only). Invalid models surface as vendor-side errors at dispatch.
 - **`knownGood` arrays are intentionally near-empty** (Phase 6a design correction per user feedback 2026-05-21): available models depend on YOUR vendor account + machine + subscription tier — opencode model catalog varies per provider auth, kimi varies per Moonshot account, copilot varies per Business/Enterprise tier, codex varies per ChatGPT entitlements. The adapter is NOT a model database. Run the vendor's own command to see what works on YOUR machine:

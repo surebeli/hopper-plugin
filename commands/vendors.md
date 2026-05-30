@@ -1,5 +1,5 @@
 ---
-description: List registered vendor adapters (codex, kimi, opencode, copilot, agy).
+description: List registered vendor adapters (codex, kimi, opencode, copilot, agy, grok).
 allowed-tools: Bash
 ---
 
@@ -11,6 +11,6 @@ Print the registered vendor adapters:
 node "$CLAUDE_PLUGIN_ROOT/cli/bin/hopper-dispatch" --vendors
 ```
 
-The dispatcher will print its own version banner and the registered adapter list. As of v0.6.0-phase-6c (spec v2.0.3), 5 functional vendors are registered: codex, kimi, opencode, copilot, agy.
+The dispatcher will print its own version banner and the registered adapter list. As of v0.6.0-phase-6c, 6 functional vendors are registered: codex, kimi, opencode, copilot, agy, grok.
 
 If a vendor is missing from this list but referenced in `.hopper/AGENTS.md`, dispatch will fail with `Unknown vendor: <name>` — flag this to the user and suggest checking the vendor name spelling in AGENTS.md (vendor names are normalized: trailing `-cli` and `_cli` are stripped).

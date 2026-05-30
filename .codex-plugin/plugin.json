@@ -16,12 +16,13 @@
     "protocol",
     "vendor-neutral",
     "codex",
+    "grok",
     "background-dispatch"
   ],
   "interface": {
     "displayName": "Hopper",
     "shortDescription": "Dispatch llm-hopper tasks from Codex and other AI CLI hosts.",
-    "longDescription": "Hopper is a thin plugin layer over the file-based llm-hopper protocol. It keeps state in .hopper markdown and JSONL files, dispatches task-typed work to Codex, Kimi, OpenCode, Copilot, and Agy vendor CLIs, and reports background progress through terminal events without adding a harness reaction core.",
+    "longDescription": "Hopper is a thin plugin layer over the file-based llm-hopper protocol. It keeps state in .hopper markdown and JSONL files, dispatches task-typed work to Codex, Kimi, OpenCode, Copilot, Agy, and Grok vendor CLIs, and reports background progress through terminal events without adding a harness reaction core.",
     "developerName": "surebeli (litianyi)",
     "category": "Coding",
     "capabilities": [

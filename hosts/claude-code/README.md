@@ -22,7 +22,7 @@ This is **Tier B** of the cross-host architecture:
 | `/hopper:dispatch <task-id> [--write] [--force]` | Dispatch a task; with `--write` also creates `.hopper/handoffs/<task-id>-output.md` |
 | `/hopper:status`        | Show queue summary (pending / in-progress / done / failed)                       |
 | `/hopper:smoke`         | Plugin host-lifecycle smoke test (Prong 1 verifier)                              |
-| `/hopper:vendors`       | List registered vendor adapters (codex, kimi, opencode, copilot, agy)            |
+| `/hopper:vendors`       | List registered vendor adapters (codex, kimi, opencode, copilot, agy, grok)      |
 
 Slash command source files: `commands/*.md` at the **repo root** (one prompt template per command).
 The completion monitor lives at `monitors/monitors.json` at the **repo root**.
