@@ -38,6 +38,10 @@ function normalizeHopperDir(path) {
 function collectSnapshot(hopperDir) {
   const byVendor = Object.fromEntries(VENDORS.map((vendor) => [vendor, 0]));
   const signals = { partial_write_orphans: 0, rotate_triggered: 0, non_codex_no_terminal: 0, empty_progress_log_with_done: 0 };
+  // Heterogeneity = host (HOPPER_HOST_VENDOR, recorded as host_native) != dispatched vendor.
+  // The core PMF signal per strategy doc: does anyone actually dispatch ACROSS vendors?
+  // host_unknown = standalone CLI or host that didn't set HOPPER_HOST_VENDOR (not counted in rate denominator).
+  const heterogeneity = { heterogeneous: 0, homogeneous: 0, host_unknown: 0, rate: null };
   const blocker_reasons = [];
   const handoffs = hopperDir ? join(hopperDir, 'handoffs') : null;
   const files = safeList(handoffs);
@@ -53,6 +57,13 @@ function collectSnapshot(hopperDir) {
     const status = String(fm.status || '');
     const terminal = fm.terminal_event_emitted === true;
     byVendor[vendor] += 1;
+    const host = String(fm.host_native || '').trim();
+    if (host && host !== 'null') {
+      if (host === String(fm.adapter || '')) heterogeneity.homogeneous += 1;
+      else heterogeneity.heterogeneous += 1;
+    } else {
+      heterogeneity.host_unknown += 1;
+    }
     if (!/^progress_log:/m.test(content)) continue;
     tasksV1Aware += 1;
     if (status === 'orphaned' && !terminal) signals.partial_write_orphans += 1;
@@ -62,11 +73,14 @@ function collectSnapshot(hopperDir) {
       blocker_reasons.push(`${taskId}: status=done but progress.log is missing or empty`);
     }
   }
+  const heteroDenom = heterogeneity.heterogeneous + heterogeneity.homogeneous;
+  heterogeneity.rate = heteroDenom > 0 ? Number((heterogeneity.heterogeneous / heteroDenom).toFixed(3)) : null;
   return {
     ts: new Date().toISOString(),
     hopper_dir: hopperDir ? resolve(hopperDir) : 'not found',
     totals: { tasks: outputFiles.length, tasks_v1_aware: tasksV1Aware, by_vendor: byVendor },
     signals,
+    heterogeneity,
     blocker: signals.empty_progress_log_with_done > 0,
     blocker_reasons,
   };
@@ -94,5 +108,7 @@ function appendMarkdown(path, snapshot) {
   if (path.includes(`${sep}.hopper${sep}`) || basename(path) === '.hopper') throw new Error('--append path must not be inside .hopper');
   const vendors = Object.entries(snapshot.totals.by_vendor).map(([k, v]) => `${k}: ${v}`).join(', ');
   const blocker = snapshot.signals.empty_progress_log_with_done > 0 ? ' BLOCKER' : '';
-  appendFileSync(path, `\n## Snapshot ${snapshot.ts}\n\nSource: \`${snapshot.hopper_dir}\`\n\n- Total tasks: ${snapshot.totals.tasks} (${vendors})\n- Partial-write orphans: ${snapshot.signals.partial_write_orphans}\n- Rotate triggered: ${snapshot.signals.rotate_triggered}\n- Non-Codex no terminal_event: ${snapshot.signals.non_codex_no_terminal}\n- Empty progress.log w/ done: ${snapshot.signals.empty_progress_log_with_done}${blocker}\n`, 'utf-8');
+  const het = snapshot.heterogeneity;
+  const hetRate = het.rate === null ? 'n/a (no host-tagged tasks)' : het.rate;
+  appendFileSync(path, `\n## Snapshot ${snapshot.ts}\n\nSource: \`${snapshot.hopper_dir}\`\n\n- Total tasks: ${snapshot.totals.tasks} (${vendors})\n- Heterogeneity rate: ${hetRate} (heterogeneous ${het.heterogeneous} / homogeneous ${het.homogeneous} / host-unknown ${het.host_unknown})\n- Partial-write orphans: ${snapshot.signals.partial_write_orphans}\n- Rotate triggered: ${snapshot.signals.rotate_triggered}\n- Non-Codex no terminal_event: ${snapshot.signals.non_codex_no_terminal}\n- Empty progress.log w/ done: ${snapshot.signals.empty_progress_log_with_done}${blocker}\n`, 'utf-8');
 }

@@ -93,6 +93,56 @@ test('--append writes Markdown entry with vendor counts', () => {
   }
 });
 
+test('heterogeneity: host_native vs adapter classifies het/hom/host-unknown and computes rate', () => {
+  const { tmp, hopperDir } = setup();
+  try {
+    // heterogeneous: dispatched from a codex host to a kimi vendor
+    writeOutput(hopperDir, 'T-HET', { task_id: 'T-HET', adapter: 'kimi', status: 'done', terminal_event_emitted: true, host_native: 'codex' });
+    writeProgress(hopperDir, 'T-HET', '{"seq":1,"terminal":true}\n');
+    // homogeneous: opencode host dispatching to opencode vendor
+    writeOutput(hopperDir, 'T-HOM', { task_id: 'T-HOM', adapter: 'opencode', status: 'done', terminal_event_emitted: true, host_native: 'opencode' });
+    writeProgress(hopperDir, 'T-HOM', '{"seq":1,"terminal":true}\n');
+    // host-unknown: standalone CLI, no host_native (omitted)
+    writeOutput(hopperDir, 'T-STD', { task_id: 'T-STD', adapter: 'codex', status: 'done', terminal_event_emitted: true });
+    writeProgress(hopperDir, 'T-STD', '{"seq":1,"terminal":true}\n');
+
+    const { json } = runSnapshot({ hopperDir });
+    assert.equal(json.heterogeneity.heterogeneous, 1);
+    assert.equal(json.heterogeneity.homogeneous, 1);
+    assert.equal(json.heterogeneity.host_unknown, 1);
+    assert.equal(json.heterogeneity.rate, 0.5, 'rate = het / (het + hom); host-unknown excluded from denominator');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('heterogeneity: rate is null when no host-tagged tasks exist', () => {
+  const { tmp, hopperDir } = setup();
+  try {
+    writeOutput(hopperDir, 'T-STD', { task_id: 'T-STD', adapter: 'codex', status: 'done', terminal_event_emitted: true });
+    writeProgress(hopperDir, 'T-STD', '{"seq":1,"terminal":true}\n');
+    const { json } = runSnapshot({ hopperDir });
+    assert.equal(json.heterogeneity.rate, null);
+    assert.equal(json.heterogeneity.host_unknown, 1);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('heterogeneity: host_native literal "null" counts as host-unknown', () => {
+  const { tmp, hopperDir } = setup();
+  try {
+    // background.js writes host_native: null literally when HOPPER_HOST_VENDOR unset
+    writeOutput(hopperDir, 'T-NULL', { task_id: 'T-NULL', adapter: 'codex', status: 'done', terminal_event_emitted: true, host_native: 'null' });
+    writeProgress(hopperDir, 'T-NULL', '{"seq":1,"terminal":true}\n');
+    const { json } = runSnapshot({ hopperDir });
+    assert.equal(json.heterogeneity.host_unknown, 1);
+    assert.equal(json.heterogeneity.heterogeneous, 0);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('pre-v1.0 tasks stay visible in totals but do not trigger signals', () => {
   const { tmp, hopperDir } = setup();
   try {
