@@ -101,13 +101,22 @@ test('codex adapter args() builds expected invocation', () => {
   assert.ok(argv.includes('test prompt'));
 });
 
-test('kimi adapter args() includes --afk for headless', () => {
+test('kimi adapter args() uses Kimi Code 0.x headless form (no removed legacy flags)', () => {
   const a = getAdapter('kimi');
   const argv = a.args('test', {});
   assert.ok(argv.includes('-p'));
-  assert.ok(argv.includes('--afk'));
-  assert.ok(argv.includes('--print'));
-  assert.ok(argv.includes('--final-message-only'));
+  assert.ok(argv.includes('test'));
+  // Kimi Code 0.x removed these (Commander allowUnknownOption(false) → would error out)
+  assert.ok(!argv.includes('--afk'), '--afk removed in 0.x');
+  assert.ok(!argv.includes('--print'), '--print removed in 0.x');
+  assert.ok(!argv.includes('--final-message-only'), '--final-message-only removed in 0.x');
+  assert.ok(!argv.includes('--thinking') && !argv.includes('--no-thinking'), 'reasoning is config-driven in 0.x, not argv');
+  // -m only when model given; --session only when conversationId given
+  assert.ok(!argv.includes('-m'), 'no -m without opts.model');
+  const withModel = a.args('test', { model: 'kimi-code/kimi-for-coding' });
+  assert.ok(withModel.includes('-m') && withModel.includes('kimi-code/kimi-for-coding'));
+  const withSession = a.args('test', { conversationId: 'sess-1' });
+  assert.ok(withSession.includes('--session') && withSession.includes('sess-1'));
 });
 
 test('opencode adapter args() uses run subcommand', () => {

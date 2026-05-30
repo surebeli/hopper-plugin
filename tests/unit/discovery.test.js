@@ -266,16 +266,15 @@ test('capabilities: kimi/opencode/copilot accept --model freeform', () => {
   }
 });
 
-test('capabilities: opencode/copilot/agy ignore --reasoning; kimi maps to binary --thinking', () => {
-  // Phase 6c+follow-up wired kimi --thinking/--no-thinking binary toggle.
-  for (const name of ['opencode', 'copilot', 'agy']) {
+test('capabilities: opencode/copilot/agy/kimi ignore --reasoning (kimi 0.x dropped --thinking argv)', () => {
+  // T-KIMI-MIGRATE: Kimi Code 0.x removed the --thinking/--no-thinking argv toggle;
+  // reasoning is now config-driven ([thinking] in ~/.kimi-code/config.toml), so the
+  // adapter no longer forwards opts.reasoning → reasoningArg.accepted is 'ignored'.
+  for (const name of ['opencode', 'copilot', 'agy', 'kimi']) {
     const caps = capabilitiesForAdapter(name);
     assert.equal(caps.reasoningArg.accepted, 'ignored',
-      `${name} adapter does not honor opts.reasoning`);
+      `${name} adapter does not forward opts.reasoning as an argv flag`);
   }
-  const kimi = capabilitiesForAdapter('kimi');
-  assert.equal(kimi.reasoningArg.accepted, 'binary',
-    'kimi maps opts.reasoning to --thinking / --no-thinking binary toggle (Phase 6c follow-up)');
 });
 
 test('capabilities: every adapter has staleAfter date for freshness tracking', () => {

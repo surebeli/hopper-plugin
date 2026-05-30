@@ -1,9 +1,12 @@
 // kimi vendor probe — config-file-only (ZERO subprocess spawn)
 // Anchor: cli/src/vendor-probe/kimi.js
 //
-// Per Phase 6b research: kimi has NO `kimi models` introspection command.
-// `~/.kimi/config.{toml,json}` is the authoritative source — `[models.NAME]`
-// blocks define the aliases user can pass to `-m`. We read the file directly.
+// Kimi has NO `kimi models` introspection command; the config file is the
+// authoritative source — `[models."NAME"]` blocks define the aliases passable
+// to `-m`. T-KIMI-MIGRATE (2026-05-23): Kimi Code 0.x moved the config to
+// ~/.kimi-code/config.toml (TOML-only, overridable via $KIMI_CODE_HOME); the
+// legacy ~/.kimi/config.{toml,json} (Python kimi-cli 1.x) is now a fallback.
+// We read the new path first, then fall back. Stays zero-spawn.
 
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -59,8 +62,11 @@ export async function probe() {
   const binaryPath = resolved && resolved.resolvedPath ? resolved.resolvedPath : null;
 
   // Parse config-file for [models.NAME] block keys.
-  // Try TOML first (canonical), then JSON variant.
+  // New Kimi Code 0.x path first (TOML-only, $KIMI_CODE_HOME override), then
+  // legacy ~/.kimi/ (Python kimi-cli 1.x) as fallback.
+  const codeHome = process.env.KIMI_CODE_HOME || join(homedir(), '.kimi-code');
   const candidates = [
+    { path: join(codeHome, 'config.toml'), format: 'toml' },
     { path: join(homedir(), '.kimi', 'config.toml'), format: 'toml' },
     { path: join(homedir(), '.kimi', 'config.json'), format: 'json' },
   ];
@@ -77,7 +83,7 @@ export async function probe() {
         const parsed = parseKimiTomlConfig(content);
         models = parsed.models;
         modelsCaps.push(...parsed.modelsCaps);
-        modelsSource = `~/.kimi/config.toml (${parsed.models.length} [models.X] block(s))`;
+        modelsSource = `${path} (${parsed.models.length} [models.X] block(s))`;
       } else {
         // JSON variant
         const parsed = JSON.parse(content);
@@ -89,7 +95,7 @@ export async function probe() {
               modelsCaps.push({ name, caps: block.capabilities });
             }
           }
-          modelsSource = `~/.kimi/config.json (${models.length} models entry/entries)`;
+          modelsSource = `${path} (${models.length} models entry/entries)`;
         }
       }
       break;
@@ -99,7 +105,7 @@ export async function probe() {
   }
 
   if (models.length === 0 && notes.length === 0) {
-    notes.push('No ~/.kimi/config.{toml,json} found OR no [models.NAME] blocks defined. Run `kimi login` or define aliases.');
+    notes.push('No ~/.kimi-code/config.toml (or $KIMI_CODE_HOME / legacy ~/.kimi/config.{toml,json}) found OR no [models.NAME] blocks defined. Run `kimi` then `/login`, or define aliases.');
     modelsSource = 'no config file';
   }
 
@@ -115,8 +121,9 @@ export async function probe() {
     version: null,  // kimi version requires subprocess; we keep this probe zero-spawn
     models,
     models_source: modelsSource,
-    // Kimi reasoning is binary toggle (--thinking / --no-thinking), not an enum
-    reasoning_levels: ['--thinking', '--no-thinking'],
+    // Kimi Code 0.x: reasoning is config-driven [thinking].effort (no argv flag).
+    // Effort enum (CONFIRMED via binary); mode is auto|on|off, default_thinking bool.
+    reasoning_levels: ['low', 'medium', 'high', 'xhigh', 'max'],
     notes,
     duration_ms: Date.now() - t0,
   };

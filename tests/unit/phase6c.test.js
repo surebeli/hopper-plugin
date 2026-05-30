@@ -169,18 +169,16 @@ test('6c-followup P1: relative path with extension also bypasses fallback walk',
   assert.equal(r.command, cmd, 'qualified cmd passes through');
 });
 
-// ─── P1: kimi --thinking forwarding ────────────────────────────────────
+// ─── T-KIMI-MIGRATE: Kimi Code 0.x dropped the --thinking argv toggle ──────
+// (Supersedes the Phase 6c "P1: kimi --thinking forwarding" test — 0.x makes
+// reasoning config-driven; emitting --thinking would error out the new binary.)
 
-test('P1: kimi args() includes --thinking when opts.reasoning is truthy', async () => {
+test('kimi args() never emits --thinking/--no-thinking (0.x reasoning is config-driven)', async () => {
   const { kimiAdapter } = await import('../../cli/src/vendors/kimi.js');
-  const argsWithoutReasoning = kimiAdapter.args('prompt', {});
-  assert.ok(!argsWithoutReasoning.includes('--thinking'),
-    `no reasoning → no --thinking; got: ${argsWithoutReasoning.join(' ')}`);
-
-  for (const r of ['low', 'medium', 'high', 'xhigh', true]) {
-    const args = kimiAdapter.args('prompt', { reasoning: r });
-    assert.ok(args.includes('--thinking'),
-      `reasoning=${r} should include --thinking; got: ${args.join(' ')}`);
+  for (const r of [undefined, 'none', 'low', 'medium', 'high', 'xhigh', true]) {
+    const args = kimiAdapter.args('prompt', r === undefined ? {} : { reasoning: r });
+    assert.ok(!args.includes('--thinking') && !args.includes('--no-thinking'),
+      `reasoning=${r}: 0.x must NOT emit a reasoning argv flag; got: ${args.join(' ')}`);
   }
 });
 
@@ -296,12 +294,14 @@ test('6c-followup P2: copilot args() includes --allow-all-tools and --allow-all-
     `copilot must pass --allow-all-paths so file writes aren't blocked; got: ${args.join(' ')}`);
 });
 
-test('P1: kimi args() preserves -m forwarding alongside --thinking', async () => {
+test('kimi args() forwards -m and ignores opts.reasoning (0.x: no --thinking argv)', async () => {
   const { kimiAdapter } = await import('../../cli/src/vendors/kimi.js');
-  const args = kimiAdapter.args('prompt', { reasoning: 'high', model: 'kimi-thinking' });
-  assert.ok(args.includes('--thinking'));
+  const args = kimiAdapter.args('prompt', { reasoning: 'high', model: 'kimi-code/kimi-for-coding' });
   assert.ok(args.includes('-m'));
-  assert.ok(args.includes('kimi-thinking'));
+  assert.ok(args.includes('kimi-code/kimi-for-coding'));
+  // reasoning is config-driven in Kimi Code 0.x — must NOT leak into argv
+  assert.ok(!args.includes('--thinking') && !args.includes('--no-thinking'),
+    `0.x must not emit a reasoning flag even when opts.reasoning set; got: ${args.join(' ')}`);
 });
 
 // ─── P2: soft-warn enhancement for kimi config-only ───────────────────
@@ -322,8 +322,8 @@ test('P2 (manual-check): kimi config-only soft-warn includes TOML snippet hint',
     'soft-warn must include vendor-specific branch for kimi');
   assert.match(src, /config-only/,
     'soft-warn must check introspection_supported === config-only');
-  assert.match(src, /\[models\.\$\{model\}\]/,
-    'soft-warn must print the [models.X] TOML block snippet');
+  assert.match(src, /\[models\."\$\{model\}"\]/,
+    'soft-warn must print the [models."X"] TOML block snippet (0.x quoted key — aliases like kimi-code/kimi-for-coding contain a slash)');
   assert.match(src, /capabilities = \["thinking"\]/,
     'soft-warn must include capabilities hint for thinking-capable models');
 });

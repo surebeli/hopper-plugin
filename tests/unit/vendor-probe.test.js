@@ -29,8 +29,8 @@ test('kimi probe declares config-only introspection', async () => {
   const r = await probeVendor('kimi');
   assert.equal(r.introspection_supported, 'config-only');
   assert.ok(Array.isArray(r.models));
-  assert.deepEqual(r.reasoning_levels, ['--thinking', '--no-thinking'],
-    'kimi reasoning is binary, not enumerated');
+  assert.deepEqual(r.reasoning_levels, ['low', 'medium', 'high', 'xhigh', 'max'],
+    'Kimi Code 0.x reasoning is config-driven [thinking].effort enum (no argv toggle)');
   // duration ms should be fast (file-read only, no spawn)
   assert.ok(r.duration_ms < 5000, `kimi probe should be <5s (no spawn); got ${r.duration_ms}ms`);
 });
