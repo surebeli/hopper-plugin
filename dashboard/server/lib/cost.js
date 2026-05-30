@@ -173,7 +173,7 @@ function inferVendor(model) {
   const lower = model.toLowerCase();
   const via = lower.match(/via\s+([a-z0-9_-]+)/);
   if (via) return cleanVendor(via[1]);
-  const known = ['codex', 'kimi', 'opencode', 'copilot', 'agy', 'claude', 'deepseek', 'gemini'];
+  const known = ['codex', 'kimi', 'opencode', 'copilot', 'agy', 'grok', 'claude', 'deepseek', 'gemini'];
   const match = known.find((prefix) => lower.startsWith(prefix));
   if (match) return match;
   return cleanVendor(lower.split(/\s|-/)[0] || 'unknown');

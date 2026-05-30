@@ -10,6 +10,7 @@ import { kimiAdapter } from './kimi.js';
 import { opencodeAdapter } from './opencode.js';
 import { copilotAdapter } from './copilot.js';
 import { agyAdapter } from './agy.js';
+import { grokAdapter } from './grok.js';
 // Phase 6b probe entry points — each module exports an async probe() fn.
 // Imported lazily by probeVendor() below so that --check / --capabilities
 // (which don't probe) don't pull these subprocess-capable modules into
@@ -24,6 +25,7 @@ const REGISTRY = {
   opencode: opencodeAdapter,
   copilot: copilotAdapter,
   agy: agyAdapter,
+  grok: grokAdapter,
 };
 
 /**

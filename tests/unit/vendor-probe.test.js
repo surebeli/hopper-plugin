@@ -35,7 +35,7 @@ test('kimi probe declares config-only introspection', async () => {
   assert.ok(r.duration_ms < 5000, `kimi probe should be <5s (no spawn); got ${r.duration_ms}ms`);
 });
 
-test('all 5 adapters have a probe-module that exports probe()', async () => {
+test('all 6 adapters have a probe-module that exports probe()', async () => {
   for (const name of listAdapters()) {
     const mod = await import(`../../cli/src/vendor-probe/${name}.js`);
     assert.equal(typeof mod.probe, 'function', `${name} must export probe()`);
@@ -85,6 +85,7 @@ test('zero-spawn discovery surface unchanged: --check / --capabilities still spa
     join(REPO_ROOT, 'cli', 'src', 'vendors', 'opencode.js'),
     join(REPO_ROOT, 'cli', 'src', 'vendors', 'copilot.js'),
     join(REPO_ROOT, 'cli', 'src', 'vendors', 'agy.js'),
+    join(REPO_ROOT, 'cli', 'src', 'vendors', 'grok.js'),
   ];
   for (const f of discoveryHotPath) {
     const src = readFileSync(f, 'utf-8');

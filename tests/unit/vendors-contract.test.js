@@ -8,9 +8,9 @@ import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { listAdapters, getAdapter } from '../../cli/src/vendors/index.js';
 
-const VENDORS = ['codex', 'kimi', 'opencode', 'copilot', 'agy'];
+const VENDORS = ['codex', 'kimi', 'opencode', 'copilot', 'agy', 'grok'];
 
-test('registry lists exactly the 5 spec v2.0.3 functional vendors', () => {
+test('registry lists exactly the 6 functional vendors', () => {
   const names = listAdapters().sort();
   assert.deepEqual(names, [...VENDORS].sort(),
     `expected ${VENDORS.join(',')}; got ${names.join(',')}`);
@@ -151,6 +151,71 @@ test('agy adapter args() includes --dangerously-skip-permissions for headless', 
   const a = getAdapter('agy');
   const argv = a.args('test', {});
   assert.ok(argv.includes('--dangerously-skip-permissions'));
+});
+
+test('grok adapter args() builds headless json invocation with explicit default model', () => {
+  const a = getAdapter('grok');
+  const argv = a.args('test prompt', {});
+  assert.ok(argv.includes('-p'));
+  assert.ok(argv.includes('test prompt'));
+  assert.ok(argv.includes('--output-format'));
+  assert.ok(argv.includes('json'));
+  assert.ok(argv.includes('--no-auto-update'));
+  // Always passes explicit -m (avoids retired-slug grok-4.3 billing redirect)
+  assert.ok(argv.includes('-m'));
+  assert.ok(argv.includes('grok-build-0.1'), 'default model must be grok-build-0.1');
+  // --always-approve only in background mode (else agent hangs per tool call)
+  assert.ok(!argv.includes('--always-approve'), 'no --always-approve in sync mode');
+  const bg = a.args('test', { background: true });
+  assert.ok(bg.includes('--always-approve'), '--always-approve required for background');
+  // honors explicit --model override
+  const custom = a.args('test', { model: 'grok-4.3' });
+  assert.ok(custom.includes('grok-4.3') && !custom.includes('grok-build-0.1'));
+});
+
+test('grok adapter parseResult() detects auth-fail from unauthorized signal', () => {
+  const a = getAdapter('grok');
+  const result = a.parseResult({
+    exitCode: 1,
+    stdout: '',
+    stderr: 'Error: unauthorized (401) — set XAI_API_KEY',
+    timedOut: false,
+    durationMs: 120,
+  });
+  assert.equal(result.status, 'auth-fail');
+  assert.match(result.error || '', /XAI_API_KEY/);
+});
+
+test('grok adapter parseResult() extracts text from --output-format json object', () => {
+  const a = getAdapter('grok');
+  const result = a.parseResult({
+    exitCode: 0,
+    stdout: JSON.stringify({ text: 'GROK_ANSWER', usage: { total_tokens: 42 } }),
+    stderr: '',
+    timedOut: false,
+    durationMs: 200,
+  });
+  assert.equal(result.status, 'success');
+  assert.equal(result.text, 'GROK_ANSWER');
+  assert.deepEqual(result.usage, { total_tokens: 42 });
+});
+
+test('grok adapter envPreflight() never checks GROK_API_KEY (third-party collision)', () => {
+  const savedXai = process.env.XAI_API_KEY;
+  const savedGrok = process.env.GROK_API_KEY;
+  delete process.env.XAI_API_KEY;
+  process.env.GROK_API_KEY = 'should-be-ignored';
+  try {
+    const a = getAdapter('grok');
+    const result = a.envPreflight();
+    assert.equal(result.ok, true, 'soft-warn ok=true');
+    // GROK_API_KEY set but XAI_API_KEY absent → must still warn (does not treat GROK_API_KEY as auth)
+    assert.ok(result.missing.some((m) => /XAI_API_KEY/.test(m)),
+      'must guide user to XAI_API_KEY, not accept GROK_API_KEY');
+  } finally {
+    if (savedXai !== undefined) process.env.XAI_API_KEY = savedXai;
+    if (savedGrok !== undefined) process.env.GROK_API_KEY = savedGrok; else delete process.env.GROK_API_KEY;
+  }
 });
 
 test('getAdapter throws clear error for unknown vendor', () => {

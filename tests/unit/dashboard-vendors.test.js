@@ -14,7 +14,7 @@ function closeServer(server) {
 test('vendor inventory merges adapter list with cache diagnostics', () => {
   const inventory = readVendorInventory({
     capabilitiesForAdapterImpl: () => ({ reasoningArg: { knownGood: ['high'] } }),
-    listAdaptersImpl: () => ['codex', 'kimi', 'opencode', 'copilot', 'agy'],
+    listAdaptersImpl: () => ['codex', 'kimi', 'opencode', 'copilot', 'agy', 'grok'],
     readCacheWithDiagnosticsImpl: () => ({
       cache: {
         version: 1,
@@ -34,8 +34,8 @@ test('vendor inventory merges adapter list with cache diagnostics', () => {
     }),
   });
 
-  assert.equal(inventory.vendors.length, 5);
-  assert.deepEqual(inventory.vendors.map((vendor) => vendor.name), ['codex', 'kimi', 'opencode', 'copilot', 'agy']);
+  assert.equal(inventory.vendors.length, 6);
+  assert.deepEqual(inventory.vendors.map((vendor) => vendor.name), ['codex', 'kimi', 'opencode', 'copilot', 'agy', 'grok']);
   assert.equal(inventory.vendors[0].installStatus, 'installed');
   assert.equal(inventory.vendors[0].cachedModels.length, 2);
   assert.equal(inventory.vendors[0].stale, false);

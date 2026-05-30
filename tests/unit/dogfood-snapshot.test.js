@@ -86,7 +86,7 @@ test('--append writes Markdown entry with vendor counts', () => {
     runSnapshot({ hopperDir, args: ['--append', out] });
     const markdown = readFileSync(out, 'utf-8');
     assert.match(markdown, /## Snapshot /);
-    assert.match(markdown, /Total tasks: 1 \(codex: 1, kimi: 0, opencode: 0, copilot: 0, agy: 0, unknown: 0\)/);
+    assert.match(markdown, /Total tasks: 1 \(codex: 1, kimi: 0, opencode: 0, copilot: 0, agy: 0, grok: 0, unknown: 0\)/);
     assert.match(markdown, /Empty progress\.log w\/ done: 0/);
   } finally {
     rmSync(tmp, { recursive: true, force: true });

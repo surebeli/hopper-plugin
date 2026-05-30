@@ -203,6 +203,7 @@ test('installCheckForAdapter does NOT spawn vendor subprocess (single-spawn proo
     join(REPO_ROOT, 'cli', 'src', 'vendors', 'opencode.js'),
     join(REPO_ROOT, 'cli', 'src', 'vendors', 'copilot.js'),
     join(REPO_ROOT, 'cli', 'src', 'vendors', 'agy.js'),
+    join(REPO_ROOT, 'cli', 'src', 'vendors', 'grok.js'),
   ];
 
   const stripCodeOnly = (src) => src

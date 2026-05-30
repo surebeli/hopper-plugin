@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
-const VENDORS = ['codex', 'kimi', 'opencode', 'copilot', 'agy', 'unknown'];
+const VENDORS = ['codex', 'kimi', 'opencode', 'copilot', 'agy', 'grok', 'unknown'];
 const TERMINAL = new Set(['done', 'failed', 'timeout', 'cancelled', 'orphaned']);
-const NON_CODEX = new Set(['kimi', 'opencode', 'copilot', 'agy']);
+const NON_CODEX = new Set(['kimi', 'opencode', 'copilot', 'agy', 'grok']);
 try {
   const appendPath = parseAppendPath(process.argv.slice(2));
   const snapshot = collectSnapshot(findHopperDir());
