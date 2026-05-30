@@ -314,7 +314,7 @@ Single-vendor form (`hopper-dispatch --check kimi`) prints just one row + detail
 **What to do per status**:
 
 - `NOT_INSTALLED` → install the vendor CLI per its official docs (see the auth table in the install sections above for hints)
-- `AUTH_NEEDED` → run the auth flow the vendor's notes mention (e.g. `codex login`, `kimi /connect`, `agy` interactive once)
+- `AUTH_NEEDED` → run the auth flow the vendor's notes mention (e.g. `codex login`, `kimi` then `/login`, `agy` interactive once)
 - `READY` with `note` auth → vendor MAY work, MAY fail at dispatch with auth error; the soft-warn note explains what to set if it fails
 
 ### `hopper-dispatch --capabilities <vendor>` — model + reasoning + features
@@ -361,7 +361,7 @@ For quick reference (re-verify quarterly per each adapter's `staleAfter` date):
 - Hopper does NOT validate model names against `knownGood` — it stays freeform (validation regex is shell-safety only). Invalid models surface as vendor-side errors at dispatch.
 - **`knownGood` arrays are intentionally near-empty** (Phase 6a design correction per user feedback 2026-05-21): available models depend on YOUR vendor account + machine + subscription tier — opencode model catalog varies per provider auth, kimi varies per Moonshot account, copilot varies per Business/Enterprise tier, codex varies per ChatGPT entitlements. The adapter is NOT a model database. Run the vendor's own command to see what works on YOUR machine:
   - `opencode models` — live catalog including provider prefixes
-  - `kimi --help` — confirms `-m` accepts free text; specific models come from your `~/.kimi/config`
+  - `kimi --help` — confirms `-m` accepts free text; specific models come from your `~/.kimi-code/config.toml` (Kimi Code 0.x; default alias `kimi-code/kimi-for-coding`)
   - `copilot --help` — confirms `--model <name>`; available list is account-tier dependent
   - `codex doctor` or `codex exec --help` — codex available models depend on ChatGPT login
   - `agy --help` — agy doesn't currently accept `--model` flag
@@ -398,7 +398,7 @@ hopper-dispatch <task-id> --background    # only after both above look good
 **Mac-specific install paths the adapters detect**:
 
 - `~/.codex/auth.json` (codex login)
-- `~/.kimi/config.toml` (kimi /connect)
+- `~/.kimi-code/config.toml` (Kimi Code 0.x; `kimi` then `/login`)
 - `~/Library/Application Support/opencode/auth.json` (OR `~/.local/share/opencode/auth.json`)
 - `~/.gemini/` (agy OAuth artifacts)
 - `$GH_TOKEN` / `$GITHUB_TOKEN` env var (copilot)
@@ -449,7 +449,7 @@ Spawns the vendor CLI to query model catalog. Costs subprocesses; this is the **
 | codex    | `full`                  | 2 subprocesses      | `--version` + `debug models --bundled` JSON (.slug) |
 | opencode | `full`                  | 3 subprocesses      | `--version` + `models` + `auth list` (text, ANSI-stripped) |
 | copilot  | `partial`               | 1 subprocess + FS   | `version` + filesystem scan of `~/.copilot/agents/*.agent.md` (model list server-side per-tier, not exposed) |
-| kimi     | `config-only`           | 0 subprocesses      | Reads `~/.kimi/config.{toml,json}` `[models.NAME]` blocks |
+| kimi     | `config-only`           | 0 subprocesses      | Reads `~/.kimi-code/config.toml` (or `$KIMI_CODE_HOME`; legacy `~/.kimi/config.{toml,json}` fallback) `[models.NAME]` blocks |
 | agy      | `none`                  | 0 subprocesses      | Static (`gemini-3.5-flash` baked into agy itself)   |
 
 ```bash

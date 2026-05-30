@@ -127,7 +127,7 @@ The plugin spawns vendor subprocesses; each needs its own auth set up **outside*
 | Vendor    | Auth artifact / env var                                                      |
 |-----------|-------------------------------------------------------------------------------|
 | codex     | `~/.codex/auth.json` (`codex login`) OR `CODEX_API_KEY` / `OPENAI_API_KEY` env |
-| kimi      | `~/.kimi/config.toml` (`kimi /connect`) OR `KIMI_API_KEY` / `MOONSHOT_API_KEY` |
+| kimi      | `~/.kimi-code/config.toml` (`kimi` then `/login`; Kimi Code 0.x) OR `KIMI_API_KEY` / `MOONSHOT_API_KEY` |
 | opencode  | `~/.local/share/opencode/auth.json` etc. OR provider env keys                  |
 | copilot   | `GH_TOKEN` / `GITHUB_TOKEN` / `COPILOT_GITHUB_TOKEN` env OR `gh auth status`  |
 | agy       | Interactive OAuth via `agy` (one-time), then `agy -p` headless                |

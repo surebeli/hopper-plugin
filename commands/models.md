@@ -41,7 +41,7 @@ The CLI prints one block per vendor:
   reasoning: <level1> | <level2> | ...
 ```
 
-- **introspection-level**: `full` (codex/opencode — live `--models`/`debug models`), `partial` (copilot — limited inspection), `config-only` (kimi — reads `~/.kimi/config.toml`), `none` (agy — static).
+- **introspection-level**: `full` (codex/opencode — live `--models`/`debug models`), `partial` (copilot — limited inspection), `config-only` (kimi — reads `~/.kimi-code/config.toml`), `none` (agy — static).
 - **staleness**: e.g. `6m ago`, `2d ago`. Older than ~14 days → adapter prints `[STALE]`; recommend `/hopper:probe <vendor>` to refresh.
 
 ## What to tell the user

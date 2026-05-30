@@ -379,9 +379,9 @@ function warnIfModelUnknown(vendor, model) {
     console.error(`      hopper-dispatch <task-id> --reasoning high             # default model + elevated reasoning`);
     console.error(`  (b) Refresh the cache: \`hopper-dispatch --probe ${vendor}\` (the vendor may have added '${model}' since last probe).`);
     if (vendor === 'kimi' && cached.introspection_supported === 'config-only') {
-      console.error(`  (c) Add a kimi alias to ~/.kimi/config.toml then re-probe:`);
-      console.error(`      [models.${model}]`);
-      console.error(`      model = "kimi-k2-thinking"   # or another Moonshot upstream ID`);
+      console.error(`  (c) Add a kimi alias to ~/.kimi-code/config.toml (Kimi Code 0.x; legacy ~/.kimi/ for the old Python kimi-cli) then re-probe:`);
+      console.error(`      [models."${model}"]`);
+      console.error(`      model = "kimi-for-coding"   # or another Moonshot upstream ID`);
       console.error(`      capabilities = ["thinking"]   # if your target supports thinking`);
     } else {
       console.error(`  (c) Verify the exact identifier with \`hopper-dispatch --models ${vendor}\` (or /hopper:models ${vendor}).`);
