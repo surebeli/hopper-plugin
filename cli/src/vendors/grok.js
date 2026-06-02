@@ -30,9 +30,9 @@ import { join } from 'node:path';
 import { applyTaskTypeFloor } from '../subprocess.js';
 
 // Always pass -m explicitly: when -m is omitted the CLI's built-in default is
-// UNCONFIRMED, and slugs retired 2026-05-15 silently redirect + bill at
-// grok-4.3 rates — a hidden-cost trap. grok-build-0.1 is the coding model.
-const DEFAULT_MODEL = 'grok-build-0.1';
+// UNCONFIRMED, and retired slugs can silently redirect. Real-world dogfood on
+// 2026-06-02 confirmed `grok-build` as the working coding-model slug.
+const DEFAULT_MODEL = 'grok-build';
 
 /** @type {import('../types.js').VendorAdapter} */
 export const grokAdapter = {
@@ -43,8 +43,8 @@ export const grokAdapter = {
   capabilities: {
     modelArg: {
       accepted: 'freeform',
-      knownGood: ['grok-build-0.1', 'grok-4.3'],
-      sourceNote: 'grok `-m, --model <MODEL>` (CONFIRMED docs.x.ai/build/cli/headless-scripting). grok-build-0.1 = Grok Build coding model (256K ctx); grok-4.3 = flagship (1M ctx). CLI built-in default when -m omitted is UNCONFIRMED, so this adapter ALWAYS passes -m (default grok-build-0.1). WARNING: slugs RETIRED 2026-05-15 (grok-4-0709, grok-4-fast-*, grok-4-1-fast-*, grok-code-fast-1, grok-3) still resolve but REDIRECT and bill at grok-4.3 rates ($1.25/M in, $2.50/M out per docs.x.ai/developers/migration/may-15-retirement) — hidden-cost trap, hence the explicit default. NAME COLLISION: the third-party grok-cli defaults to grok-code-fast-1.',
+      knownGood: ['grok-build', 'grok-4.3'],
+      sourceNote: 'grok `-m, --model <MODEL>` (CONFIRMED docs.x.ai/build/cli/headless-scripting). Local dogfood feedback on 2026-06-02 confirmed `grok-build` as the working coding-model slug; `grok-build-0.1` returned `unknown model id`. CLI built-in default when -m omitted is still UNCONFIRMED, so this adapter ALWAYS passes -m (default grok-build). NAME COLLISION: the third-party grok-cli defaults to grok-code-fast-1 and uses different auth/output flags.',
     },
     reasoningArg: {
       accepted: 'ignored',

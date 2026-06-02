@@ -16,7 +16,7 @@ import { basename, dirname } from 'node:path';
 import { readFrontmatter, writeFrontmatter } from '../src/background.js';
 import { appendProgressEvent } from '../src/progress.js';
 import { getAdapter } from '../src/vendors/index.js';
-import { killProcessTree } from '../src/subprocess.js';
+import { acquireVendorLock, killProcessTree } from '../src/subprocess.js';
 import { resolveCommandOnPath, resolveCommandWithKnownPaths } from '../src/path-resolve.js';
 
 function parseRunnerArgs(argv) {
@@ -199,6 +199,19 @@ async function main() {
   const resolvedCmd = resolved ? resolved.command : adapter.command;
   const prependArgs = resolved ? resolved.prependArgs : [];
   const finalArgv = [...prependArgs, ...adapterArgv];
+  let releaseVendorLock = () => {};
+  let vendorLockReleased = false;
+  const releaseVendorLockOnce = () => {
+    if (vendorLockReleased) return;
+    vendorLockReleased = true;
+    releaseVendorLock();
+  };
+
+  try {
+    releaseVendorLock = await acquireVendorLock(adapter.name);
+  } catch (err) {
+    fail(outputMdPath, `Could not acquire vendor lock: ${err.message}`, { taskId, hopperDir, adapterName });
+  }
 
   // *** THE single spawn (spec §3 #4) ***
   // Single spawn() call. Windows command resolution above is pure-sync
@@ -241,6 +254,7 @@ async function main() {
   killTimer.unref();
 
   vendor.on('exit', (code, signal) => {
+    releaseVendorLockOnce();
     clearTimeout(killTimer);
     const duration_ms = Date.now() - t0;
 
@@ -342,6 +356,10 @@ async function main() {
   vendor.on('error', (err) => {
     clearTimeout(killTimer);
     fail(outputMdPath, `Vendor spawn error: ${err.message} (command: ${adapter.command})`, { taskId, hopperDir, adapterName });
+  });
+
+  vendor.on('error', () => {
+    releaseVendorLockOnce();
   });
 }
 

@@ -6,6 +6,9 @@
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { listAdapters, getAdapter } from '../../cli/src/vendors/index.js';
 
 const VENDORS = ['codex', 'kimi', 'opencode', 'copilot', 'agy', 'grok'];
@@ -123,6 +126,31 @@ test('opencode adapter args() uses run subcommand', () => {
   const a = getAdapter('opencode');
   const argv = a.args('test', {});
   assert.equal(argv[0], 'run');
+  assert.ok(argv.includes('--print-logs'));
+  assert.ok(argv.includes('--format'));
+  assert.ok(argv.includes('json'));
+  assert.ok(argv.includes('--pure'));
+
+  const bg = a.args('test', { background: true });
+  assert.ok(bg.includes('--dangerously-skip-permissions'));
+});
+
+test('opencode adapter parseResult() reconstructs assistant text from json event stream', () => {
+  const a = getAdapter('opencode');
+  const result = a.parseResult({
+    exitCode: 0,
+    stdout: [
+      JSON.stringify({ type: 'session.started', session: 's-1' }),
+      JSON.stringify({ type: 'message.part.delta', delta: 'HELLO_' }),
+      JSON.stringify({ type: 'message.part.delta', delta: 'WORLD' }),
+      JSON.stringify({ type: 'message.completed' }),
+    ].join('\n'),
+    stderr: '',
+    timedOut: false,
+    durationMs: 200,
+  });
+  assert.equal(result.status, 'success');
+  assert.equal(result.text, 'HELLO_WORLD');
 });
 
 test('copilot adapter surfaces GH_TOKEN warning when no env token present', () => {
@@ -172,14 +200,14 @@ test('grok adapter args() builds headless json invocation with explicit default 
   assert.ok(argv.includes('--no-auto-update'));
   // Always passes explicit -m (avoids retired-slug grok-4.3 billing redirect)
   assert.ok(argv.includes('-m'));
-  assert.ok(argv.includes('grok-build-0.1'), 'default model must be grok-build-0.1');
+  assert.ok(argv.includes('grok-build'), 'default model must be grok-build');
   // --always-approve only in background mode (else agent hangs per tool call)
   assert.ok(!argv.includes('--always-approve'), 'no --always-approve in sync mode');
   const bg = a.args('test', { background: true });
   assert.ok(bg.includes('--always-approve'), '--always-approve required for background');
   // honors explicit --model override
   const custom = a.args('test', { model: 'grok-4.3' });
-  assert.ok(custom.includes('grok-4.3') && !custom.includes('grok-build-0.1'));
+  assert.ok(custom.includes('grok-4.3') && !custom.includes('grok-build'));
 });
 
 test('grok adapter parseResult() detects auth-fail from unauthorized signal', () => {
@@ -212,8 +240,17 @@ test('grok adapter parseResult() extracts text from --output-format json object'
 test('grok adapter envPreflight() never checks GROK_API_KEY (third-party collision)', () => {
   const savedXai = process.env.XAI_API_KEY;
   const savedGrok = process.env.GROK_API_KEY;
+  const savedHome = process.env.HOME;
+  const savedUserProfile = process.env.USERPROFILE;
+  const savedHomeDrive = process.env.HOMEDRIVE;
+  const savedHomePath = process.env.HOMEPATH;
+  const fakeHome = mkdtempSync(join(tmpdir(), 'hopper-grok-home-'));
   delete process.env.XAI_API_KEY;
   process.env.GROK_API_KEY = 'should-be-ignored';
+  process.env.HOME = fakeHome;
+  process.env.USERPROFILE = fakeHome;
+  delete process.env.HOMEDRIVE;
+  delete process.env.HOMEPATH;
   try {
     const a = getAdapter('grok');
     const result = a.envPreflight();
@@ -224,6 +261,11 @@ test('grok adapter envPreflight() never checks GROK_API_KEY (third-party collisi
   } finally {
     if (savedXai !== undefined) process.env.XAI_API_KEY = savedXai;
     if (savedGrok !== undefined) process.env.GROK_API_KEY = savedGrok; else delete process.env.GROK_API_KEY;
+    if (savedHome !== undefined) process.env.HOME = savedHome; else delete process.env.HOME;
+    if (savedUserProfile !== undefined) process.env.USERPROFILE = savedUserProfile; else delete process.env.USERPROFILE;
+    if (savedHomeDrive !== undefined) process.env.HOMEDRIVE = savedHomeDrive; else delete process.env.HOMEDRIVE;
+    if (savedHomePath !== undefined) process.env.HOMEPATH = savedHomePath; else delete process.env.HOMEPATH;
+    rmSync(fakeHome, { recursive: true, force: true });
   }
 });
 

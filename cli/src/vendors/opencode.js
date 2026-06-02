@@ -42,12 +42,22 @@ export const opencodeAdapter = {
   },
 
   args(input, opts) {
-    return [
+    const argv = [
       'run',
       input,
       ...(opts.model ? ['--model', opts.model] : []),
       ...(opts.conversationId ? ['-s', opts.conversationId] : []),
+      '--print-logs',
+      '--format', 'json',
+      '--pure',
     ];
+
+    // Background dispatches build argv in the parent process before the runner
+    // owns stdio, so treat an injected log path as another headless signal.
+    const headless = Boolean(opts.background || opts.logFile || !process.stdout.isTTY);
+    if (headless) argv.push('--dangerously-skip-permissions');
+
+    return argv;
   },
 
   envPreflight() {
@@ -87,10 +97,7 @@ export const opencodeAdapter = {
       return { text: '', status: 'permission-fail', error: 'opencode binary not found. Install: npm install -g opencode-ai/opencode' };
     }
     if (raw.exitCode === 0) {
-      // Strip leading "> build · <provider/model>" line + ANSI codes
-      let text = raw.stdout.replace(/\x1b\[[0-9;]*m/g, ''); // strip ANSI
-      text = text.replace(/^>\s+build\s+·\s+[^\n]+\n+/m, '').trim();
-      return { text, status: 'success' };
+      return { text: extractOpencodeText(raw.stdout), status: 'success' };
     }
     return {
       text: raw.stdout,
@@ -99,3 +106,69 @@ export const opencodeAdapter = {
     };
   },
 };
+
+function extractOpencodeText(stdout) {
+  const trimmed = (stdout || '').trim();
+  if (!trimmed) return '';
+
+  const lines = trimmed.split(/\r?\n/).filter((line) => line.trim());
+  const chunks = [];
+  let parsedJson = false;
+
+  for (const line of lines) {
+    try {
+      const event = JSON.parse(line);
+      parsedJson = true;
+      const text = extractOpencodeEventText(event);
+      if (text) chunks.push(text);
+    } catch (_) {
+      // Mixed stdout is possible; fall back below if the stream wasn't JSON.
+    }
+  }
+
+  if (parsedJson) {
+    const joined = chunks.join('').trim();
+    if (joined) return joined;
+  }
+
+  // Legacy/plain-text fallback.
+  let text = stdout.replace(/\x1b\[[0-9;]*m/g, '');
+  text = text.replace(/^>\s+build\s+·\s+[^\n]+\n+/m, '').trim();
+  return text;
+}
+
+function extractOpencodeEventText(event) {
+  if (!event || typeof event !== 'object') return '';
+
+  const kind = typeof event.type === 'string'
+    ? event.type
+    : typeof event.kind === 'string'
+      ? event.kind
+      : '';
+
+  if (kind && !/message|assistant|output|response|result/i.test(kind)) {
+    return '';
+  }
+
+  return collectOpencodeText(event);
+}
+
+function collectOpencodeText(node, depth = 0) {
+  if (depth > 6 || node == null) return '';
+  if (typeof node === 'string') return node;
+  if (Array.isArray(node)) {
+    return node.map((part) => collectOpencodeText(part, depth + 1)).join('');
+  }
+  if (typeof node !== 'object') return '';
+
+  for (const key of ['text', 'delta', 'content', 'value']) {
+    if (typeof node[key] === 'string') return node[key];
+  }
+
+  for (const key of ['message', 'part', 'parts', 'payload', 'data', 'result', 'output']) {
+    const text = collectOpencodeText(node[key], depth + 1);
+    if (text) return text;
+  }
+
+  return '';
+}

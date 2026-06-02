@@ -35,7 +35,7 @@ Dispatch with a model override for vendors that honor `--model`:
 
 ```bash
 hopper-dispatch T-PROG-UI --background --model deepseek/v4-flash
-hopper-dispatch T-PROG-KIMI --background --model kimi-thinking
+hopper-dispatch T-PROG-KIMI --background --model kimi-code/kimi-for-coding
 ```
 
 Expected output includes a runner PID and `.hopper/handoffs/<task-id>-output.md`.

@@ -6,7 +6,7 @@
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { runSubprocessOnce, makeUniqueLogPath } from '../../cli/src/subprocess.js';
+import { acquireVendorLock, runSubprocessOnce, makeUniqueLogPath } from '../../cli/src/subprocess.js';
 import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir, platform } from 'node:os';
 import { join } from 'node:path';
@@ -157,4 +157,28 @@ test('makeUniqueLogPath generates unique paths per dispatch (codex F2 fix)', () 
   assert.notEqual(p1, p2, 'two calls must produce different paths');
   assert.match(p1, /codex/);
   assert.match(p1, /T-PLUGIN-05a/);
+});
+
+test('acquireVendorLock serializes codex across overlapping callers', async () => {
+  const release1 = await acquireVendorLock('codex');
+  let secondAcquired = false;
+
+  const waiter = (async () => {
+    const release2 = await acquireVendorLock('codex');
+    secondAcquired = true;
+    release2();
+  })();
+
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(secondAcquired, false, 'second codex caller must wait for the first lock holder');
+
+  release1();
+  await waiter;
+  assert.equal(secondAcquired, true);
+});
+
+test('acquireVendorLock is a no-op for non-serialized vendors', async () => {
+  const release = await acquireVendorLock('opencode');
+  assert.equal(typeof release, 'function');
+  release();
 });

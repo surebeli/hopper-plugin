@@ -45,7 +45,7 @@ Build an explicit, properly-quoted command. Do not splat raw `$ARGUMENTS`:
 node "$CLAUDE_PLUGIN_ROOT/cli/bin/hopper-dispatch" "T-PLUGIN-05a" --write
 
 # With adapter opts
-node "$CLAUDE_PLUGIN_ROOT/cli/bin/hopper-dispatch" "T-PLUGIN-05a" --write --model "kimi-thinking" --reasoning "high"
+node "$CLAUDE_PLUGIN_ROOT/cli/bin/hopper-dispatch" "T-PLUGIN-05a" --write --model "kimi-code/kimi-for-coding" --reasoning "high"
 ```
 
 ### Mode B: BACKGROUND dispatch (`--background` flag present)

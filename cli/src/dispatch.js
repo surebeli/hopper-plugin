@@ -177,6 +177,7 @@ export async function executeWithAdapter({ resolved, adapter, adapterOpts = {} }
     stdinInput,
     timeoutMs: adapter.timeoutMs(effectiveOpts),
     logFilePath: logPath,
+    vendorName: adapter.name,
   });
 
   // Parse result (adapter-specific failure classification)

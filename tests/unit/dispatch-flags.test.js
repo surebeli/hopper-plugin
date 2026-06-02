@@ -9,6 +9,7 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import {
@@ -189,4 +190,12 @@ test('CLI flag value must not start with dash (consumes-next-arg detection)', ()
   const r = runCli(['T-PLUGIN-05a', '--model', '--write']);
   assert.equal(r.exitCode, 2);
   assert.match(r.stderr, /--model requires a value/i);
+});
+
+test('background dispatch path passes background=true into adapter opts before building argv', () => {
+  const src = readFileSync(DISPATCH, 'utf-8');
+  assert.match(
+    src,
+    /const effectiveOpts = \{[^}]*background:\s*true[^}]*logFile:\s*logPath[^}]*taskType:\s*resolved\.task\.taskType[^}]*\};/s,
+  );
 });

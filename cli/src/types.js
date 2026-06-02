@@ -41,7 +41,7 @@
  * Adapter invocation options.
  * @typedef {object} AdapterOpts
  * @property {string} [sandbox]       Vendor-specific sandbox flag (e.g. 'read-only' for codex)
- * @property {string} [reasoning]     Reasoning effort (e.g. 'low'|'medium'|'high'|'xhigh'|'none' for codex; kimi maps to --thinking/--no-thinking; 'none' explicit)
+ * @property {string} [reasoning]     Reasoning effort hint (codex honors the enum directly; kimi/opencode/grok currently ignore or use config/vendor-specific knobs instead of argv)
  * @property {string} [model]         Optional model override
  * @property {boolean} [webSearch]    Optional web search enable
  * @property {string} [conversationId] Optional session resume ID

@@ -19,14 +19,13 @@ export async function probe() {
     introspection_supported: 'none',
     binary_path: binaryPath,
     version: null,
-    // Static catalog: no CONFIRMED CLI models subcommand. grok-build-0.1 =
-    // coding model; grok-4.3 = flagship. Canonical identifiers (no prose) so
-    // the dispatch-time soft-warn string-match works against `-m grok-build-0.1`.
-    models: binaryPath ? ['grok-build-0.1', 'grok-4.3'] : [],
-    models_source: 'xAI Grok Build static catalog (source: docs.x.ai/developers/models); no CONFIRMED CLI models-introspection subcommand. Adapter passes grok-build-0.1 by default.',
+    // Static catalog: no CONFIRMED CLI models subcommand. 2026-06-02 dogfood
+    // feedback corrected the coding-model slug from grok-build-0.1 → grok-build.
+    models: binaryPath ? ['grok-build', 'grok-4.3'] : [],
+    models_source: 'xAI Grok Build static catalog (source: docs.x.ai/developers/models + 2026-06-02 dogfood feedback); no CONFIRMED CLI models-introspection subcommand. Adapter passes grok-build by default.',
     reasoning_levels: [],
     notes: binaryPath
-      ? ['grok: no CONFIRMED machine-readable models subcommand; default model grok-build-0.1 passed explicitly by adapter (avoids retired-slug → grok-4.3 billing redirect). reasoning not flag-configurable. NAME COLLISION: same `grok` binary may resolve to the third-party grok-cli (GROK_API_KEY, --format json).']
+      ? ['grok: no CONFIRMED machine-readable models subcommand; default model grok-build passed explicitly by adapter. reasoning not flag-configurable. NAME COLLISION: same `grok` binary may resolve to the third-party grok-cli (GROK_API_KEY, --format json).']
       : ['grok binary not found on PATH'],
     duration_ms: Date.now() - t0,
   };

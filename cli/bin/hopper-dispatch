@@ -33,7 +33,7 @@ import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
-const VERSION = '0.6.0-phase-6c';
+const VERSION = '0.6.1-phase-6c';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -535,7 +535,7 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {} } = {
   const outputMdPath = join(handoffDir, `${taskId}-output.md`);
   const logPath = outputMdPath.replace(/\.md$/, '.log');
   // Phase 6c F1: thread taskType through so runner's timeoutMs() applies review floor.
-  const effectiveOpts = { ...adapterOpts, logFile: logPath, taskType: resolved.task.taskType };
+  const effectiveOpts = { ...adapterOpts, background: true, logFile: logPath, taskType: resolved.task.taskType };
   const adapterArgv = adapter.args(resolved.composedPrompt, effectiveOpts);
 
   try {

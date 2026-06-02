@@ -11,6 +11,7 @@
 //   NOT by port — children may be unrelated.
 
 import { spawn, execSync } from 'node:child_process';
+import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 
 // Phase 6c F1: task-type-aware timeout floors.
 // Adapter-native timeoutMs is tuned for code-impl (short tasks). Review tasks
@@ -23,6 +24,9 @@ const REVIEW_TASK_TYPES = new Set([
   'code-review-acceptance',
 ]);
 const REVIEW_TASK_FLOOR_MS = 1_800_000;  // 30 min floor for any review task
+const SERIAL_VENDOR_LOCK_POLL_MS = 250;
+const SERIAL_VENDOR_LOCK_STALE_MS = 3_600_000;
+const SERIALIZED_VENDORS = new Set(['codex']);
 
 /**
  * Apply task-type-aware floor to an adapter-native timeout.
@@ -48,6 +52,58 @@ import { platform, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 /**
+ * Serialize selected vendors across processes when the upstream CLI cannot
+ * safely share auth/session state concurrently. Current scope: codex only.
+ *
+ * @param {string | undefined} vendorName
+ * @returns {Promise<() => void>} release callback
+ */
+export async function acquireVendorLock(vendorName) {
+  if (!vendorName || !SERIALIZED_VENDORS.has(vendorName)) {
+    return () => {};
+  }
+
+  const lockPath = join(tmpdir(), `hopper-${vendorName}.lock`);
+  const lockToken = `${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
+
+  while (true) {
+    try {
+      writeFileSync(lockPath, lockToken, { flag: 'wx' });
+      return () => releaseVendorLock(lockPath, lockToken);
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+      if (isVendorLockStale(lockPath)) {
+        try {
+          unlinkSync(lockPath);
+          continue;
+        } catch (_) {
+          // Another process may have reclaimed it first.
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, SERIAL_VENDOR_LOCK_POLL_MS));
+    }
+  }
+}
+
+function releaseVendorLock(lockPath, lockToken) {
+  try {
+    if (!existsSync(lockPath)) return;
+    const current = readFileSync(lockPath, 'utf-8');
+    if (current === lockToken) unlinkSync(lockPath);
+  } catch (_) {
+    // best-effort; stale lock recovery handles crash leftovers
+  }
+}
+
+function isVendorLockStale(lockPath) {
+  try {
+    return (Date.now() - statSync(lockPath).mtimeMs) > SERIAL_VENDOR_LOCK_STALE_MS;
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
  * Run a vendor subprocess EXACTLY ONCE with hard timeout + process-tree kill.
  *
  * @param {object} args
@@ -58,6 +114,7 @@ import { join } from 'node:path';
  * @param {object} [args.env]            Extra env vars (merged with process.env)
  * @param {string} [args.cwd]            Working directory
  * @param {string|null} [args.logFilePath]  Path to vendor --log-file (read after exit if set)
+ * @param {string} [args.vendorName]     Logical vendor name for serialization guard
  * @returns {Promise<import('./types.js').SubprocessResult>}
  */
 export async function runSubprocessOnce({
@@ -68,70 +125,75 @@ export async function runSubprocessOnce({
   env,
   cwd,
   logFilePath = null,
+  vendorName,
 }) {
   const isWindows = platform() === 'win32';
   const startedAt = Date.now();
+  const releaseVendorLock = await acquireVendorLock(vendorName);
 
-  const child = spawn(command, args, {
-    env: { ...process.env, ...(env || {}) },
-    cwd: cwd || process.cwd(),
-    stdio: [stdinInput == null ? 'ignore' : 'pipe', 'pipe', 'pipe'],
-    detached: !isWindows,                                       // Unix: detached process group for tree-kill
-    windowsHide: isWindows,
-  });
-
-  let stdout = '';
-  let stderr = '';
-  let timedOut = false;
-  let killTimer = null;
-
-  child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
-  child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-
-  if (stdinInput != null && child.stdin) {
-    try {
-      child.stdin.write(stdinInput);
-      child.stdin.end();
-    } catch (_) {
-      // child may have exited before stdin ready — ignore; exit code captures result
-    }
-  }
-
-  // Set up hard timeout. NO retry on timeout — timeout = failure, surface it.
-  if (timeoutMs > 0) {
-    killTimer = setTimeout(() => {
-      timedOut = true;
-      killProcessTree(child.pid, isWindows);
-    }, timeoutMs);
-  }
-
-  const exitCode = await new Promise((resolve) => {
-    child.on('close', (code, signal) => {
-      if (killTimer) clearTimeout(killTimer);
-      // Map signal to exit-code-equivalent (POSIX convention: 128 + signal)
-      resolve(code != null ? code : 128 + (signal === 'SIGKILL' ? 9 : signal === 'SIGTERM' ? 15 : 0));
+  try {
+    const child = spawn(command, args, {
+      env: { ...process.env, ...(env || {}) },
+      cwd: cwd || process.cwd(),
+      stdio: [stdinInput == null ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+      detached: !isWindows,                                       // Unix: detached process group for tree-kill
+      windowsHide: isWindows,
     });
-    child.on('error', (_err) => {
-      if (killTimer) clearTimeout(killTimer);
-      resolve(127); // command-not-found convention
-    });
-  });
 
-  const durationMs = Date.now() - startedAt;
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    let killTimer = null;
 
-  // Read --log-file content if adapter requested one (silent-fail diagnostic per codex F2)
-  let logFileContent = undefined;
-  if (logFilePath) {
-    try {
-      const { readFileSync } = await import('node:fs');
-      logFileContent = readFileSync(logFilePath, 'utf-8');
-    } catch (_) {
-      // log file may not exist if subprocess died early — that's diagnostic-worthy itself
-      logFileContent = undefined;
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+
+    if (stdinInput != null && child.stdin) {
+      try {
+        child.stdin.write(stdinInput);
+        child.stdin.end();
+      } catch (_) {
+        // child may have exited before stdin ready — ignore; exit code captures result
+      }
     }
-  }
 
-  return { exitCode, stdout, stderr, timedOut, durationMs, logFileContent };
+    // Set up hard timeout. NO retry on timeout — timeout = failure, surface it.
+    if (timeoutMs > 0) {
+      killTimer = setTimeout(() => {
+        timedOut = true;
+        killProcessTree(child.pid, isWindows);
+      }, timeoutMs);
+    }
+
+    const exitCode = await new Promise((resolve) => {
+      child.on('close', (code, signal) => {
+        if (killTimer) clearTimeout(killTimer);
+        // Map signal to exit-code-equivalent (POSIX convention: 128 + signal)
+        resolve(code != null ? code : 128 + (signal === 'SIGKILL' ? 9 : signal === 'SIGTERM' ? 15 : 0));
+      });
+      child.on('error', (_err) => {
+        if (killTimer) clearTimeout(killTimer);
+        resolve(127); // command-not-found convention
+      });
+    });
+
+    const durationMs = Date.now() - startedAt;
+
+    // Read --log-file content if adapter requested one (silent-fail diagnostic per codex F2)
+    let logFileContent = undefined;
+    if (logFilePath) {
+      try {
+        logFileContent = readFileSync(logFilePath, 'utf-8');
+      } catch (_) {
+        // log file may not exist if subprocess died early — that's diagnostic-worthy itself
+        logFileContent = undefined;
+      }
+    }
+
+    return { exitCode, stdout, stderr, timedOut, durationMs, logFileContent };
+  } finally {
+    releaseVendorLock();
+  }
 }
 
 /**
