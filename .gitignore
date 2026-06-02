@@ -53,3 +53,8 @@ yarn-debug.log*
 
 # agy CLI project metadata
 .antigravitycli/
+
+# Dashboard sidequest local review/handoff docs
+docs/sidequests/web-dashboard/handoffs/*-REVIEW-*-output.md
+docs/sidequests/web-dashboard/handoffs/*-REVIEW-*-output.template.md
+docs/sidequests/web-dashboard/handoffs/*-output.template.md
