@@ -135,8 +135,9 @@ After the command returns:
 
 4. Do NOT diagnose the failure, propose fixes, suggest next steps, recommend retries, or suggest switching vendors. Dispatch + surface only."
 
-HOST_MODEL_FLAG=()
+set -- -p "$PROMPT" --allow-all-tools --allow-all-paths
 if [ -n "${COPILOT_MODEL:-}" ]; then
-  HOST_MODEL_FLAG=(--model "$COPILOT_MODEL")
+  set -- "$@" --model "$COPILOT_MODEL"
 fi
-exec copilot -p "$PROMPT" --allow-all-tools --allow-all-paths "${HOST_MODEL_FLAG[@]}"
+
+exec copilot "$@"

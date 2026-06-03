@@ -151,9 +151,13 @@ export const agyAdapter = {
     const log = raw.logFileContent || '';
     const logFileMissing = raw.logFileContent === undefined;
     const signal = `${log}\n${raw.stderr || ''}`;
+    const hasStdout = Boolean((raw.stdout || '').trim());
 
     // Auth-fail patterns (per T-00b diagnostic + codex F2 enumeration)
-    if (/You are not logged into Antigravity|Failed to get OAuth token|error getting token source/i.test(signal)) {
+    // agy print mode may emit early "not logged in" log lines, then recover via
+    // silent auth and still return a valid answer on stdout. Treat these auth
+    // patterns as terminal only when there is no successful stdout payload.
+    if ((!hasStdout || raw.exitCode !== 0) && /You are not logged into Antigravity|Failed to get OAuth token|error getting token source/i.test(signal)) {
       return {
         text: '',
         status: 'auth-fail',
@@ -169,7 +173,7 @@ export const agyAdapter = {
       };
     }
 
-    if (/permission|access denied|forbidden/i.test(signal)) {
+    if (/permission denied|permission error|access denied|forbidden|not allowed/i.test(signal)) {
       return {
         text: raw.stdout,
         status: 'permission-fail',
@@ -177,7 +181,7 @@ export const agyAdapter = {
       };
     }
 
-    if (raw.exitCode === 0 && raw.stdout.trim()) {
+    if (raw.exitCode === 0 && hasStdout) {
       return { text: raw.stdout.trim(), status: 'success' };
     }
 

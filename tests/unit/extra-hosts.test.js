@@ -3,11 +3,11 @@
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, mkdtempSync, writeFileSync, chmodSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
-import { platform } from 'node:os';
+import { platform, tmpdir } from 'node:os';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -19,7 +19,7 @@ const HOSTS = [
     wrapperBase: 'hopper-copilot',
     title: 'Copilot CLI',
     hostVendor: 'copilot',
-    execPattern: /\bexec copilot -p\b/,
+    execPattern: /\bexec copilot\b/,
     commandPattern: /command -v copilot/,
   },
   {
@@ -143,3 +143,29 @@ for (const spec of HOSTS) {
     assert.match(stderr, /hopper-dispatch not found/i);
   });
 }
+
+test('copilot-cli: wrapper runs without COPILOT_MODEL set', { skip: platform() === 'win32' ? 'bash not standardly available on Windows CI' : false }, () => {
+  const wrapper = join(REPO_ROOT, 'hosts', 'copilot-cli', 'bin', 'hopper-copilot');
+  const tmpBin = mkdtempSync(join(tmpdir(), 'hopper-copilot-mock-'));
+  const mockCopilot = join(tmpBin, 'copilot');
+  try {
+    writeFileSync(mockCopilot, '#!/usr/bin/env bash\nprintf \'%s\\n\' "$*"\n');
+    chmodSync(mockCopilot, 0o755);
+
+    const stdout = execFileSync('bash', [wrapper, 'T-OK'], {
+      env: {
+        ...process.env,
+        HOPPER_PLUGIN_ROOT: REPO_ROOT,
+        PATH: `${tmpBin}:${process.env.PATH}`,
+        COPILOT_MODEL: '',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).toString();
+
+    assert.match(stdout, /--allow-all-tools/);
+    assert.match(stdout, /--allow-all-paths/);
+    assert.ok(!/--model\b/.test(stdout), 'COPILOT_MODEL unset should not emit --model');
+  } finally {
+    rmSync(tmpBin, { recursive: true, force: true });
+  }
+});

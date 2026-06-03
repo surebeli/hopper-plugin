@@ -72,6 +72,19 @@ test('agy parseResult: detects "permission" as permission-fail', () => {
   assert.equal(result.status, 'permission-fail');
 });
 
+test('agy parseResult: does not treat toolPermission bookkeeping as permission-fail', () => {
+  const result = agyAdapter.parseResult({
+    exitCode: 0,
+    stdout: 'HOPPER_AGY_OK',
+    stderr: '',
+    timedOut: false,
+    durationMs: 5000,
+    logFileContent: 'I cli_setting_manager.go:66] CLI settings initialized: permissions=<nil>, toolPermission=request-review',
+  });
+  assert.equal(result.status, 'success');
+  assert.equal(result.text, 'HOPPER_AGY_OK');
+});
+
 test('agy parseResult: empty stdout without error pattern → unknown-fail', () => {
   const result = agyAdapter.parseResult({
     exitCode: 0,
@@ -93,6 +106,22 @@ test('agy parseResult: exit 0 + non-empty stdout + no error pattern = success', 
     timedOut: false,
     durationMs: 5000,
     logFileContent: 'I normal log',
+  });
+  assert.equal(result.status, 'success');
+  assert.equal(result.text, 'HOPPER_AGY_OK');
+});
+
+test('agy parseResult: exit 0 + stdout wins over early auth warnings when silent auth recovers', () => {
+  const result = agyAdapter.parseResult({
+    exitCode: 0,
+    stdout: 'HOPPER_AGY_OK',
+    stderr: '',
+    timedOut: false,
+    durationMs: 5000,
+    logFileContent: [
+      'E log.go:398] Failed to get OAuth token: error getting token source: You are not logged into Antigravity.',
+      'I printmode.go:166] Print mode: silent auth succeeded',
+    ].join('\n'),
   });
   assert.equal(result.status, 'success');
   assert.equal(result.text, 'HOPPER_AGY_OK');
