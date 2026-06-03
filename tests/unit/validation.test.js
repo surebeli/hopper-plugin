@@ -8,6 +8,7 @@ import {
   ALLOWED_DISPATCH_FLAGS,
   validateTaskId,
   validateDispatchFlags,
+  validateHostVendorSeparation,
 } from '../../cli/src/validation.js';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -63,18 +64,34 @@ test('validateDispatchFlags throws on unknown flag', () => {
   assert.throws(() => validateDispatchFlags(['--write', '--evil']), /--evil/);
 });
 
-// ─── Cross-host parity: verify the same pattern appears in all 4 hosts ──
+test('validateHostVendorSeparation enforces host != vendor', () => {
+  assert.doesNotThrow(() => validateHostVendorSeparation(undefined, 'kimi'));
+  assert.doesNotThrow(() => validateHostVendorSeparation('codex', 'kimi'));
+  assert.throws(() => validateHostVendorSeparation('codex', 'codex'), /host != vendor/i);
+});
 
-test('cross-host parity: canonical TASK_ID_PATTERN matches dispatch.md, hopper-codex, hopper-opencode', () => {
+// ─── Cross-host parity: verify the same pattern appears in all host entry points ──
+
+test('cross-host parity: canonical TASK_ID_PATTERN matches dispatch.md and all Tier C wrappers', () => {
   const canonical = TASK_ID_PATTERN.source;
   // What pattern do the hosts cite?
   const claudeCode = readFileSync(join(REPO_ROOT, 'commands', 'dispatch.md'), 'utf-8');
   const codexCli = readFileSync(join(REPO_ROOT, 'hosts', 'codex-cli', 'bin', 'hopper-codex'), 'utf-8');
   const opencode = readFileSync(join(REPO_ROOT, 'hosts', 'opencode', 'bin', 'hopper-opencode'), 'utf-8');
+  const copilot = readFileSync(join(REPO_ROOT, 'hosts', 'copilot-cli', 'bin', 'hopper-copilot'), 'utf-8');
+  const grok = readFileSync(join(REPO_ROOT, 'hosts', 'grok-cli', 'bin', 'hopper-grok'), 'utf-8');
+  const cursor = readFileSync(join(REPO_ROOT, 'hosts', 'cursor-cli', 'bin', 'hopper-cursor'), 'utf-8');
 
   // All three should contain a literal "^[A-Za-z][A-Za-z0-9._-]{0,99}$" substring
   const literal = '^[A-Za-z][A-Za-z0-9._-]{0,99}$';
-  for (const [name, content] of [['dispatch.md', claudeCode], ['hopper-codex', codexCli], ['hopper-opencode', opencode]]) {
+  for (const [name, content] of [
+    ['dispatch.md', claudeCode],
+    ['hopper-codex', codexCli],
+    ['hopper-opencode', opencode],
+    ['hopper-copilot', copilot],
+    ['hopper-grok', grok],
+    ['hopper-cursor', cursor],
+  ]) {
     assert.ok(content.includes(literal),
       `${name} must reference canonical task-id pattern "${literal}"`);
   }

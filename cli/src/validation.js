@@ -123,6 +123,26 @@ export function validateReasoning(reasoning) {
 }
 
 /**
+ * Enforce the product rule that a host must not dispatch back into the same
+ * vendor identity. Hosts are allowed to omit hostVendor (standalone path).
+ *
+ * @param {string | undefined} hostVendor
+ * @param {string} resolvedVendor
+ */
+export function validateHostVendorSeparation(hostVendor, resolvedVendor) {
+  if (!hostVendor) return;
+  if (typeof resolvedVendor !== 'string' || resolvedVendor.length === 0) {
+    throw new Error(`resolved vendor must be non-empty string, got ${typeof resolvedVendor}`);
+  }
+  if (hostVendor === resolvedVendor) {
+    throw new Error(
+      `Host '${hostVendor}' cannot dispatch to the same vendor '${resolvedVendor}'. ` +
+      `hopper-plugin requires host != vendor. Choose a different vendor in .hopper/AGENTS.md or invoke from a different host.`
+    );
+  }
+}
+
+/**
  * Validate a task-type string. Per codex final strict audit P1 (Category E):
  * task-type names a `.hopper/tasks/<type>.md` file path, so it must be
  * lowercase, kebab-case, no path separators, no '..'.

@@ -82,7 +82,7 @@ test('wrapper supports --model + --reasoning value flags (gap-fix 2026-05-21)', 
   const content = readFileSync(WRAPPER, 'utf-8');
   assert.match(content, /--model\)/, 'wrapper must handle --model case');
   assert.match(content, /--reasoning\)/, 'wrapper must handle --reasoning case');
-  assert.match(content, /low\|medium\|high\|xhigh/, 'wrapper must enforce reasoning whitelist');
+  assert.match(content, /minimal\|low\|medium\|high\|xhigh/, 'wrapper must enforce reasoning whitelist');
   assert.match(content, /\^\[A-Za-z\]\[A-Za-z0-9\._\/:-\]\{0,99\}\$/, 'wrapper must validate model name regex');
 });
 
@@ -205,7 +205,7 @@ test('wrapper rejects --reasoning with invalid level (dry-run)', { skip: platfor
     exitCode = err.status;
   }
   assert.equal(exitCode, 2);
-  assert.match(stderr, /reasoning.*low\|medium\|high\|xhigh/i);
+  assert.match(stderr, /reasoning.*minimal\|low\|medium\|high\|xhigh/i);
 });
 
 test('wrapper rejects --model with no value (dry-run)', { skip: platform() === 'win32' ? 'bash not standardly available on Windows CI' : false }, () => {

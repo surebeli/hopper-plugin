@@ -5,7 +5,7 @@
 // Per spec §3 #4 (no harness reaction core): ONE invocation = ONE action = ONE exit.
 // No retry, no fallback, no state across invocations.
 
-import { resolveDispatch, getStatus, executeDispatch } from '../src/dispatch.js';
+import { resolveDispatch, getStatus, executeWithAdapter } from '../src/dispatch.js';
 import { listTaskTypes } from '../src/tasks.js';
 import { listAdapters, getAdapter, installCheckForAdapter, capabilitiesForAdapter, probeVendor } from '../src/vendors/index.js';
 import { readCache, readCacheWithDiagnostics, getVendorCache, setVendorCache, isStale, staleness } from '../src/cache.js';
@@ -15,6 +15,7 @@ import {
   validateDispatchFlags,
   validateModelName,
   validateReasoning,
+  validateHostVendorSeparation,
   ALLOWED_DISPATCH_FLAGS,
   ALLOWED_DISPATCH_VALUE_FLAGS,
 } from '../src/validation.js';
@@ -47,7 +48,7 @@ function printUsage() {
   console.log('  hopper-dispatch <task-id> --background          Dispatch + return immediately; result in .md (spec §14)');
   console.log('  hopper-dispatch <task-id> --write [--force]     Dispatch + write output.md (sync mode only)');
   console.log('  hopper-dispatch <task-id> --model <name>        Override vendor model (e.g. gpt-5.5, claude-opus-4-7)');
-  console.log('  hopper-dispatch <task-id> --reasoning <level>   Override reasoning effort (low|medium|high|xhigh)');
+  console.log('  hopper-dispatch <task-id> --reasoning <level>   Override reasoning effort (minimal|low|medium|high|xhigh)');
   console.log('  hopper-dispatch --watch <task-id>               Tail-follow a background job until exit');
   console.log('  hopper-dispatch --progress <task-id>            Show background task phase + recent progress events');
   console.log('  hopper-dispatch --watch-events [--once]         Emit terminal task events as stdout JSONL');
@@ -68,14 +69,13 @@ function printUsage() {
   console.log('');
   console.log('Adapter opts (forwarded to vendor adapter; ignored if adapter does not honor):');
   console.log('  --model <name>       Examples: gpt-5.5, claude-opus-4-7, deepseek/v4-flash, kimi-thinking');
-  console.log('                       Honored by: kimi, opencode, copilot');
-  console.log('  --reasoning <level>  low | medium | high | xhigh');
+  console.log('                       Honored by: kimi, opencode, copilot, grok');
+  console.log('  --reasoning <level>  minimal | low | medium | high | xhigh');
   console.log('                       Honored by: codex (others ignore harmlessly)');
   console.log('');
   console.log('Env: HOPPER_DIR overrides .hopper/ location');
   console.log('     HOPPER_DEBUG=1 prints composed prompt + raw subprocess result');
-  console.log('     HOPPER_HOST_VENDOR set by Tier B/C hosts; triggers heterogeneous-only warning');
-  console.log('     HOPPER_ALLOW_SAME_VENDOR=1 suppresses heterogeneous-only warning');
+  console.log('     HOPPER_HOST_VENDOR set by Tier B/C hosts; host and vendor must differ');
 }
 
 function printSmoke() {
@@ -257,7 +257,7 @@ async function main() {
   }
 
   // Per codex Phase 4 audit P1: validate task-id + flags at CLI entry using
-  // the canonical validator so all 4 hosts apply identical rules.
+  // the canonical validator so every host path applies identical rules.
   try {
     validateTaskId(taskId);
     if (bareFlags.length > 0) validateDispatchFlags(bareFlags);
@@ -398,17 +398,23 @@ async function runDispatch(hopperDir, taskId, { write = false, force = false, ad
       : '';
     console.error(`hopper-dispatch v${VERSION} — dispatching ${taskId}${optsSummary}...`);
 
+    const resolved = await resolveDispatch({ hopperDir, taskId });
+
+    const hostVendor = process.env.HOPPER_HOST_VENDOR;
+    validateHostVendorSeparation(hostVendor, resolved.vendor);
+
     // Soft-warn: --model passed but X not in cached list. Non-blocking. Single-
     // spawn invariant unaffected (resolveDispatch is in-process; cache read is FS).
     if (adapterOpts.model) {
-      try {
-        const peek = await resolveDispatch({ hopperDir, taskId });
-        warnIfModelUnknown(peek.vendor, adapterOpts.model);
-      } catch (_) { /* never block dispatch */ }
+      try { warnIfModelUnknown(resolved.vendor, adapterOpts.model); } catch (_) { /* never block dispatch */ }
     }
 
     const startedAt = Date.now();
-    const result = await executeDispatch({ hopperDir, taskId, adapterOpts });
+    const adapter = getAdapter(resolved.vendor);
+    if (!adapter) {
+      throw new Error(`unknown vendor '${resolved.vendor}'`);
+    }
+    const result = await executeWithAdapter({ resolved, adapter, adapterOpts });
     const elapsedMs = Date.now() - startedAt;
 
     console.log('');
@@ -501,14 +507,13 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {} } = {
     process.exit(1);
   }
 
-  // Heterogeneous-only warning (spec §14.7)
+  // Enforce host != vendor across all host adapters.
   const hostVendor = process.env.HOPPER_HOST_VENDOR;
-  if (hostVendor && hostVendor === resolved.vendor && process.env.HOPPER_ALLOW_SAME_VENDOR !== '1') {
-    console.error(
-      `Warning: invoked from host '${hostVendor}' but resolved vendor is also '${resolved.vendor}'.\n` +
-      `hopper-plugin's value proposition assumes heterogeneous combinations.\n` +
-      `Continuing anyway. Set HOPPER_ALLOW_SAME_VENDOR=1 to suppress.`
-    );
+  try {
+    validateHostVendorSeparation(hostVendor, resolved.vendor);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
   }
 
   // Adapter envPreflight gate

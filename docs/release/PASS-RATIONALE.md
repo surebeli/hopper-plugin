@@ -18,15 +18,15 @@ Anchor: `docs/release/PASS-RATIONALE.md::root`
 | Metric                             | Value         | Where                                          |
 |------------------------------------|---------------|------------------------------------------------|
 | Core dispatcher LOC (JS)           | ~1,517 lines  | `cli/src/*.js` (excluding vendors)             |
-| Vendor adapter LOC (JS, all 5)     | ~520 lines    | `cli/src/vendors/*.js`                         |
+| Vendor adapter LOC (JS, all 6)     | ~620 lines    | `cli/src/vendors/*.js`                         |
 | Host wrapper LOC (bash + cmd)      | ~280 lines    | `hosts/codex-cli/bin/` + `hosts/opencode/bin/` |
 | Slash-command prompts LOC (md)     | ~127 lines    | `commands/*.md`                                |
 | Test suite LOC                     | ~2,473 lines  | `tests/unit/` + `tests/integration/`           |
 | Test count (after final strict)    | 207 / 216     | 9 skipped on Windows by design                 |
 | Test : code ratio                  | ~1.0 : 1      | tests have parity with implementation           |
-| Vendor adapters registered         | 5             | codex, kimi, opencode, copilot, agy            |
-| Vendor adapters live-smoke-verified| **4 of 5**    | agy code-complete; live smoke gated on OAuth   |
-| Functional host adapters           | 4             | Tier A + Tier B + Tier C #1 + Tier C #2        |
+| Vendor adapters registered         | 6             | codex, kimi, opencode, copilot, agy, grok      |
+| Vendor adapters live-smoke-verified| **4 of 6**    | agy OAuth-gated; grok not yet live-dogfooded   |
+| Functional host adapters           | 7             | Tier A + Tier B + Tier C #1..#5                |
 | Codex audit cycles                 | 10            | 8 phase audits + Critic (T-10) + final strict   |
 | Total Strategy + audit cost (est.) | ~$0.50 API    | `.hopper/COST-LOG.md`                          |
 
@@ -73,22 +73,27 @@ Anchor: `docs/release/PASS-RATIONALE.md::root`
 - Tier B: `commands/*.md` (4 slash commands) + `.claude-plugin/plugin.json` at repo root
 - Tier C #1: `hosts/codex-cli/bin/hopper-codex` (bash wrapper invoking `codex exec`)
 - Tier C #2: `hosts/opencode/bin/hopper-opencode` (bash wrapper invoking `opencode run`)
-- Vendor coverage: **5 adapters registered + code-complete; 4 live-smoke-verified**; agy live smoke gated on user OAuth (T-05e). Spec required ≥3 live-smoked; demo exceeds with 4.
+- Tier C #3: `hosts/copilot-cli/bin/hopper-copilot` (bash wrapper invoking `copilot -p`)
+- Tier C #4: `hosts/grok-cli/bin/hopper-grok` (bash wrapper invoking `grok -p`)
+- Tier C #5: `hosts/cursor-cli/bin/hopper-cursor` (bash wrapper invoking `agent -p`)
+- Vendor coverage: **6 adapters registered + code-complete; 4 live-smoke-verified**; agy live smoke gated on user OAuth (T-05e), and grok remains documented/code-complete but not yet live-dogfooded. Spec required ≥3 live-smoked; demo exceeds with 4.
 
 **Evidence**:
-- `cli/src/vendors/index.js` — static registry of all 5 adapters
-- `cli/bin/hopper-dispatch --vendors` lists 5
-- Cross-host equivalence: same `task-id` resolved via any of the 4 hosts ends up in `executeDispatch` → `getAdapter(vendor)` → `runSubprocessOnce` once, with vendor selected deterministically from `.hopper/AGENTS.md`.
+- `cli/src/vendors/index.js` — static registry of all 6 adapters
+- `cli/bin/hopper-dispatch --vendors` lists 6
+- Cross-host equivalence: same `task-id` resolved via any supported host ends up in `executeDispatch` → `getAdapter(vendor)` → `runSubprocessOnce` once, with vendor selected deterministically from `.hopper/AGENTS.md`, subject to the hard `host != vendor` rule.
 - Tests:
-  - `tests/unit/validation.test.js` "cross-host parity: canonical TASK_ID_PATTERN matches dispatch.md, hopper-codex, hopper-opencode" — asserts byte-equivalent regex literal in all 3 host entry points
+  - `tests/unit/validation.test.js` "cross-host parity: canonical TASK_ID_PATTERN matches dispatch.md and all Tier C wrappers" — asserts byte-equivalent regex literal in all host entry points
+  - `tests/unit/extra-hosts.test.js` — static + dry-run checks for copilot/grok/cursor host wrappers
   - `tests/unit/opencode-host.test.js` "OpenCode wrapper and Codex CLI wrapper share validation logic"
   - `tests/integration/execute-dispatch-e2e.test.js` 4 tests — proves single-spawn at executeDispatch chain via counter-incrementing fake adapter
-- 5 vendor adapters each have a contract test suite (codex/kimi/opencode/copilot/agy)
+- 6 vendor adapters each have a contract test suite (codex/kimi/opencode/copilot/agy/grok)
 
 **Caveats** (per T-10 Critic OVER-CLAIM CHECK, language tightened):
 - **Tier B Claude Code install** is functionally implemented but **not user-verified** (T-PLUGIN-00 Prong 1 still open — Strategy-as-developer cannot install plugin on self while running inside Claude Code). The manifest schema + 4 command files exist + tests assert structure, but the actual `/hopper:smoke` invocation under a fresh Claude Code session is a user-action gate.
-- **agy adapter live smoke** is gated on user OAuth (T-PLUGIN-05e). The adapter classifies silent-auth-fail correctly when tested with synthetic SubprocessResult inputs (`tests/unit/vendors-agy-quirks.test.js` + `tests/unit/vendors-agy-edge-cases.test.js`, 16 quirks/edge-case tests passing); **the code path is functionally complete, but no live OAuth-authed `agy -p` smoke has been captured**. Spec only requires ≥3 live-smoked; demo has 4 (codex, kimi, opencode, copilot all live-smoke-verified during Phase 0; agy code-complete pending OAuth).
-- **Cross-host equivalence is structural, not live-empirical**. `scripts/cross-host-verify.sh` proves the structural invariants (same regex, same dispatcher binary, no orchestration constructs). A live 4-host demo (same task-id dispatched via Tier A + Tier B + Tier C #1 + Tier C #2, observed to spawn the same vendor) is a user-action follow-up.
+- **agy adapter live smoke** is gated on user OAuth (T-PLUGIN-05e). The adapter classifies silent-auth-fail correctly when tested with synthetic SubprocessResult inputs (`tests/unit/vendors-agy-quirks.test.js` + `tests/unit/vendors-agy-edge-cases.test.js`, 16 quirks/edge-case tests passing); **the code path is functionally complete, but no live OAuth-authed `agy -p` smoke has been captured**.
+- **grok adapter** is registered and code-complete, but the adapter was authored from docs research plus follow-up dogfood feedback rather than a local full live-dogfood cycle; it remains **not yet live-dogfooded**. Spec only requires ≥3 live-smoked; demo still has 4 (codex, kimi, opencode, copilot live-smoke-verified).
+- **Cross-host equivalence is structural, not live-empirical**. `scripts/cross-host-verify.sh` proves the structural invariants (same regex, same dispatcher binary, no orchestration constructs). A live multi-host demo remains a user-action follow-up.
 - Tier C wrappers' cross-host claim is **prompt-enforced** at the host model boundary (codex/opencode must comply with the wrapper's prompt). Mechanically the deterministic vendor resolution holds; soft-orchestration by the host model is explicitly forbidden in the prompt but the constraint is policy-level, not bytecode-level. (Codex Phase 4 audit acknowledged this as inherent to the integration boundary.)
 - **Output sidecar `-output-raw.txt`** is created for long vendor outputs (>4096 chars). It lives inside `.hopper/handoffs/` (still satisfies criterion #1) but is `.txt` not `.md` — disclosed here per T-10 Critic note.
 - **OpenCode adapter accepts `ANTHROPIC_API_KEY` as a provider env-var fallback** (`cli/src/vendors/opencode.js:39`). This is OpenCode's own multi-provider env scheme, NOT an Anthropic SDK / `claude -p` usage path. Surfaced per T-10 Critic OVER-CLAIM CHECK so the spec §1 #3 verifier grep is not misread.
@@ -128,7 +133,7 @@ Anchor: `docs/release/PASS-RATIONALE.md::root`
 **Built**:
 - `cli/src/dispatch.js` `executeDispatch` invokes `runSubprocessOnce` exactly once per dispatch call. No retry on any failure status.
 - `cli/src/subprocess.js` `runSubprocessOnce` is the single-spawn primitive. Hard timeout, no exponential backoff.
-- All 5 vendor adapters' `parseResult` classify failures (`success` / `auth-fail` / `timeout` / `permission-fail` / `unknown-fail`) but do NOT retry. The dispatcher returns the classification; the caller (user / Critic / Leader) decides what to do.
+- All 6 vendor adapters' `parseResult` classify failures (`success` / `auth-fail` / `timeout` / `permission-fail` / `unknown-fail`) but do NOT retry. The dispatcher returns the classification; the caller (user / Critic / Leader) decides what to do.
 - Host wrappers contain NO active loops over codex/opencode/hopper-dispatch invocations.
 
 **Evidence**:
@@ -208,12 +213,12 @@ Per user directive 2026-05-20: these gates will be exercised during the demo tes
 §14 added to the spec to support long-running tasks without blocking the caller. **Does NOT modify §3 hard criteria.** All 5 still bind. The amendment adds:
 
 - `--background` opt-in flag at Tier A CLI
-- Host-native async paths: Claude Code (Bash `run_in_background=true` + Monitor) + OpenCode (plugin + `prompt_async` + `session.idle`)
-- Custom fallback for Codex CLI / Codex Desktop / Kimi-as-vendor / Copilot-as-vendor / Agy-as-vendor via `hopper-runner` detached wrapper
+- Host-native async paths: Claude Code (Bash `run_in_background=true` + Monitor)
+- Custom fallback for Codex CLI / OpenCode wrapper / Copilot CLI / Grok Build / Cursor CLI and vendor-side detached runs via `hopper-runner`
 - State lives in `output.md` frontmatter (spec §1 #1 preserved — no new JSON files)
 - 24h ceiling rule for PID-reuse mitigation
 - Status state machine: `in-progress → done | failed | orphaned`
-- Heterogeneous-only soft warning (HOPPER_ALLOW_SAME_VENDOR=1 suppresses)
+- Hard `host != vendor` enforcement at dispatcher entry
 
 **§3 #4 single-spawn invariant preserved**: the hopper-runner wrapper itself spawns exactly once, and contains exactly one `spawn()` call. Counter-tested in `tests/integration/execute-dispatch-e2e.test.js` + `tests/unit/subprocess-spawn-count.test.js` + `tests/integration/background-e2e.test.js` (preflight protection + path-traversal rejection).
 
@@ -224,7 +229,7 @@ Phase 5 deliverables (this amendment):
 - `cli/bin/hopper-runner` (~140 LOC) — detached wrapper owning single vendor spawn
 - 4 new dispatcher commands: `--background`, `--watch`, `--jobs`, `--reap`
 - `commands/dispatch.md` Claude Code prompt extended (Mode A sync / Mode B background)
-- `hosts/opencode/plugins/hopper-async.ts` (~270 LOC) — OpenCode plugin using native `prompt_async`
+- `hosts/opencode/plugins/hopper-async.ts` — disabled shim documenting why the native OpenCode path is no longer allowed under `host != vendor`
 - Test count: 266/278 passing (+38 from Phase 4 baseline of 228/240; 12 Windows skips unchanged in shape)
 - Backing research: `docs/research/async-execution/` (5 docs)
 
@@ -234,7 +239,7 @@ All 5 hard criteria self-rated PASS (subject to user-action gates as documented)
 
 - "Multi-LLM coordination via file-based protocol is feasible with ~2,500 LOC core + ~2,500 LOC tests."
 - "10 codex audit cycles caught real issues; the discipline of 'every phase audited adversarially before next phase' worked — including a final strict cycle that found queue-status schema bugs and a path-traversal gap that all 9 prior local-scope audits missed."
-- "Same task-id → same vendor across 4 hosts is mechanically true through deterministic vendor resolution; cross-host claim is structurally enforced."
+- "Same task-id → same vendor across all supported host paths is mechanically true through deterministic vendor resolution, while same-identity host/vendor pairs are structurally rejected."
 - "Single-spawn invariant proven by counter-tests at 3 layers (runSubprocessOnce, executeDispatch, executeWithAdapter)."
 
 T-PLUGIN-10 Critic acceptance should review this document + the codebase + the test suite + the `.hopper/` audit trail and produce a final verdict.

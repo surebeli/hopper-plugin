@@ -12,7 +12,10 @@ Anchor: `docs/release/INSTALL-MATRIX.md::root`
 | Claude Code                          | Tier A + Tier B                 | Slash commands in-session                            |
 | Codex CLI (gpt-5.x)                  | Tier A + Tier C #1              | Drives hopper-dispatch from codex's agentic loop     |
 | OpenCode (multi-provider)            | Tier A + Tier C #2              | Drives hopper-dispatch from opencode's agentic loop  |
-| All four hosts (e.g. for testing)    | Tier A + B + C #1 + C #2        | Cross-host equivalence dogfood                       |
+| Copilot CLI                          | Tier A + Tier C #3              | Drives hopper-dispatch from copilot's agentic loop   |
+| Grok Build                           | Tier A + Tier C #4              | Drives hopper-dispatch from grok's agentic loop      |
+| Cursor CLI                           | Tier A + Tier C #5              | Drives hopper-dispatch from Cursor's agentic loop    |
+| All supported hosts (e.g. testing)   | Tier A + B + C #1..#5           | Cross-host equivalence dogfood                       |
 
 Tier A is the baseline. Every other tier shells out to `cli/bin/hopper-dispatch` from Tier A. There is no scenario where you install **only** a host adapter without Tier A.
 
@@ -132,7 +135,7 @@ hopper-opencode T-PLUGIN-05a
 
 ## Cross-host equivalence verification
 
-After installing all 4 routes, dispatch the same task ID through each. All 4 should resolve to the same vendor (determined by `.hopper/AGENTS.md`).
+After installing the routes you care about, dispatch the same task ID through each. Every route should resolve to the same vendor (determined by `.hopper/AGENTS.md`), unless the hard `host != vendor` rule rejects a homogeneous combination.
 
 ```bash
 # In a directory containing .hopper/ (e.g. this repo)
@@ -141,11 +144,14 @@ hopper-dispatch --resolve T-PLUGIN-05a               # Tier A: prints vendor: ki
 /hopper:dispatch T-PLUGIN-05a                        # Tier B: tells Claude to invoke same dispatcher
 hopper-codex T-PLUGIN-05a                            # Tier C #1: codex tool-use → same dispatcher
 hopper-opencode T-PLUGIN-05a                         # Tier C #2: opencode tool-use → same dispatcher
+hopper-copilot T-PLUGIN-05a                          # Tier C #3: copilot tool-use → same dispatcher
+hopper-grok T-PLUGIN-05a                             # Tier C #4: grok tool-use → same dispatcher
+hopper-cursor T-PLUGIN-05a                           # Tier C #5: cursor tool-use → same dispatcher
 ```
 
-**Structurally** all 4 routes resolve to the same vendor (kimi) and would spawn the same subprocess. Vendor selection lives in `.hopper/AGENTS.md`, not in the host adapter — this is the structural cross-host claim, mechanically asserted by the validation parity tests. A live empirical 4-host demonstration is a user-action follow-up (it requires Claude Code + codex CLI + opencode CLI all installed + authenticated simultaneously).
+**Structurally** all supported routes resolve to the same vendor and would spawn the same subprocess. Vendor selection lives in `.hopper/AGENTS.md`, not in the host adapter, and the dispatcher now hard-enforces `host != vendor`.
 
-The equivalence is mechanically asserted by `tests/unit/validation.test.js` "cross-host parity" test, which reads all 3 host entry points (Tier B + Tier C #1 + Tier C #2) and verifies they cite the same canonical task-id regex literal.
+The equivalence is mechanically asserted by `tests/unit/validation.test.js` plus `tests/unit/extra-hosts.test.js`, which verify the canonical task-id regex and wrapper invariants across Tier B and every Tier C wrapper.
 
 ## Async dispatch (spec v2.1.0 §14)
 
@@ -156,7 +162,7 @@ Long-running tasks (kimi-thinking, codex xhigh, agy reasoning — anything >1 mi
 | Tier A standalone | `hopper-dispatch <id> --background` (custom fallback) | works out of box |
 | Tier B Claude Code | Bash tool `run_in_background=true` + Monitor (native) | works once plugin installed; prompt handles it |
 | Tier C #1 Codex CLI | Custom fallback (Codex has no native — open issue openai/codex#3968) | works via `hopper-codex` wrapper |
-| Tier C #2 OpenCode | Plugin: `POST /session/:id/prompt_async` + `session.idle` hook (native) | install plugin (below); requires `opencode serve` |
+| Tier C #2 OpenCode | Custom fallback via `hopper-opencode --background` | native plugin path is disabled because it violates `host != vendor` |
 
 ### Async setup per tier
 
@@ -186,23 +192,13 @@ hopper-codex T-PLUGIN-05a --background
 
 The wrapper passes the flag through to inner `hopper-dispatch`, which spawns the hopper-runner detached process.
 
-**Tier C #2 OpenCode** — install the bundled plugin first:
+**Tier C #2 OpenCode** — use the wrapper path:
 
 ```bash
-# Project-local
-mkdir -p .opencode/plugins/
-cp /path/to/hopper-plugin/hosts/opencode/plugins/hopper-async.ts .opencode/plugins/
-
-# OR global
-mkdir -p ~/.config/opencode/plugins/
-cp /path/to/hopper-plugin/hosts/opencode/plugins/hopper-async.ts ~/.config/opencode/plugins/
+hopper-opencode T-PLUGIN-05a --background
 ```
 
-Then restart `opencode serve` (or TUI). From inside an OpenCode session:
-
-> "Use hopper_dispatch tool to start T-PLUGIN-05a in the background"
-
-The plugin uses OpenCode's `prompt_async` natively — see `hosts/opencode/plugins/README.md` for details.
+The previously bundled native plugin path is now a disabled shim because it always forced `host == vendor` (`opencode` → `opencode`).
 
 ### Async result retrieval
 
@@ -263,7 +259,7 @@ Host behavior:
 | Claude Code plugin | Native session wake via repo-root `monitors/monitors.json` running `hopper-dispatch --watch-events` | `/hopper:result <id>` or `hopper-dispatch --progress <id>` |
 | Codex CLI wrapper | No native hopper-terminal wake; OS toast only if a monitor/watch-events process is running | `hopper-dispatch --progress <id>` / `--result <id>` |
 | OpenCode wrapper path | No native `session.idle` wake; behaves like standalone | `--progress <id>` / `--result <id>` |
-| OpenCode native plugin path | OpenCode `session.idle` for opencode-only async jobs | dashboard / frontmatter |
+| OpenCode native plugin path | Disabled by the hard `host != vendor` rule; use the wrapper path instead | dashboard / frontmatter |
 | Standalone shell | OS toast + stdout JSONL from a user-run `--watch-events` process | `--watch <id>` / `--progress <id>` |
 | Dashboard | SSE push from the same progress/output files; no OS toast | browser refresh / API snapshot |
 
@@ -271,7 +267,7 @@ Host behavior:
 
 - **Concurrent dispatch protection**: trying to dispatch a task that's already `in-progress` with an alive PID → refused. Use `--watch` to follow or wait. After 24h, the job is auto-classified as `orphaned` and re-dispatch is allowed (PID-reuse mitigation).
 - **stdin-piping adapters**: not supported in background mode (would require a pipe surviving parent exit — fragile cross-platform). Codex/Kimi/OpenCode/Copilot/Agy all use argv-mode prompts, so this doesn't affect existing vendors.
-- **Heterogeneous-only**: invoking from Codex CLI host to dispatch back to codex vendor triggers a soft warning. Set `HOPPER_ALLOW_SAME_VENDOR=1` to suppress.
+- **Host/vendor separation**: dispatch now hard-rejects `host == vendor`. If a Codex CLI host resolves to the `codex` vendor (or any other same-identity pair), choose a different vendor in `.hopper/AGENTS.md` or invoke from a different host.
 - **No auto-retry**: failed jobs stay `status: failed`. User re-dispatches manually if desired. Spec §14.10 forbids any retry logic in this layer.
 
 ### Test-only environment variables
@@ -328,7 +324,7 @@ $ hopper-dispatch --capabilities codex
                Note: codex adapter uses opts.reasoning, not opts.model.
 
   --reasoning  enumerated
-               Values: low | medium | high | xhigh
+               Values: minimal | low | medium | high | xhigh
                Note: docs/research/async-execution/01-openai-hosts.md
 
   Features:
@@ -345,12 +341,12 @@ For quick reference (re-verify quarterly per each adapter's `staleAfter` date):
 
 | Vendor | `--model` | `--reasoning` | Session resume | File output | Streaming |
 |---|---|---|---|---|---|
-| **codex** | IGNORED | `low \| medium \| high \| xhigh` | ✓ | ✓ (`--output-last-message`, unused by adapter) | ✓ |
+| **codex** | IGNORED | `minimal \| low \| medium \| high \| xhigh` | ✓ | ✓ (`--output-last-message`, unused by adapter) | ✓ |
 | **kimi** | freeform (e.g. `default`) | IGNORED | ✓ (`--session <id>` / `--continue`) | ✗ | ✓ |
 | **opencode** | freeform (`<provider>/<model>`) | IGNORED | ✓ (per-machine session IDs; NOT cross-OS) | ✗ | ✓ |
 | **copilot** | freeform | IGNORED | partial (`--resume` picker; UNCONFIRMED ID arg) | ✗ | ✓ |
 | **agy** | IGNORED | IGNORED | UNCONFIRMED | ✗ (`--log-file` is diagnostic, not answer) | ✓ |
-| **grok** | freeform (`-m`; default `grok-build-0.1`) | IGNORED (no CLI flag) | ✓ (`-s` / `-r` / `-c`) | ✗ (stdout only) | ✓ (`--output-format streaming-json`) |
+| **grok** | freeform (`-m`; default `grok-build`) | IGNORED (no CLI flag) | ✓ (`-s` / `-r` / `-c`) | ✗ (stdout only) | ✓ (`--output-format streaming-json`) |
 
 **Honest gotchas surfaced by the capability data**:
 

@@ -1,37 +1,27 @@
 #!/usr/bin/env bash
-# hopper-opencode — Tier C OpenCode host adapter for hopper-plugin
-# Anchor: hosts/opencode/bin/hopper-opencode
-#
-# Per spec §1 #2 cross-host architecture + §3 #4 no harness reaction core.
-# Same shape as hosts/codex-cli/bin/hopper-codex (Tier C #1) — but invokes
-# `opencode run` instead of `codex exec`. The pattern is intentionally
-# parallel so both Tier C adapters demonstrate the same cross-host claim.
-#
-# Single-spawn invariant chain:
-#   hopper-opencode → 1× opencode run → opencode tool-use → 1× hopper-dispatch → 1× vendor adapter
-#
-# Usage:
-#   hopper-opencode <task-id> [--write] [--force]
+# hopper-cursor — Tier C Cursor CLI host adapter for hopper-plugin
+# Anchor: hosts/cursor-cli/bin/hopper-cursor
 
 set -eu
 
 usage() {
   cat <<EOF >&2
-hopper-opencode — Tier C OpenCode host adapter for hopper-plugin
+hopper-cursor — Tier C Cursor CLI host adapter for hopper-plugin
 
-Usage: hopper-opencode <task-id> [--write] [--force] [--model <name>] [--reasoning <level>]
+Usage: hopper-cursor <task-id> [--write] [--force] [--background] [--model <name>] [--reasoning <level>]
 
 Arguments:
   <task-id>           Task ID matching ^[A-Za-z][A-Za-z0-9._-]{0,99}$ (no '..')
   --write             Write .hopper/handoffs/<task-id>-output.md after dispatch
   --force             Overwrite existing output.md (only with --write)
+  --background        Forward background mode to hopper-dispatch
   --model <name>      Forward to vendor adapter (honored by kimi/opencode/copilot/grok)
   --reasoning <lv>    Forward reasoning effort: minimal|low|medium|high|xhigh (honored by codex adapter)
 
 Environment:
   HOPPER_PLUGIN_ROOT   Override plugin root (defaults to wrapper-relative)
   HOPPER_DIR           Override .hopper/ location (passed through)
-  OPENCODE_MODEL       OUTER opencode model (the opencode driving the dispatch loop, not the vendor)
+  CURSOR_MODEL         OUTER cursor host model (passed to `agent --model`)
 EOF
 }
 
@@ -43,8 +33,6 @@ fi
 TASK_ID="$1"
 shift
 
-# Cross-host parity with Claude Code dispatch.md + Codex CLI hopper-codex:
-# regex check + explicit '..' rejection.
 if ! printf '%s' "$TASK_ID" | grep -Eq '^[A-Za-z][A-Za-z0-9._-]{0,99}$'; then
   echo "Error: task-id '$TASK_ID' must match ^[A-Za-z][A-Za-z0-9._-]{0,99}$" >&2
   exit 2
@@ -56,9 +44,6 @@ case "$TASK_ID" in
     ;;
 esac
 
-# Validate flags against explicit whitelist + parse value-taking flags.
-# Bare flags: --write, --force, --background. Value flags: --model, --reasoning.
-# Same validation rules as Claude Code dispatch.md + Tier A + Tier C #1.
 FLAGS=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -99,10 +84,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# Per spec §14.7: signal heterogeneous-only constraint via env var
-export HOPPER_HOST_VENDOR=opencode
+export HOPPER_HOST_VENDOR=cursor
 
-# Symlink-safe SCRIPT_DIR resolution (audit T-08a P1 F2 pattern)
 resolve_script_dir() {
   local src="$1"
   while [ -L "$src" ]; do
@@ -120,7 +103,6 @@ SCRIPT_DIR="$(resolve_script_dir "$0")"
 if [ -n "${HOPPER_PLUGIN_ROOT:-}" ]; then
   PLUGIN_ROOT="$HOPPER_PLUGIN_ROOT"
 else
-  # wrapper at hosts/opencode/bin/hopper-opencode → plugin root is 3 levels up
   PLUGIN_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 fi
 
@@ -131,15 +113,12 @@ if [ ! -f "$DISPATCH" ]; then
   exit 3
 fi
 
-if ! command -v opencode >/dev/null 2>&1; then
-  echo "Error: opencode CLI not found in PATH. Install opencode before using Tier C #2." >&2
+if ! command -v agent >/dev/null 2>&1; then
+  echo "Error: Cursor CLI agent not found in PATH. Install Cursor CLI before using this host adapter." >&2
   exit 4
 fi
 
-# Build the opencode prompt. Parallel to the Codex CLI prompt: instructs
-# opencode to call hopper-dispatch via its tool/shell capability, surface
-# output verbatim, respect user-action gate, refuse to diagnose/retry.
-PROMPT="Run the following exact shell command via your shell/bash tool, then surface its output to the user verbatim:
+PROMPT="Run the following exact shell command via your shell tool, then surface its output to the user verbatim:
 
 node \"$DISPATCH\" \"$TASK_ID\"$FLAGS
 
@@ -147,16 +126,14 @@ After the command returns:
 
 1. If exit code is 0 and --write was passed, locate the 'Suggested queue.md edit' and 'Suggested COST-LOG.md row' blocks in stdout. Print them. State explicitly: 'Per hopper-plugin spec §11 unified user-action gate, apply these edits only after manual review. I will not apply them automatically.'
 
-2. If exit code is non-zero, surface the error block verbatim. Do NOT retry the command — spec §3 #4 single-spawn invariant means retries belong to the user.
+2. If exit code is non-zero, surface the error block verbatim. Do NOT retry the command.
 
 3. Do NOT call any other shell commands. Do NOT modify .hopper/queue.md, .hopper/AGENTS.md, or .hopper/COST-LOG.md.
 
-4. Do NOT diagnose the failure, propose fixes, suggest next steps, recommend retries, or suggest switching vendors. Dispatch + surface only — orchestration belongs outside this host adapter."
+4. Do NOT diagnose the failure, propose fixes, suggest next steps, recommend retries, or suggest switching vendors. Dispatch + surface only."
 
-# Build opencode invocation
-OPENCODE_ARGS="run"
-if [ -n "${OPENCODE_MODEL:-}" ]; then
-  OPENCODE_ARGS="$OPENCODE_ARGS --model $OPENCODE_MODEL"
+HOST_MODEL_FLAG=()
+if [ -n "${CURSOR_MODEL:-}" ]; then
+  HOST_MODEL_FLAG=(--model "$CURSOR_MODEL")
 fi
-
-exec opencode $OPENCODE_ARGS "$PROMPT"
+exec agent -p --force --output-format text "${HOST_MODEL_FLAG[@]}" "$PROMPT"

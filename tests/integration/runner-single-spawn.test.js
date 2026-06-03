@@ -436,18 +436,12 @@ test('OpenCode plugin source has NO retry/fallback patterns (Windows + POSIX)', 
     .replace(/'[^']*'/g, "''")
     .replace(/"[^"]*"/g, '""')
     .replace(/`[^`]*`/g, '``');
-  // OpenCode plugin should NOT retry on session.error
-  assert.ok(!/while\b.*prompt_async/i.test(code),
-    'OpenCode plugin must not have while-loop around prompt_async');
-  assert.ok(!/catch\s*\([^)]*\)\s*\{[^}]*prompt_async/i.test(code),
-    'OpenCode plugin must not catch + retry prompt_async');
-  // session.error handler must exist (string-preserved check)
-  assert.match(noComments, /session\.error/);
-  // Verify prompt_async appears (code-level) but in limited number of sites
-  const promptAsyncMatches = (noComments.match(/prompt_async/g) || []).length;
-  // Tool description + invocation + maybe in error message = up to 6
-  assert.ok(promptAsyncMatches <= 8,
-    `OpenCode plugin: too many prompt_async occurrences (${promptAsyncMatches}); check for retry pattern`);
+  assert.ok(!/while\b.*hopper_dispatch/i.test(code),
+    'OpenCode plugin shim must not have while-loop around tool execution');
+  assert.ok(!/catch\s*\([^)]*\)\s*\{[^}]*hopper_dispatch/i.test(code),
+    'OpenCode plugin shim must not catch + retry tool execution');
+  assert.doesNotMatch(noComments, /prompt_async/);
+  assert.match(noComments, /host!=vendor|host != vendor/i);
 });
 
 test('runner-direct invocation: vendor spawn count visible in counter file', { skip: platform() === 'win32' ? 'PATH-shim .cmd not executable on Windows; covered by code-inspection test' : false }, async () => {

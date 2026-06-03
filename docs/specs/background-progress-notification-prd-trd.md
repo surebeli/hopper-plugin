@@ -287,7 +287,7 @@ Packaging anchor (post-R16 spike): for Claude Code plugin packaging, `monitors/m
 Host bridges (with native-wake capability disclosed):
 
 - **Claude Code** (native wake): plugin monitor starts `hopper-monitor`; each stdout JSONL line is delivered to Claude as a notification via the `monitors/monitors.json` mechanism. This is the only host with native session-wake support today.
-- **OpenCode, native plugin path** (partial wake): `session.idle` hook fires for OpenCode-native async sessions only; vendor is restricted to `opencode` (see `hosts/opencode/plugins/hopper-async.ts` line 143 hardcoded `adapter: 'opencode'`). Heterogeneous-vendor jobs from OpenCode session must use the wrapper path (no native wake).
+- **OpenCode, wrapper path only**: the native plugin path is now disabled by the hard `host != vendor` rule. OpenCode sessions behave like other wrapper hosts and use pull mode / dashboard updates instead of native wake.
 - **Codex CLI** (no native wake): Codex `notify.command` only fires on `agent-turn-complete` of Codex itself, not on hopper job terminal events (verified against openai/codex#3052, openai/codex#17532). `hopper-monitor` degrades to OS toast + the user attaches `hopper-dispatch --wait <id>` / `--progress <id>` manually inside the Codex session.
 - **Standalone CLI** (no native wake): user runs `hopper-monitor` as a daemon (emits OS toast + stdout JSONL), or attaches `hopper-dispatch --watch-events` / `--watch <id>` in a terminal.
 - **Dashboard** (push UI): dashboard server uses `chokidar` to watch `.hopper/handoffs/` and broadcasts via SSE; no OS toast.
@@ -303,8 +303,7 @@ Each task has at most **one** native-wake subscriber. Multi-terminal observers u
 | Claude Code main session | plugin monitor → `hopper-monitor` → stdout JSONL → Claude notification | `/hopper:result <id>` |
 | Claude Code background subagent | do not subscribe; parent session's monitor receives | parent session |
 | Codex CLI session | no native wake; user runs `hopper-dispatch --wait <id>` (blocking) inside the session; OS toast emitted by separate `hopper-monitor` daemon if running | `hopper-dispatch --result <id>` |
-| OpenCode session, native plugin path | plugin `session.idle` hook (already implemented) | dashboard / read frontmatter |
-| OpenCode session, wrapper path | degrades to standalone behavior; user runs `--watch <id>` | `--result <id>` |
+| OpenCode session | wrapper path only; degrades to standalone behavior; user runs `--watch <id>` | `--result <id>` |
 | Standalone shell | `hopper-monitor` daemon → OS toast | `--watch <id>` / `--progress <id>` |
 | Dashboard | server-side `chokidar` → SSE (one dashboard process per machine) | — |
 | CI / script | `hopper-dispatch --watch <id>` blocking + exit code | — |
@@ -321,9 +320,11 @@ Constraints:
 |---|---|---|---|
 | Claude Code | Codex | Yes | Richest path: Claude monitor bridge + Codex app-server provider (`capability: fine-phase`). |
 | Claude Code | Kimi/OpenCode/Copilot/Agy | Yes | Progress from generic stream parser (`capability: coarse-phase`). |
-| Codex CLI | Any configured vendor | Yes | Codex host wraps `hopper-dispatch`; vendor routing remains in hopper. **No native session wake** — `hopper-monitor` emits OS toast; user pulls via `--wait` / `--result` inside session. |
-| OpenCode (wrapper path) | Kimi/Copilot/Codex/Agy | Yes | Uses dispatcher; degrades to standalone behavior for wake — no native `session.idle` involvement. |
-| OpenCode (native plugin path) | opencode only | Restricted | Plugin hardcodes `adapter: 'opencode'` and bypasses `resolveDispatch` (`hosts/opencode/plugins/hopper-async.ts:103,143`). `progress.log` written only at state transitions (≤ 1 Hz; no heartbeat). Heterogeneous-vendor jobs MUST use the wrapper path. |
+| Codex CLI | Any configured vendor except `codex` | Yes | Codex host wraps `hopper-dispatch`; vendor routing remains in hopper. **No native session wake** — `hopper-monitor` emits OS toast; user pulls via `--wait` / `--result` inside session. Same-identity `host == vendor` pairs are rejected at dispatch entry. |
+| OpenCode | Any configured vendor except `opencode` | Yes | Uses the wrapper path only; degrades to standalone behavior for wake. Same-identity `host == vendor` pairs are rejected at dispatch entry. |
+| Copilot CLI | Any configured vendor except `copilot` | Yes | Wrapper host; no native session wake. Pull/dashboard behavior matches standalone. |
+| Grok Build | Any configured vendor except `grok` | Yes | Wrapper host; no native session wake. Pull/dashboard behavior matches standalone. |
+| Cursor CLI | Any configured vendor | Yes | Wrapper host via `agent -p`; no native session wake. There is no `cursor` vendor adapter, so separation is structurally satisfied. |
 | Standalone CLI | Any configured vendor | Yes | No host notification unless user runs `hopper-monitor` or `--watch-events`. |
 | Dashboard | Any configured vendor | Yes | Reads the same files and events. |
 
@@ -331,7 +332,7 @@ Key rules:
 
 1. Host completion is advisory; runner terminal state is authoritative.
 2. Vendor selection comes from `.hopper/AGENTS.md`, not from the host — preserved end-to-end (enforced by `cli/src/dispatch.js::resolveVendor`).
-3. The OpenCode native plugin path is the only path that legitimately writes `progress.log` outside the runner; it does so only at session state transitions and at ≤ 1 Hz (no heartbeat). Subscribers must tolerate sparser `last_progress_at` on this path.
+3. Runner-written progress state is authoritative across all currently supported host paths; no host-specific native plugin path writes `progress.log` anymore.
 
 ## 7. Implementation Plan
 
@@ -382,7 +383,7 @@ Key rules:
 14. Codex vendor `parseResult` correctly extracts tokens from stderr after pipe+tee migration (no cross-stream merge corruption).
 15. High-volume vendor output (≥ 10 MB stdout) keeps runner RSS < 50 MB; `progress.log` rotates to `.1` when exceeding 10 MB.
 16. On Codex CLI host, `hopper-monitor` emits exactly one OS toast per terminal event (Windows BurntToast / macOS osascript / Linux notify-send) alongside the stdout JSONL line.
-17. OpenCode native plugin path writes a single terminal-event row to `progress.log` on `session.idle` / `session.error`; no heartbeat rows appear on this path.
+17. OpenCode host support uses the wrapper path only; terminal progress rows are emitted by `hopper-runner`, not by a native plugin hook.
 18. `tail` implementation reading `progress.log` handles truncate (size shrink → offset reset) and rotate (inode change → offset reset and re-stat) without losing the first line of the new file or re-reading the old content.
 
 ## 9. Open Questions

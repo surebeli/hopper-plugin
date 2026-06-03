@@ -11,7 +11,7 @@ These examples assume:
 ## Recipe 1 - Dispatch to a specific vendor, model, and reasoning level
 
 **Scenario**: Start a long review task and pass vendor-specific knobs.
-**Hosts**: standalone, Claude Code, Codex CLI, OpenCode
+**Hosts**: standalone, Claude Code, Codex CLI, OpenCode, Copilot CLI, Grok Build, Cursor CLI
 **Vendors involved**: codex, kimi, opencode, copilot
 
 ### Steps
@@ -42,12 +42,12 @@ Expected output includes a runner PID and `.hopper/handoffs/<task-id>-output.md`
 
 ### Notes
 
-Vendor selection comes from `.hopper/AGENTS.md`, not from `--model`. `--reasoning` is honored by codex; `--model` is honored by kimi, opencode, and copilot. Unsupported flags are ignored by the adapter rather than remapping to another vendor.
+Vendor selection comes from `.hopper/AGENTS.md`, not from `--model`. `--reasoning` is honored by codex; `--model` is honored by kimi, opencode, copilot, and grok. Unsupported flags are ignored by the adapter rather than remapping to another vendor.
 
 ## Recipe 2 - Background dispatch and active progress checks
 
 **Scenario**: Keep the host session responsive while you pull progress on demand.
-**Hosts**: standalone, Claude Code, Codex CLI, OpenCode
+**Hosts**: standalone, Claude Code, Codex CLI, OpenCode, Copilot CLI, Grok Build, Cursor CLI
 **Vendors involved**: any configured vendor
 
 ### Steps
@@ -68,7 +68,7 @@ Use `--progress` for a snapshot. Use `--watch` when you want the terminal to fol
 ## Recipe 3 - Background dispatch and passive completion notifications
 
 **Scenario**: Start a long job, stop polling, and let a terminal event wake you.
-**Hosts**: Claude Code, standalone, Codex CLI, OpenCode wrapper
+**Hosts**: Claude Code, standalone, Codex CLI, OpenCode wrapper, Copilot CLI, Grok Build, Cursor CLI
 **Vendors involved**: any configured vendor
 
 ### Steps
@@ -104,7 +104,7 @@ Claude Code loads `monitors/monitors.json` from the plugin root and forwards wat
 ## Recipe 4 - Watch progress in the dashboard
 
 **Scenario**: Use the browser dashboard for queue, log, progress timeline, and terminal event visibility.
-**Hosts**: standalone, Claude Code, Codex CLI, OpenCode
+**Hosts**: standalone, Claude Code, Codex CLI, OpenCode, Copilot CLI, Grok Build, Cursor CLI
 **Vendors involved**: any configured vendor
 
 ### Steps
@@ -135,7 +135,7 @@ The dashboard is a read-only consumer for queue, task, log, and progress data. V
 ## Recipe 5 - Cross-host equivalent dispatch
 
 **Scenario**: Prove that host choice does not change vendor routing.
-**Hosts**: Claude Code, Codex CLI, OpenCode, standalone
+**Hosts**: Claude Code, Codex CLI, OpenCode, Copilot CLI, Grok Build, Cursor CLI, standalone
 **Vendors involved**: any configured vendor
 
 ### Steps
@@ -167,7 +167,7 @@ hopper-opencode T-PROG-REVIEW --background
 
 ### Notes
 
-Every route eventually invokes the same dispatcher and reads the same `.hopper/AGENTS.md`. Do not use multiple routes to dispatch the same task simultaneously; background dispatch refuses alive duplicate jobs.
+Every route eventually invokes the same dispatcher and reads the same `.hopper/AGENTS.md`. The dispatcher now enforces `host != vendor`, so a host session cannot dispatch back into the same vendor identity. Do not use multiple routes to dispatch the same task simultaneously; background dispatch refuses alive duplicate jobs.
 
 ## Recipe 6 - Probe vendor capabilities and query the cache
 

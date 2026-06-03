@@ -76,7 +76,7 @@ hopper-codex T-PLUGIN-05a --write
 # Overwrite existing output.md
 hopper-codex T-PLUGIN-05a --write --force
 
-# Force a specific model (honored by kimi/opencode/copilot adapters)
+# Force a specific model (honored by kimi/opencode/copilot/grok adapters)
 hopper-codex T-PLUGIN-05a --write --model "deepseek/v4-flash"
 
 # Force reasoning effort (honored by codex adapter)
@@ -88,7 +88,7 @@ hopper-codex T-PLUGIN-05a --write --model "claude-opus-4-7" --reasoning high
 
 **`--model` accepts**: `^[A-Za-z][A-Za-z0-9._/:-]{0,99}$` (e.g. `gpt-5.5`, `claude-opus-4-7`, `deepseek/v4-flash`, `org/model:tag`). No spaces, no shell metachars.
 
-**`--reasoning` accepts**: `low | medium | high | xhigh`. Adapters that don't honor reasoning ignore it harmlessly.
+**`--reasoning` accepts**: `minimal | low | medium | high | xhigh`. Adapters that don't honor reasoning ignore it harmlessly.
 
 ## Environment variables
 
@@ -96,7 +96,7 @@ hopper-codex T-PLUGIN-05a --write --model "claude-opus-4-7" --reasoning high
 |------------------------|--------------------------------------|-----------------------------------------------------|
 | `HOPPER_PLUGIN_ROOT`   | wrapper-relative (3 levels up)       | Override plugin root                                |
 | `HOPPER_DIR`           | walks up from cwd looking for .hopper| Override `.hopper/` location                        |
-| `CODEX_REASONING`      | `medium`                              | Codex reasoning effort (`low` / `medium` / `high` / `xhigh`) |
+| `CODEX_REASONING`      | `medium`                              | Codex reasoning effort (`minimal` / `low` / `medium` / `high` / `xhigh`) |
 | `CODEX_SANDBOX`        | `workspace-write`                    | Codex sandbox mode (`read-only` will block shell tool execution)         |
 
 ## What this adapter does NOT do
@@ -111,9 +111,9 @@ Per spec §3 #4 (no harness reaction core):
 
 ## Cross-host equivalence claim
 
-The same `<task-id>` produces the same vendor invocation regardless of which host (Tier A standalone, Tier B Claude Code, Tier C #1 Codex CLI, Tier C #2 OpenCode) invokes it. Vendor selection comes from `.hopper/AGENTS.md`, not from the host. This is the **cross-host portable** claim.
+The same `<task-id>` produces the same vendor invocation regardless of which supported host path invokes it (Tier A standalone, Tier B Claude Code, or any Tier C wrapper such as Codex CLI / OpenCode / Copilot CLI / Grok Build / Cursor CLI). Vendor selection comes from `.hopper/AGENTS.md`, not from the host. This is the **cross-host portable** claim, subject to the hard `host != vendor` rule.
 
-Verification: dispatch `T-PLUGIN-05a` (a `code-impl` task whose AGENTS preference is `kimi`) via all 4 hosts; all 4 should spawn kimi.
+Verification: dispatch `T-PLUGIN-05a` (a `code-impl` task whose AGENTS preference is `kimi`) via each supported host path; every path should resolve to `kimi`, and any same-identity host/vendor pairing should fail fast before adapter execution.
 
 ## Troubleshooting
 

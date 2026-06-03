@@ -27,8 +27,8 @@ Arguments:
   <task-id>           Task ID matching ^[A-Za-z][A-Za-z0-9._-]{0,99}$
   --write             Write .hopper/handoffs/<task-id>-output.md after dispatch
   --force             Overwrite existing output.md (only with --write)
-  --model <name>      Forward to vendor adapter (honored by kimi/opencode/copilot)
-  --reasoning <lv>    Forward reasoning effort: low|medium|high|xhigh (honored by codex adapter)
+  --model <name>      Forward to vendor adapter (honored by kimi/opencode/copilot/grok)
+  --reasoning <lv>    Forward reasoning effort: minimal|low|medium|high|xhigh (honored by codex adapter)
 
 Environment:
   HOPPER_PLUGIN_ROOT   Override plugin root (defaults to wrapper-relative)
@@ -88,12 +88,12 @@ while [ $# -gt 0 ]; do
     --reasoning)
       shift
       case "${1:-}" in
-        low|medium|high|xhigh)
+        minimal|low|medium|high|xhigh)
           FLAGS="$FLAGS --reasoning $1"
           shift
           ;;
         *)
-          echo "Error: --reasoning must be one of low|medium|high|xhigh (got: ${1:-empty})." >&2
+          echo "Error: --reasoning must be one of minimal|low|medium|high|xhigh (got: ${1:-empty})." >&2
           exit 2
           ;;
       esac

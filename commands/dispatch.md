@@ -1,7 +1,7 @@
 ---
 description: Dispatch a task from .hopper/queue.md to its preferred vendor CLI via hopper-dispatch. Supports --background for long-running tasks (spec §14).
 allowed-tools: Bash, Read
-argument-hint: <task-id> [--background] [--write] [--force] [--model <name>] [--reasoning <low|medium|high|xhigh>]
+argument-hint: <task-id> [--background] [--write] [--force] [--model <name>] [--reasoning <minimal|low|medium|high|xhigh>]
 ---
 
 This command runs inside a Claude Code session and invokes the host-agnostic `hopper-dispatch` CLI to dispatch one task.
@@ -29,7 +29,7 @@ This command runs inside a Claude Code session and invokes the host-agnostic `ho
 4. If validation fails: STOP. Print the offending input verbatim and ask the user to correct it. Do **not** invoke Bash with rejected input.
 
 **What `--model` and `--reasoning` do**: they forward to the vendor adapter via `executeDispatch`'s `adapterOpts`. Adapters honor them differently:
-- `--model` honored by: kimi, opencode, copilot (becomes `-m / --model <name>` to the vendor CLI)
+- `--model` honored by: kimi, opencode, copilot, grok (becomes `-m / --model <name>` to the vendor CLI)
 - `--reasoning` honored by: codex (becomes `model_reasoning_effort=<level>`); other adapters ignore it harmlessly
 
 ## Invocation modes — pick ONE based on arguments
@@ -124,7 +124,7 @@ Show the user:
 - Surface the error block verbatim. Do NOT auto-retry.
 - Do NOT propose fixes, retries, or vendor-switches as soft-orchestration. If the user explicitly asks for diagnosis, you may then explain the failure mode (auth-fail / timeout / permission-fail / unknown-fail) and what the adapter's error message means. Otherwise, dispatch + surface is the full scope.
 
-Per codex final strict audit (Category C): Tier B's previous prompt suggested status-specific next steps, inconsistent with Tier C's "no soft-orchestration" stance. Now aligned across all 4 hosts: surface only, diagnose only if user explicitly asks.
+Per codex final strict audit (Category C): Tier B's previous prompt suggested status-specific next steps, inconsistent with Tier C's "no soft-orchestration" stance. Now aligned across all supported host paths: surface only, diagnose only if the user explicitly asks.
 
 ## What this command MUST NOT do
 

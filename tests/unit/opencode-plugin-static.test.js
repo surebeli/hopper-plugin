@@ -23,39 +23,18 @@ test('OpenCode hopper-async plugin file exists', () => {
   assert.ok(existsSync(PLUGIN_README), `plugin README missing`);
 });
 
-test('plugin uses canonical TASK_ID regex (cross-host parity with §3 #5)', () => {
+test('plugin remains present as a disabled shim', () => {
   const src = readFileSync(PLUGIN_PATH, 'utf-8');
-  assert.match(src, /\^\[A-Za-z\]\[A-Za-z0-9\._-\]\{0,99\}\$/,
-    'plugin must use the canonical task-id regex');
-  assert.match(src, /\.\.|path traversal/,
-    'plugin must explicitly reject "..". in task-id');
+  assert.match(src, /host!=vendor|host != vendor/i);
+  assert.match(src, /hopper-opencode <task-id> --background|hopper-dispatch --background/);
 });
 
-test('plugin writes status=in-progress before async dispatch', () => {
+test('plugin advertises disabled shim behavior instead of native async execution', () => {
   const src = readFileSync(PLUGIN_PATH, 'utf-8');
-  assert.match(src, /status:.*['"`]?in-progress['"`]?/,
-    'plugin must seed status=in-progress before invoking prompt_async');
-});
-
-test('plugin uses OpenCode native prompt_async (not blocking prompt)', () => {
-  const src = readFileSync(PLUGIN_PATH, 'utf-8');
-  assert.match(src, /prompt_async/,
-    'plugin must use prompt_async per spec §14.9 native-preferred path');
-  assert.ok(!/await.*\.prompt\s*\(/.test(src),
-    'plugin must NOT use blocking prompt() — that would block the session');
-});
-
-test('plugin handles session.idle hook (completion notification)', () => {
-  const src = readFileSync(PLUGIN_PATH, 'utf-8');
-  assert.match(src, /['"`]session\.idle['"`]/, 'plugin must register session.idle hook');
-  assert.match(src, /['"`]session\.error['"`]/, 'plugin must register session.error hook');
-});
-
-test('plugin uses status state machine matching spec §14.4', () => {
-  const src = readFileSync(PLUGIN_PATH, 'utf-8');
-  // Must emit done / failed status values
-  assert.match(src, /['"`]done['"`]/, 'must use "done" status string');
-  assert.match(src, /['"`]failed['"`]/, 'must use "failed" status string');
+  assert.match(src, /Disabled shim/i);
+  assert.match(src, /throw new Error/);
+  assert.doesNotMatch(src, /prompt_async/);
+  assert.doesNotMatch(src, /session\.idle/);
 });
 
 test('plugin has NO retry / fallback / orchestration constructs', () => {
@@ -77,14 +56,14 @@ test('plugin README documents §14 spec compliance section', () => {
   assert.match(readme, /Spec compliance/);
   assert.match(readme, /§14\.4|§14\.6|§14\.10/,
     'README must cite spec §14 sub-sections');
-  assert.match(readme, /single-spawn/i);
+  assert.match(readme, /host!=vendor|host != vendor/i);
 });
 
 test('plugin README explains when to use plugin vs CLI fallback', () => {
   const readme = readFileSync(PLUGIN_README, 'utf-8');
   assert.match(readme, /When to use/i);
-  assert.match(readme, /native-preferred|native preferred|spec §14\.4/i,
-    'README must explain the native-preferred constraint #4 rationale');
+  assert.match(readme, /wrapper|disabled|host!=vendor|host != vendor/i,
+    'README must explain why the native path is disabled and where to go instead');
 });
 
 test('plugin README has install instructions for project + global', () => {

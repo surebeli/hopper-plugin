@@ -1,0 +1,63 @@
+# hopper-plugin host adapter: Grok Build (Tier C #4)
+
+Anchor: `hosts/grok-cli/README.md::root`
+
+## What this is
+
+The Grok Build host adapter for `hopper-plugin`. It is a thin prompt wrapper that uses the outer `grok` CLI to invoke the host-agnostic `cli/bin/hopper-dispatch`.
+
+## How it works
+
+`hopper-grok`:
+
+1. Validates task-id and flags with the same rules used by the other host adapters
+2. Locates `cli/bin/hopper-dispatch`
+3. Exports `HOPPER_HOST_VENDOR=grok`
+4. Runs `grok -p ... --always-approve` exactly once so Grok uses its tools to run the dispatcher
+
+The dispatcher enforces the product rule `host != vendor`. A Grok host session cannot dispatch back to the `grok` vendor.
+
+## Install
+
+Linux / macOS:
+
+```bash
+ln -s /absolute/path/to/hopper-plugin/hosts/grok-cli/bin/hopper-grok \
+      ~/.local/bin/hopper-grok
+chmod +x /absolute/path/to/hopper-plugin/hosts/grok-cli/bin/hopper-grok
+```
+
+Windows (PowerShell, admin):
+
+```powershell
+New-Item -ItemType SymbolicLink `
+  -Path "$HOME\bin\hopper-grok.cmd" `
+  -Target "F:\path\to\hopper-plugin\hosts\grok-cli\bin\hopper-grok.cmd"
+```
+
+## Prerequisites
+
+| Requirement | How to check |
+|---|---|
+| Node 18+ on PATH | `node --version` |
+| Grok CLI on PATH | `command -v grok` |
+| Grok authenticated | `grok -p "say HOPPER_AUTH_OK" --output-format json` |
+| bash on Windows | `bash --version` |
+
+## Usage
+
+```bash
+hopper-grok <task-id> [--write] [--force] [--background] [--model <name>] [--reasoning <level>]
+```
+
+## Cross-host note
+
+This is another Tier C host path. Vendor routing still comes from `.hopper/AGENTS.md`, not from the host wrapper. The same task-id should resolve the same vendor across hosts, subject to the hard rule that `host != vendor`.
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `grok: command not found` | Grok Build not installed | Install Grok Build CLI |
+| `Error: hopper-dispatch not found` | Wrong plugin root | Set `HOPPER_PLUGIN_ROOT` |
+| `host != vendor` rejection | `.hopper/AGENTS.md` resolved to `grok` | Change vendor binding or invoke from a different host |

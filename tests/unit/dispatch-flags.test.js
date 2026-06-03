@@ -9,9 +9,10 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import {
   MODEL_PATTERN,
   ALLOWED_REASONING,
@@ -28,7 +29,7 @@ const DISPATCH = join(REPO_ROOT, 'cli', 'bin', 'hopper-dispatch');
 function runCli(args, opts = {}) {
   try {
     const stdout = execFileSync(process.execPath, [DISPATCH, ...args], {
-      env: { ...process.env, HOPPER_DIR: opts.hopperDir || join(REPO_ROOT, '.hopper') },
+      env: { ...process.env, ...(opts.env || {}), HOPPER_DIR: opts.hopperDir || join(REPO_ROOT, '.hopper') },
       stdio: ['ignore', 'pipe', 'pipe'],
       encoding: 'utf-8',
     });
@@ -40,6 +41,35 @@ function runCli(args, opts = {}) {
       exitCode: err.status,
     };
   }
+}
+
+function makeMinimalHopper(vendor = 'codex-builder') {
+  const root = mkdtempSync(join(tmpdir(), 'hopper-host-vendor-'));
+  const hopperDir = join(root, '.hopper');
+  mkdirSync(join(hopperDir, 'tasks'), { recursive: true });
+  mkdirSync(join(hopperDir, 'handoffs'), { recursive: true });
+  writeFileSync(join(hopperDir, 'queue.md'), [
+    '| ID | Task-type | Status | Depends | Brief |',
+    '|----|-----------|--------|---------|-------|',
+    '| T-SAME | code-impl | pending | | test |',
+    '',
+  ].join('\n'));
+  writeFileSync(join(hopperDir, 'tasks', 'code-impl.md'), '# code-impl\n');
+  writeFileSync(join(hopperDir, 'AGENTS.md'), [
+    '## Active Agent Instances',
+    '',
+    '| Nickname | UUID | Vendor | Default invocation |',
+    '|----------|------|--------|--------------------|',
+    `| \`builder\` | \`1\` | ${vendor} | \`x\` |`,
+    '',
+    '## Task-type → vendor default preference',
+    '',
+    '| Task-type | Default vendor |',
+    '|---|---|',
+    '| `code-impl` | builder |',
+    '',
+  ].join('\n'));
+  return { root, hopperDir };
 }
 
 // ─── Static validation tests ──────────────────────────────────────────
@@ -143,6 +173,18 @@ test('CLI prints adapter opts summary on dispatch line', () => {
   const r = runCli(['T-PLUGIN-NONEXISTENT', '--model', 'kimi-thinking']);
   // The 'opts:' summary should appear in stderr before the resolution error
   assert.match(r.stderr, /opts.*model=kimi-thinking/);
+});
+
+test('CLI hard-rejects host == vendor before adapter execution', () => {
+  const { root, hopperDir } = makeMinimalHopper('codex');
+  try {
+    const r = runCli(['T-SAME'], { hopperDir, env: { HOPPER_HOST_VENDOR: 'codex' } });
+    assert.equal(r.exitCode, 1);
+    assert.match(r.stderr, /host != vendor/i);
+    assert.match(r.stderr, /same vendor|cannot dispatch to the same vendor/i);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('CLI help mentions both --model and --reasoning', () => {

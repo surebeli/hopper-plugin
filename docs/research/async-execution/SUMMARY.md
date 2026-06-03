@@ -116,15 +116,13 @@ hopper-dispatch --reap            # re-classify stale (>24h or dead-PID) jobs to
 
 **Stdout / exit code semantics unchanged in sync mode**. Async mode prints only `PID 12345 started; output: .hopper/handoffs/T-X-output.md` and exits 0.
 
-### 2.5 Heterogeneous-only constraint
+### 2.5 Host/vendor separation constraint
 
-Dispatcher emits a **soft warning** (not hard block) when host vendor == resolved vendor:
+Dispatcher now emits a **hard error** when host vendor == resolved vendor:
 
 ```
-Warning: invoked from codex-host but resolved vendor is also codex.
-hopper-plugin's value proposition assumes heterogeneous combinations.
-Consider dispatching to a different vendor (kimi, opencode, copilot, agy).
-Continuing anyway. To suppress this warning, set HOPPER_ALLOW_SAME_VENDOR=1.
+Error: Host 'codex' cannot dispatch to the same vendor 'codex'.
+hopper-plugin requires host != vendor. Choose a different vendor in .hopper/AGENTS.md or invoke from a different host.
 ```
 
 Detection: dispatcher reads `HOPPER_HOST_VENDOR` env var (set by each Tier C wrapper) and compares against resolved vendor.
@@ -139,8 +137,8 @@ Add new §13 "Async dispatch" to spec v2.1, codifying:
 2. **State model** = output.md frontmatter (above).
 3. **Single-spawn invariant preserved** — wrapper owns lifecycle but spawns vendor exactly once.
 4. **Status machine**: `in-progress → done | failed | orphaned`. 24h ceiling rule. No automatic re-dispatch.
-5. **Heterogeneous-only** constraint as soft warning at dispatcher entry.
-6. **Host-native preferred**: Claude Code via `Bash(run_in_background)`, OpenCode via plugin. Others use the wrapper fallback.
+5. **Host/vendor separation** constraint as a hard rejection at dispatcher entry.
+6. **Host-native preferred**: Claude Code via `Bash(run_in_background)`. OpenCode's native plugin path is disabled; other hosts use wrapper fallbacks.
 7. **No new JSON state files**. All async state in markdown.
 
 Spec §3 #4 (no harness reaction core) — **unchanged**. Background mode is single-spawn, single-attempt, no retry. The wrapper is a process-lifetime adapter, not orchestration.

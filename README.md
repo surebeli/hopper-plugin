@@ -11,13 +11,13 @@
 
 ## What
 
-hopper-plugin is a thin plugin layer over the llm-hopper file protocol. It lets Claude Code, Codex CLI, OpenCode, or a standalone shell dispatch task-typed work to vendor CLIs such as codex, kimi, opencode, copilot, agy, and grok. State stays in `.hopper/` markdown and JSONL files: no hidden database, no harness reaction core, and no automatic vendor retry or fallback.
+hopper-plugin is a thin plugin layer over the llm-hopper file protocol. It lets Claude Code, Codex CLI, OpenCode, Copilot CLI, Grok Build, Cursor CLI, or a standalone shell dispatch task-typed work to vendor CLIs such as codex, kimi, opencode, copilot, agy, and grok. State stays in `.hopper/` markdown and JSONL files: no hidden database, no harness reaction core, and no automatic vendor retry or fallback.
 
 ## Architecture
 
 ![hopper-plugin architecture](docs/assets/architecture.svg)
 
-Four host routes converge on `hopper-dispatch`. The dispatcher reads `.hopper/queue.md` and `.hopper/AGENTS.md`, resolves the vendor, and starts `hopper-runner` for background jobs. Vendor model catalogs remain owned by each vendor account. The dashboard is a read-only consumer of the same `.hopper/` state, while `monitors/monitors.json` bridges terminal events into Claude Code native session wake.
+Seven host routes converge on `hopper-dispatch`. The dispatcher reads `.hopper/queue.md` and `.hopper/AGENTS.md`, resolves the vendor, enforces `host != vendor`, and starts `hopper-runner` for background jobs. Vendor model catalogs remain owned by each vendor account. The dashboard is a read-only consumer of the same `.hopper/` state, while `monitors/monitors.json` bridges terminal events into Claude Code native session wake.
 
 ## Data Flow
 

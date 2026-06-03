@@ -81,7 +81,7 @@ hopper-opencode T-PLUGIN-05a --write --model "claude-opus-4-7" --reasoning high
 
 **`--model` accepts**: `^[A-Za-z][A-Za-z0-9._/:-]{0,99}$` (e.g. `gpt-5.5`, `claude-opus-4-7`, `deepseek/v4-flash`). No spaces, no shell metachars.
 
-**`--reasoning` accepts**: `low | medium | high | xhigh`. Adapters that don't honor reasoning ignore it harmlessly.
+**`--reasoning` accepts**: `minimal | low | medium | high | xhigh`. Adapters that don't honor reasoning ignore it harmlessly.
 
 ## Environment variables
 

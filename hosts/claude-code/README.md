@@ -12,7 +12,7 @@ This is **Tier B** of the cross-host architecture:
 
 - **Tier A** — Standalone CLI (`hopper-dispatch <task-id>` from any terminal) — already works
 - **Tier B** — Claude Code host adapter — what this README covers
-- **Tier C** — Codex CLI / OpenCode host adapters (separate dirs) — Phase 4
+- **Tier C** — Codex CLI / OpenCode / Copilot CLI / Grok Build / Cursor CLI host adapters (separate dirs)
 - **Tier D** — Documented adapters for hosts that don't reach functional — case-by-case
 
 ## Slash commands provided
@@ -131,8 +131,9 @@ The plugin spawns vendor subprocesses; each needs its own auth set up **outside*
 | opencode  | `~/.local/share/opencode/auth.json` etc. OR provider env keys                  |
 | copilot   | `GH_TOKEN` / `GITHUB_TOKEN` / `COPILOT_GITHUB_TOKEN` env OR `gh auth status`  |
 | agy       | Interactive OAuth via `agy` (one-time), then `agy -p` headless                |
+| grok      | `XAI_API_KEY` OR `~/.grok/` credentials from `grok login --device-auth` / browser OAuth |
 
-Run `/hopper:vendors` after install to confirm all 5 are registered.
+Run `/hopper:vendors` after install to confirm all 6 are registered.
 
 ## What this plugin does NOT do
 
