@@ -302,9 +302,24 @@ export function preflightDispatch(outputMdPath) {
  * @param {string|null} [args.stdinInput]      adapter stdin payload (kept null in background mode; piping stdin to detached child is unreliable)
  * @returns {{ pid: number, outputMdPath: string, logPath: string, startTime: string }}
  */
+/**
+ * Resolve the CWD a dispatched vendor CLI must run in: the repo root that OWNS
+ * the .hopper/ dir (= dirname of the resolved hopperDir), NOT the directory
+ * hopper-dispatch happened to be invoked from. Fixes the retrospective #3 bug
+ * where a vendor spawned in process.cwd() (e.g. the plugin's CLI dir) could not
+ * see the project's files and timed out. Deterministic: same .hopper/ → same
+ * vendor CWD, regardless of which host/dir launched the dispatch.
+ * @param {string} hopperDir
+ * @returns {string} absolute repo root
+ */
+export function resolveVendorCwd(hopperDir) {
+  return dirname(resolve(hopperDir));
+}
+
 export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, runnerPath, hostNative = null, stdinInput = null, adapterOpts = null }) {
   validateTaskId(taskId);
 
+  const vendorCwd = resolveVendorCwd(hopperDir);
   const handoffDir = join(hopperDir, 'handoffs');
   const outputMdPath = join(handoffDir, `${taskId}-output.md`);
   const logPath = outputMdPath.replace(/\.md$/, '.log');
@@ -464,13 +479,16 @@ export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, run
     '--adapter', adapterName,
     '--output-md', outputMdPath,
     '--log', logPath,
+    '--cwd', vendorCwd,
     '--',
     ...adapterArgv,
   ], {
     detached: true,
     stdio: ['ignore', fdOut, fdErr],
     windowsHide: true,
-    cwd: process.cwd(),
+    // Retro #3 fix: anchor the runner (and thus the vendor) to the repo root
+    // that owns .hopper/, not the arbitrary dir hopper-dispatch was launched in.
+    cwd: vendorCwd,
     env: {
       ...process.env,
       HOPPER_RUNNER_INVOKED: '1',

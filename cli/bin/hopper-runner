@@ -152,7 +152,7 @@ async function main() {
     process.exit(2);
   }
 
-  const { taskId, hopperDir, adapter: adapterName, outputMd: outputMdPath, log: logPath, adapterArgv } = opts;
+  const { taskId, hopperDir, adapter: adapterName, outputMd: outputMdPath, log: logPath, cwd: vendorCwd, adapterArgv } = opts;
   if (!taskId || !hopperDir || !adapterName || !outputMdPath || !logPath) {
     process.stderr.write('hopper-runner: missing required flags (--task-id, --hopper-dir, --adapter, --output-md, --log)\n');
     process.exit(2);
@@ -225,7 +225,10 @@ async function main() {
   const vendor = spawn(resolvedCmd, finalArgv, {
     stdio: ['ignore', fdOut, fdErr],
     windowsHide: true,
-    cwd: process.cwd(),
+    // Retro #3 fix: vendor runs in the repo root that owns .hopper/ (passed via
+    // --cwd by spawnDetached), not the runner's own process.cwd(). Falls back to
+    // process.cwd() only if --cwd was not supplied (older callers).
+    cwd: vendorCwd || process.cwd(),
     env: process.env,
     detached: !isWindows,
   });

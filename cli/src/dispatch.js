@@ -16,7 +16,7 @@ import { getAdapter } from './vendors/index.js';
 import { resolveCommandWithKnownPaths } from './path-resolve.js';
 import { runSubprocessOnce } from './subprocess.js';
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 
 /**
  * Resolve a task for dispatch (Phase 1 stops here; Phase 2 calls vendor adapter).
@@ -117,7 +117,9 @@ export async function getStatus(hopperDir) {
 export async function executeDispatch({ hopperDir, taskId, adapterOpts = {} }) {
   const resolved = await resolveDispatch({ hopperDir, taskId });
   const adapter = getAdapter(resolved.vendor);
-  return executeWithAdapter({ resolved, adapter, adapterOpts });
+  // Retro #3 fix: sync-mode vendor runs in the repo root that owns .hopper/,
+  // not the dir hopper-dispatch was invoked from.
+  return executeWithAdapter({ resolved, adapter, adapterOpts, cwd: dirname(resolve(hopperDir)) });
 }
 
 /**
@@ -130,7 +132,7 @@ export async function executeDispatch({ hopperDir, taskId, adapterOpts = {} }) {
  * @param {import('./types.js').VendorAdapter} args.adapter
  * @param {import('./types.js').AdapterOpts} [args.adapterOpts]
  */
-export async function executeWithAdapter({ resolved, adapter, adapterOpts = {} }) {
+export async function executeWithAdapter({ resolved, adapter, adapterOpts = {}, cwd = null }) {
   const { task, vendor, composedPrompt } = resolved;
 
   // envPreflight — if not ok, fail FAST without spawning subprocess
@@ -178,6 +180,7 @@ export async function executeWithAdapter({ resolved, adapter, adapterOpts = {} }
     timeoutMs: adapter.timeoutMs(effectiveOpts),
     logFilePath: logPath,
     vendorName: adapter.name,
+    cwd: cwd || undefined,
   });
 
   // Parse result (adapter-specific failure classification)
