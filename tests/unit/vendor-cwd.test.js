@@ -67,3 +67,20 @@ test('opencode adapter passes --dir when opts.cwd is set (and omits it otherwise
   const noCwd = opencodeAdapter.args('hi', {});
   assert.ok(!noCwd.includes('--dir'), 'no --dir when opts.cwd absent');
 });
+
+test('grok passes --cwd and codex passes --cd when opts.cwd is set (and omit otherwise)', async () => {
+  const { grokAdapter } = await import('../../cli/src/vendors/grok.js');
+  const { codexAdapter } = await import('../../cli/src/vendors/codex.js');
+
+  const g = grokAdapter.args('hi', { cwd: '/repo/root' });
+  const gIdx = g.indexOf('--cwd');
+  assert.ok(gIdx !== -1, 'grok must pass --cwd when opts.cwd set');
+  assert.equal(g[gIdx + 1], '/repo/root');
+  assert.ok(!grokAdapter.args('hi', {}).includes('--cwd'), 'grok: no --cwd without opts.cwd');
+
+  const c = codexAdapter.args('hi', { cwd: '/repo/root' });
+  const cIdx = c.indexOf('--cd');
+  assert.ok(cIdx !== -1, 'codex must pass --cd when opts.cwd set');
+  assert.equal(c[cIdx + 1], '/repo/root');
+  assert.ok(!codexAdapter.args('hi', {}).includes('--cd'), 'codex: no --cd without opts.cwd');
+});

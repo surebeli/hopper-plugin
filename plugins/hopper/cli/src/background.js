@@ -313,6 +313,14 @@ export function preflightDispatch(outputMdPath) {
  * @returns {string} absolute repo root
  */
 export function resolveVendorCwd(hopperDir) {
+  // HOPPER_VENDOR_CWD lets the user point the vendor's working dir at a wider
+  // root — e.g. a monorepo root, or a common ancestor that also contains
+  // external evidence the vendor must read (opencode's external_directory
+  // sandbox is relative to the working dir, so widening the dir lets the vendor
+  // read that subtree legitimately). This is an explicit opt-in knob, NOT an
+  // auto-widening of any vendor sandbox — the vendor still enforces its own
+  // permissions. Default = the repo root that owns .hopper/ (retro #3).
+  if (process.env.HOPPER_VENDOR_CWD) return resolve(process.env.HOPPER_VENDOR_CWD);
   return dirname(resolve(hopperDir));
 }
 

@@ -48,6 +48,13 @@ export const codexAdapter = {
     return [
       'exec',
       input,
+      // Set the workspace root explicitly (CONFIRMED `--cd/-C <path>` works with
+      // `codex exec`, developers.openai.com/codex/cli/reference). hopper injects
+      // opts.cwd = resolved vendor CWD (repo root by default, or $HOPPER_VENDOR_CWD).
+      // NOTE: -s read-only keeps codex read-only here (review/spec use); for impl
+      // tasks needing writes, a future opts.sandbox='workspace-write' + --add-dir
+      // would be the path — not changed now.
+      ...(opts.cwd ? ['--cd', opts.cwd] : []),
       '-s', opts.sandbox ?? 'read-only',
       '-c', `model_reasoning_effort="${opts.reasoning ?? 'medium'}"`,
       ...(opts.webSearch ? ['--enable', 'web_search_cached'] : []),

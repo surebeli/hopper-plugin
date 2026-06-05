@@ -42,8 +42,8 @@ Or `npm link` from the repo root (uses the `bin` field in `package.json`).
 
 **Verify**:
 ```bash
-hopper-dispatch --version    # expect: 0.6.1-phase-6c
-hopper-dispatch --smoke      # expect: hopper standalone (CLI v0.6.1-phase-6c)
+hopper-dispatch --version    # expect: 0.7.0
+hopper-dispatch --smoke      # expect: hopper standalone (CLI v0.7.0)
 hopper-dispatch --vendors    # expect: 6 adapters listed
 ```
 
@@ -73,7 +73,7 @@ New-Item -ItemType SymbolicLink `
 /hopper:smoke
 ```
 
-Expected: `hopper standalone (CLI v0.6.1-phase-6c)` banner.
+Expected: `hopper standalone (CLI v0.7.0)` banner.
 
 **Common mistake**: symlinking `hosts/claude-code/` (the README directory) — that leaves `cli/bin/hopper-dispatch` unreachable from `$CLAUDE_PLUGIN_ROOT`. The codex Phase 3 audit caught this layout bug; the fix is documented as P0 in `.hopper/MANIFEST.md`.
 
@@ -285,7 +285,7 @@ Walks PATH (with Windows PATHEXT semantics) for each adapter's command, runs the
 ```bash
 $ hopper-dispatch --check
 
-hopper-dispatch v0.6.1-phase-6c — vendor install + auth check
+hopper-dispatch v0.7.0 — vendor install + auth check
 
 | Vendor    | Command resolution                                 | Auth | Status         |
 |-----------|----------------------------------------------------|------|----------------|

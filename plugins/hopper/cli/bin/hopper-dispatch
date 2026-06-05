@@ -26,6 +26,7 @@ import {
   readFrontmatter,
   isAlive,
   hoursSince,
+  resolveVendorCwd,
 } from '../src/background.js';
 import { readProgressEvents } from '../src/progress.js';
 import { notify } from '../src/notify.js';
@@ -34,7 +35,7 @@ import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
-const VERSION = '0.6.1-phase-6c';
+const VERSION = '0.7.0';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -74,6 +75,8 @@ function printUsage() {
   console.log('                       Honored by: codex (others ignore harmlessly)');
   console.log('');
   console.log('Env: HOPPER_DIR overrides .hopper/ location');
+  console.log('     HOPPER_VENDOR_CWD overrides the vendor working dir (default: repo root that owns .hopper/);');
+  console.log('       widen to a monorepo/common-ancestor root so the vendor can reach external paths it must read');
   console.log('     HOPPER_DEBUG=1 prints composed prompt + raw subprocess result');
   console.log('     HOPPER_HOST_VENDOR set by Tier B/C hosts; host and vendor must differ');
 }
@@ -540,7 +543,7 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {} } = {
   const outputMdPath = join(handoffDir, `${taskId}-output.md`);
   const logPath = outputMdPath.replace(/\.md$/, '.log');
   // Phase 6c F1: thread taskType through so runner's timeoutMs() applies review floor.
-  const effectiveOpts = { ...adapterOpts, background: true, logFile: logPath, taskType: resolved.task.taskType };
+  const effectiveOpts = { ...adapterOpts, background: true, logFile: logPath, taskType: resolved.task.taskType, cwd: resolveVendorCwd(hopperDir) };
   const adapterArgv = adapter.args(resolved.composedPrompt, effectiveOpts);
 
   try {

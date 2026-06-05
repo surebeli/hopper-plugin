@@ -70,6 +70,11 @@ export const grokAdapter = {
       '--output-format', 'json',
       '--no-auto-update',
       '-m', opts.model ?? DEFAULT_MODEL,
+      // Anchor the working dir explicitly (CONFIRMED `--cwd <PATH>` docs.x.ai).
+      // hopper injects opts.cwd = resolved vendor CWD (repo root by default, or
+      // $HOPPER_VENDOR_CWD). grok's sandbox is relative to --cwd, so a widened
+      // root reaches external paths without disabling grok's permission model.
+      ...(opts.cwd ? ['--cwd', opts.cwd] : []),
       ...(opts.background ? ['--always-approve'] : []),
       ...(opts.conversationId ? ['-r', opts.conversationId] : []),
     ];
