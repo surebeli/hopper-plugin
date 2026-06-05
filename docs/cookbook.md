@@ -6,6 +6,7 @@ These examples assume:
 
 - `hopper-dispatch` is on `PATH`, or you run `node /absolute/path/to/hopper-plugin/cli/bin/hopper-dispatch`.
 - The current project has a `.hopper/` directory.
+- You run `hopper-dispatch` from the project repo root (the dir that contains `.hopper/`), or you set `HOPPER_DIR`. The dispatched vendor CLI runs in that repo root regardless of your shell's CWD, so it always sees your project files — you never need to `cd` into the plugin directory.
 - Task IDs such as `T-PROG-REVIEW` are examples. Replace them with a pending task from your own `.hopper/queue.md`.
 
 ## Recipe 1 - Dispatch to a specific vendor, model, and reasoning level
@@ -267,3 +268,39 @@ hopper-dispatch --result T-REVIEW-KIMI
 ### Notes
 
 Keep each review as a separate task ID. hopper-plugin does not fan out a single queue row to multiple vendors automatically; the file protocol makes the fan-out explicit and auditable.
+
+## Recipe 9 - Pre-flight a dispatch and troubleshoot a failure
+
+**Scenario**: A dispatch failed, or you want to avoid the failure chain from the 2026-06-04 field retrospective (vendor spawned in the wrong directory → couldn't see project files → 180s timeout → operator forced into calling vendor CLIs by hand).
+**Hosts**: standalone, Claude Code, Codex CLI, OpenCode, Copilot CLI, Grok Build, Cursor CLI
+**Vendors involved**: any configured vendor
+
+### Steps
+
+Three pre-flight checks before dispatching — each is read-only and spawns no vendor:
+
+```bash
+# 1. Will the task resolve? (found in queue.md + vendor from AGENTS.md + composed prompt length)
+hopper-dispatch --resolve T-PROG-REVIEW
+
+# 2. Is the resolved vendor installed + authenticated on THIS machine?
+hopper-dispatch --check codex
+
+# 3. Confirm you are in the right project (vendor will run in the repo root that owns .hopper/).
+hopper-dispatch --status
+```
+
+For a background dispatch already in flight, get woken on completion instead of polling:
+
+```bash
+hopper-dispatch --watch-events          # stream terminal events as stdout JSONL
+hopper-dispatch --watch-events --once   # exit after the first terminal event (CI / scripts)
+```
+
+Claude Code users get this automatically: the bundled monitor (`monitors/monitors.json`) runs `--watch-events` and surfaces each terminal event into the session.
+
+### Notes
+
+- `--resolve` / `--check` / `--status` / `--capabilities` / `--models` are all **zero-spawn** read-only commands. Use them freely to confirm routing *before* committing a real dispatch — this is the `--dry-run` workflow.
+- The dispatched vendor is anchored to the repo root that owns `.hopper/` (retro #3 fix). You never need to `cd` into the plugin's CLI directory; run from your project or set `HOPPER_DIR=/path/to/project/.hopper`.
+- If `hopper-dispatch` itself is not found from Claude Code, `$CLAUDE_PLUGIN_ROOT` may be unset or wrong — see `commands/dispatch.md` Mode C for a resolver that validates the path before using it.

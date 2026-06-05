@@ -79,35 +79,42 @@ Look for `status:` line. While `status: in-progress`, report ongoing. When statu
 
 **Do NOT poll faster than ~10s intervals** — wastes Bash tool budget. The user can manually invoke `/hopper:dispatch --watch T-X` in a separate session for real-time tail.
 
-### Mode C: Fallback path resolution (if `$CLAUDE_PLUGIN_ROOT` unset)
+### Mode C: Robust dispatcher resolution (handles unset OR wrong `$CLAUDE_PLUGIN_ROOT`)
 
-Both sync and background modes need to locate the dispatcher binary. If `$CLAUDE_PLUGIN_ROOT` is unset:
-
-```bash
-for root in \
-  "$HOME/.claude/plugins/hopper" \
-  "$HOME/.claude/plugins/hopper-plugin" \
-  "./"; do
-  if [ -f "$root/cli/bin/hopper-dispatch" ]; then
-    node "$root/cli/bin/hopper-dispatch" "<validated-task-id>" <validated-flags>
-    break
-  fi
-done
-```
-
-If `$CLAUDE_PLUGIN_ROOT` is unset (older Claude Code or non-plugin invocation), fall back to a path search:
+Both sync and background modes must locate the dispatcher binary. `$CLAUDE_PLUGIN_ROOT`
+may be **unset** OR **set to a wrong path** — the 2026-06-04 field retrospective observed
+it pointing at `/`, which made `node "$CLAUDE_PLUGIN_ROOT/cli/bin/hopper-dispatch"` resolve
+to `/cli/bin/hopper-dispatch` and fail with `MODULE_NOT_FOUND`. So **validate the path before
+using it**, and fall back to a search otherwise:
 
 ```bash
-for root in \
-  "$HOME/.claude/plugins/hopper" \
-  "$HOME/.claude/plugins/hopper-plugin" \
-  "./"; do
-  if [ -f "$root/cli/bin/hopper-dispatch" ]; then
-    node "$root/cli/bin/hopper-dispatch" "<validated-task-id>" <validated-flags>
-    break
-  fi
-done
+# Resolve hopper-dispatch robustly: use $CLAUDE_PLUGIN_ROOT only if it actually
+# contains the binary; otherwise search known install locations.
+HOPPER_BIN=""
+if [ -n "$CLAUDE_PLUGIN_ROOT" ] && [ -f "$CLAUDE_PLUGIN_ROOT/cli/bin/hopper-dispatch" ]; then
+  HOPPER_BIN="$CLAUDE_PLUGIN_ROOT/cli/bin/hopper-dispatch"
+else
+  for root in \
+    "$HOME/.claude/plugins/hopper" \
+    "$HOME/.claude/plugins/hopper-plugin" \
+    "./"; do
+    if [ -f "$root/cli/bin/hopper-dispatch" ]; then
+      HOPPER_BIN="$root/cli/bin/hopper-dispatch"
+      break
+    fi
+  done
+fi
+if [ -z "$HOPPER_BIN" ]; then
+  echo "hopper-dispatch not found. Set CLAUDE_PLUGIN_ROOT to the plugin root, or install the plugin under ~/.claude/plugins/hopper." >&2
+  exit 1
+fi
+node "$HOPPER_BIN" "<validated-task-id>" <validated-flags>
 ```
+
+You do NOT need to `cd` into the plugin's CLI directory: `hopper-dispatch` locates its own
+helpers via `import.meta.url`, and (per the retro #3 fix) the dispatched vendor runs in the
+repo root that owns `.hopper/`, regardless of your shell's CWD. Run from the project, or set
+`HOPPER_DIR=/path/to/project/.hopper`.
 
 ## After dispatch returns (sync mode only)
 
