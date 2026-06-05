@@ -84,3 +84,12 @@ test('grok passes --cwd and codex passes --cd when opts.cwd is set (and omit oth
   assert.equal(c[cIdx + 1], '/repo/root');
   assert.ok(!codexAdapter.args('hi', {}).includes('--cd'), 'codex: no --cd without opts.cwd');
 });
+
+test('agy passes --add-dir when opts.cwd is set (and omits it otherwise)', async () => {
+  const { agyAdapter } = await import('../../cli/src/vendors/agy.js');
+  const withCwd = agyAdapter.args('hi', { cwd: '/repo/root' });
+  const idx = withCwd.indexOf('--add-dir');
+  assert.ok(idx !== -1, 'agy must pass --add-dir when opts.cwd set');
+  assert.equal(withCwd[idx + 1], '/repo/root');
+  assert.ok(!agyAdapter.args('hi', {}).includes('--add-dir'), 'agy: no --add-dir without opts.cwd');
+});

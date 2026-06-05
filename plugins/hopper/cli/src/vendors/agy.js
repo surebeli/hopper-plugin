@@ -53,8 +53,11 @@ export const agyAdapter = {
     //   C:\Users\litianyi\AppData\Local\agy\bin\agy.exe
     // user-verified `agy --help` from PowerShell shows: --print / -p,
     // --dangerously-skip-permissions, --log-file, --continue,
-    // --conversation, --sandbox, --print-timeout (default 5m0s),
-    // subcommands: changelog / help / install / plugin{,s} / update.
+    // --conversation, --add-dir (repeatable workspace dir), --sandbox,
+    // --print-timeout (default 5m0s), subcommands: changelog / help /
+    // install / plugin{,s} / update.
+    // RE-VERIFIED 2026-06-05: --add-dir IS present (earlier note omitted it);
+    // adapter now threads opts.cwd via --add-dir for cross-vendor parity.
     //
     // Bash session PATH coverage caveat (verified live): some MSYS2 /
     // Git-Bash environments do NOT inherit Windows-installed-app PATH
@@ -73,6 +76,14 @@ export const agyAdapter = {
     return [
       '-p', input,
       '--dangerously-skip-permissions',
+      // Cross-vendor working-dir support (mirrors opencode --dir / grok --cwd /
+      // codex --cd). agy has no cwd-setting flag, but `--add-dir <path>`
+      // (CONFIRMED present + repeatable via `agy --help`) grants a directory to
+      // its workspace. hopper injects opts.cwd = resolved vendor CWD (repo root
+      // by default, or $HOPPER_VENDOR_CWD) so agy can read/write project files
+      // regardless of where `-p` anchors its own working context. "enable not
+      // bypass" — grants the specific repo root, does NOT widen the sandbox.
+      ...(opts.cwd ? ['--add-dir', opts.cwd] : []),
       ...(opts.logFile ? ['--log-file', opts.logFile] : []),
       ...(opts.conversationId ? ['--conversation', opts.conversationId] : []),
     ];
