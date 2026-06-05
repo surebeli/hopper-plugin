@@ -303,4 +303,8 @@ Claude Code users get this automatically: the bundled monitor (`monitors/monitor
 
 - `--resolve` / `--check` / `--status` / `--capabilities` / `--models` are all **zero-spawn** read-only commands. Use them freely to confirm routing *before* committing a real dispatch — this is the `--dry-run` workflow.
 - The dispatched vendor is anchored to the repo root that owns `.hopper/` (retro #3 fix). You never need to `cd` into the plugin's CLI directory; run from your project or set `HOPPER_DIR=/path/to/project/.hopper`.
+- **Vendor needs to read a path OUTSIDE the repo** (external test evidence, a sibling repo)? The vendor's own sandbox enforces this — e.g. opencode's `external_directory` permission defaults to `ask` and is denied in headless mode. Two ways to handle it without disabling the vendor's permission model:
+  1. **Widen the vendor working dir**: `HOPPER_VENDOR_CWD=/path/to/common-ancestor hopper-dispatch <task> --background`. hopper runs the vendor there (opencode receives it via `--dir`), so a subtree that contains both your project and the external path is reachable.
+  2. **Authorize in the vendor**: for opencode, add an `opencode.json` rule, e.g. `{"permission": {"external_directory": {"~/path/to/evidence/**": "allow"}}}`.
+  3. Or (simplest, most auditable) copy the evidence into the repo so it lives under the default working dir.
 - If `hopper-dispatch` itself is not found from Claude Code, `$CLAUDE_PLUGIN_ROOT` may be unset or wrong — see `commands/dispatch.md` Mode C for a resolver that validates the path before using it.

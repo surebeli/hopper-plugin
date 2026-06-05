@@ -15,8 +15,9 @@ import { parseAgentsFile, resolveVendor } from './agents.js';
 import { getAdapter } from './vendors/index.js';
 import { resolveCommandWithKnownPaths } from './path-resolve.js';
 import { runSubprocessOnce } from './subprocess.js';
+import { resolveVendorCwd } from './background.js';
 import { readFile } from 'node:fs/promises';
-import { join, dirname, resolve } from 'node:path';
+import { join } from 'node:path';
 
 /**
  * Resolve a task for dispatch (Phase 1 stops here; Phase 2 calls vendor adapter).
@@ -117,9 +118,9 @@ export async function getStatus(hopperDir) {
 export async function executeDispatch({ hopperDir, taskId, adapterOpts = {} }) {
   const resolved = await resolveDispatch({ hopperDir, taskId });
   const adapter = getAdapter(resolved.vendor);
-  // Retro #3 fix: sync-mode vendor runs in the repo root that owns .hopper/,
-  // not the dir hopper-dispatch was invoked from.
-  return executeWithAdapter({ resolved, adapter, adapterOpts, cwd: dirname(resolve(hopperDir)) });
+  // Retro #3 fix: sync-mode vendor runs in the repo root that owns .hopper/
+  // (or $HOPPER_VENDOR_CWD if set), not the dir hopper-dispatch was invoked from.
+  return executeWithAdapter({ resolved, adapter, adapterOpts, cwd: resolveVendorCwd(hopperDir) });
 }
 
 /**
@@ -159,7 +160,9 @@ export async function executeWithAdapter({ resolved, adapter, adapterOpts = {}, 
 
   // Build args (adapter may want logFile threaded through opts).
   // Phase 6c F1: include task.taskType so timeoutMs can apply review-task floor.
-  const effectiveOpts = { ...adapterOpts, logFile: logPath, taskType: task.taskType };
+  // Thread the resolved vendor CWD through opts so adapters that take a
+  // working-dir flag (e.g. opencode --dir) can pass it explicitly.
+  const effectiveOpts = { ...adapterOpts, logFile: logPath, taskType: task.taskType, cwd: cwd || undefined };
   const args = adapter.args(composedPrompt, effectiveOpts);
 
   // Spawn subprocess ONCE (per spec §3 #4).

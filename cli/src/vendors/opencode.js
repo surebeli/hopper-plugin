@@ -45,6 +45,13 @@ export const opencodeAdapter = {
     const argv = [
       'run',
       input,
+      // opencode `--dir` sets the working dir; its external_directory sandbox is
+      // relative to it. hopper injects opts.cwd = the resolved vendor CWD (repo
+      // root by default, or $HOPPER_VENDOR_CWD if the user widened it). Passing
+      // it explicitly is more reliable than relying on the spawned process CWD,
+      // and lets a user-widened root reach external evidence without disabling
+      // opencode's own permission model.
+      ...(opts.cwd ? ['--dir', opts.cwd] : []),
       ...(opts.model ? ['--model', opts.model] : []),
       ...(opts.conversationId ? ['-s', opts.conversationId] : []),
       '--print-logs',
