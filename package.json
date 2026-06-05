@@ -9,6 +9,7 @@
   },
   "scripts": {
     "smoke": "node cli/bin/hopper-dispatch --smoke",
+    "sync:plugin": "node scripts/sync-vendored-plugin.mjs",
     "test": "node --test tests/unit/*.test.js",
     "test:queue": "node --test tests/unit/queue.test.js",
     "test:tasks": "node --test tests/unit/tasks.test.js",
