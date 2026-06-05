@@ -1,0 +1,20 @@
+{
+  "name": "agent-hopper",
+  "interface": {
+    "displayName": "Hopper"
+  },
+  "plugins": [
+    {
+      "name": "hopper",
+      "source": {
+        "source": "local",
+        "path": "./plugins/hopper"
+      },
+      "policy": {
+        "installation": "INSTALLED_BY_DEFAULT",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Coding"
+    }
+  ]
+}

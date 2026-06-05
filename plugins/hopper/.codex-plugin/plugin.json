@@ -40,10 +40,6 @@
       "Probe Hopper vendor capabilities for codex and then show cached models."
     ],
     "brandColor": "#3DDC97",
-    "screenshots": [
-      "docs/assets/banner.png",
-      "docs/assets/architecture.png",
-      "docs/assets/data-flow.png"
-    ]
+    "screenshots": []
   }
 }

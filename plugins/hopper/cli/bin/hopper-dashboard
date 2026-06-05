@@ -1,0 +1,82 @@
+#!/usr/bin/env node
+import { spawn } from 'node:child_process';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { startServer } from '../../dashboard/server/index.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const REPO_ROOT = resolve(__dirname, '..', '..');
+const CLIENT_ROOT = join(REPO_ROOT, 'dashboard', 'client');
+const VITE_BIN = join(REPO_ROOT, 'node_modules', 'vite', 'bin', 'vite.js');
+const VITE_CONFIG = join(CLIENT_ROOT, 'vite.config.ts');
+
+export function parseDashboardArgs(argv = process.argv.slice(2)) {
+  const opts = { dev: false, help: false, port: 7777 };
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === '--help' || arg === '-h') {
+      opts.help = true;
+      continue;
+    }
+    if (arg === '--dev') {
+      opts.dev = true;
+      continue;
+    }
+    if (arg === '--port') {
+      const value = argv[i + 1];
+      if (!value || value.startsWith('-')) throw new Error('--port requires a value');
+      const port = Number(value);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('--port must be 1-65535');
+      opts.port = port;
+      i += 1;
+      continue;
+    }
+    throw new Error(`unknown flag ${arg}`);
+  }
+  return opts;
+}
+
+function printUsage() {
+  console.log('Usage: hopper-dashboard [--dev] [--port <port>]');
+  console.log('');
+  console.log('Prod: serves dashboard/client/dist on http://127.0.0.1:7777');
+  console.log('Dev:  starts Vite on 5173 and API server on the selected port');
+}
+
+function startVite(port) {
+  return spawn(process.execPath, [VITE_BIN, '--config', VITE_CONFIG], {
+    cwd: CLIENT_ROOT,
+    env: { ...process.env, HOPPER_DASHBOARD_PORT: String(port) },
+    stdio: 'inherit',
+  });
+}
+
+async function main() {
+  let opts;
+  try {
+    opts = parseDashboardArgs();
+  } catch (err) {
+    console.error(err.message);
+    process.exit(2);
+  }
+
+  if (opts.help) {
+    printUsage();
+    return;
+  }
+
+  const vite = opts.dev ? startVite(opts.port) : null;
+  const started = await startServer({ dev: opts.dev, port: opts.port, requireDist: !opts.dev });
+  const stop = () => {
+    if (vite) vite.kill();
+    started.server.close(() => process.exit(0));
+  };
+  process.once('SIGINT', stop);
+  process.once('SIGTERM', stop);
+}
+
+main().catch((err) => {
+  console.error(err.message);
+  process.exit(1);
+});

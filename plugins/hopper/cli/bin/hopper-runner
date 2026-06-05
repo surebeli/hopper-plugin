@@ -1,0 +1,372 @@
+#!/usr/bin/env node
+// hopper-runner — detached wrapper owning a single vendor subprocess lifecycle
+// Anchor: cli/bin/hopper-runner
+//
+// Per spec v2.1.0 §14.6: this wrapper is invoked exclusively by hopper-dispatch
+// --background as a detached child. It then spawns the vendor adapter EXACTLY
+// ONCE (non-detached, so this wrapper owns the lifecycle), waits for vendor
+// exit, and atomically updates the output.md frontmatter status.
+//
+// Single-spawn invariant: this script contains exactly one spawn() call.
+// Counter-tested in tests/integration/runner-single-spawn.test.js.
+
+import { spawn } from 'node:child_process';
+import { openSync, closeSync, readFileSync, existsSync } from 'node:fs';
+import { basename, dirname } from 'node:path';
+import { readFrontmatter, writeFrontmatter } from '../src/background.js';
+import { appendProgressEvent } from '../src/progress.js';
+import { getAdapter } from '../src/vendors/index.js';
+import { acquireVendorLock, killProcessTree } from '../src/subprocess.js';
+import { resolveCommandOnPath, resolveCommandWithKnownPaths } from '../src/path-resolve.js';
+
+function parseRunnerArgs(argv) {
+  // Format: --task-id X --hopper-dir Y --adapter Z --output-md A --log B -- <adapter argv...>
+  const parsed = { adapterArgv: [] };
+  let i = 0;
+  let sawSeparator = false;
+  while (i < argv.length) {
+    const a = argv[i];
+    if (sawSeparator) {
+      parsed.adapterArgv.push(a);
+      i++;
+      continue;
+    }
+    if (a === '--') {
+      sawSeparator = true;
+      i++;
+      continue;
+    }
+    if (a.startsWith('--')) {
+      const key = a.slice(2).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+      const val = argv[i + 1];
+      if (val === undefined || val.startsWith('--')) {
+        throw new Error(`hopper-runner: flag ${a} requires a value`);
+      }
+      parsed[key] = val;
+      i += 2;
+      continue;
+    }
+    throw new Error(`hopper-runner: unexpected arg ${a}`);
+  }
+  return parsed;
+}
+
+function taskContext(outputMdPath, fm, context) {
+  return {
+    hopperDir: context.hopperDir || dirname(dirname(outputMdPath)),
+    taskId: context.taskId || fm.task_id || basename(outputMdPath).replace(/-output\.md$/, ''),
+    adapterName: context.adapterName || fm.adapter || 'unknown',
+  };
+}
+
+function terminalMessageFor(status, adapterStatus, providedMessage = null) {
+  if (providedMessage) return providedMessage;
+  if (status === 'done') return 'Task completed successfully.';
+  if (adapterStatus === 'timeout') return 'Task timed out.';
+  return 'Task failed.';
+}
+
+function terminalPhaseFor(status, adapterStatus, timedOut) {
+  if (timedOut || adapterStatus === 'timeout') return 'timeout';
+  return status;
+}
+
+function appendRunnerTerminalEvent(outputMdPath, fm, context) {
+  if (fm.terminal_event_emitted) return null;
+  const { hopperDir, taskId, adapterName } = taskContext(outputMdPath, fm, context);
+  return appendProgressEvent({
+    hopperDir,
+    taskId,
+    event: {
+      vendor: fm.adapter || adapterName,
+      phase: context.phase,
+      kind: 'terminal',
+      message: context.message,
+      source: 'runner',
+      terminal: true,
+      status: context.status,
+      duration_ms: context.duration_ms,
+      exit_code: context.exit_code,
+      signal: context.signal || null,
+      adapter_status: context.adapter_status,
+      timed_out: context.timed_out || null,
+    },
+  });
+}
+
+function terminalFrontmatterPatch(fm, event, phase, message) {
+  const patch = { ...fm, phase };
+  if (event) {
+    patch.last_progress_at = event.ts;
+    patch.last_progress = event.message;
+    patch.progress_seq = event.seq;
+    patch.terminal_event_emitted = true;
+  } else if (!fm.terminal_event_emitted) {
+    patch.last_progress = message;
+  }
+  return patch;
+}
+
+function fail(outputMdPath, message, context = {}) {
+  // best-effort frontmatter update on early failure
+  try {
+    const fm = readFrontmatter(outputMdPath);
+    const endTime = new Date().toISOString();
+    const duration_ms = Date.now() - Date.parse(fm.start_time || new Date().toISOString());
+    const phase = 'failed';
+    let event = null;
+    try {
+      event = appendRunnerTerminalEvent(outputMdPath, fm, {
+        ...context,
+        status: 'failed',
+        phase,
+        message,
+        duration_ms,
+        exit_code: -1,
+        adapter_status: 'unknown-fail',
+      });
+    } catch (_) {
+      // Progress writing is best-effort; final frontmatter is still authoritative.
+    }
+    writeFrontmatter(outputMdPath, {
+      ...terminalFrontmatterPatch(fm, event, phase, message),
+      status: 'failed',
+      end_time: endTime,
+      exit_code: -1,
+      duration_ms,
+      _body: (fm._body || '') + `\n## Failure (runner)\n${message}\n`,
+    });
+  } catch (_) {
+    // if we can't even write frontmatter, all we can do is exit
+  }
+  process.stderr.write(`hopper-runner: ${message}\n`);
+  process.exit(1);
+}
+
+async function main() {
+  let opts;
+  try {
+    opts = parseRunnerArgs(process.argv.slice(2));
+  } catch (err) {
+    process.stderr.write(`${err.message}\n`);
+    process.exit(2);
+  }
+
+  const { taskId, hopperDir, adapter: adapterName, outputMd: outputMdPath, log: logPath, cwd: vendorCwd, adapterArgv } = opts;
+  if (!taskId || !hopperDir || !adapterName || !outputMdPath || !logPath) {
+    process.stderr.write('hopper-runner: missing required flags (--task-id, --hopper-dir, --adapter, --output-md, --log)\n');
+    process.exit(2);
+  }
+
+  let adapter;
+  try {
+    adapter = getAdapter(adapterName);
+  } catch (err) {
+    fail(outputMdPath, err.message, { taskId, hopperDir, adapterName });
+  }
+
+  // Per codex Phase 5 audit F2: deserialize adapter opts from env var so
+  // timeoutMs honors --reasoning xhigh / --model etc.
+  let adapterOpts = {};
+  if (process.env.HOPPER_ADAPTER_OPTS) {
+    try {
+      adapterOpts = JSON.parse(process.env.HOPPER_ADAPTER_OPTS);
+    } catch (_) {
+      adapterOpts = {};
+    }
+  }
+
+  const t0 = Date.now();
+
+  // Open log fds for vendor stdio. The runner's own stdout/stderr was already
+  // redirected to logPath by the parent (hopper-dispatch). We re-open the file
+  // for the vendor so its writes are tracked separately for failure analysis.
+  let fdOut, fdErr;
+  try {
+    fdOut = openSync(logPath, 'a');
+    fdErr = openSync(logPath, 'a');
+  } catch (err) {
+    fail(outputMdPath, `Could not open log file ${logPath}: ${err.message}`, { taskId, hopperDir, adapterName });
+  }
+
+  // Per shared cli/src/path-resolve.js: in-process PATH + PATHEXT walk
+  // (no subprocess). Real .exe → spawn directly; .cmd/.bat → wrap with
+  // cmd.exe /c. POSIX returns command unchanged.
+  // Phase 6c F2: also consult adapter.knownInstallPaths for installers that
+  // don't add their bin to PATH (agy on Windows is the motivating case).
+  // This is deterministic path lookup, NOT vendor-retry orchestration.
+  const resolved = resolveCommandWithKnownPaths(adapter.command, adapter.knownInstallPaths || []);
+  const resolvedCmd = resolved ? resolved.command : adapter.command;
+  const prependArgs = resolved ? resolved.prependArgs : [];
+  const finalArgv = [...prependArgs, ...adapterArgv];
+  let releaseVendorLock = () => {};
+  let vendorLockReleased = false;
+  const releaseVendorLockOnce = () => {
+    if (vendorLockReleased) return;
+    vendorLockReleased = true;
+    releaseVendorLock();
+  };
+
+  try {
+    releaseVendorLock = await acquireVendorLock(adapter.name);
+  } catch (err) {
+    fail(outputMdPath, `Could not acquire vendor lock: ${err.message}`, { taskId, hopperDir, adapterName });
+  }
+
+  // *** THE single spawn (spec §3 #4) ***
+  // Single spawn() call. Windows command resolution above is pure-sync
+  // PATH lookup (no subprocess, no execSync).
+  //
+  // Per codex Phase 5 F1 recheck (POSIX side): vendor MUST be detached so it
+  // gets its own process group; otherwise killProcessTree(-pid) hits the
+  // runner's group, not the vendor's children. Windows uses taskkill /T
+  // which works without detached. detached on POSIX puts vendor in new pgrp.
+  const isWindows = process.platform === 'win32';
+  const vendor = spawn(resolvedCmd, finalArgv, {
+    stdio: ['ignore', fdOut, fdErr],
+    windowsHide: true,
+    // Retro #3 fix: vendor runs in the repo root that owns .hopper/ (passed via
+    // --cwd by spawnDetached), not the runner's own process.cwd(). Falls back to
+    // process.cwd() only if --cwd was not supplied (older callers).
+    cwd: vendorCwd || process.cwd(),
+    env: process.env,
+    detached: !isWindows,
+  });
+
+  // Close our copies of the fds; vendor has its own.
+  closeSync(fdOut);
+  closeSync(fdErr);
+
+  let timedOut = false;
+  // Per codex Phase 5 audit F2: pass adapter opts to timeoutMs so --reasoning xhigh
+  // actually gets 900s instead of the default 300s.
+  let timeoutMs = adapter.timeoutMs({ ...adapterOpts, background: true });
+  if (process.env.HOPPER_TEST_ONLY_TIMEOUT_MS) {
+    const testTimeoutMs = Number.parseInt(process.env.HOPPER_TEST_ONLY_TIMEOUT_MS, 10);
+    if (Number.isFinite(testTimeoutMs) && testTimeoutMs > 0) timeoutMs = testTimeoutMs;
+  }
+  const killTimer = setTimeout(() => {
+    timedOut = true;
+    // Per codex Phase 5 audit F1 + recheck: process-tree kill (not just
+    // top-level vendor) so children of .cmd wrappers + agentic CLIs don't
+    // leak. Reuses shared killProcessTree from subprocess.js: taskkill /T /F
+    // on Windows; process.kill(-pid, SIGKILL) on POSIX (works because vendor
+    // was spawned with detached: true → owns its own process group).
+    try { killProcessTree(vendor.pid, isWindows); } catch (_) {}
+  }, timeoutMs);
+  killTimer.unref();
+
+  vendor.on('exit', (code, signal) => {
+    releaseVendorLockOnce();
+    clearTimeout(killTimer);
+    const duration_ms = Date.now() - t0;
+
+    // Per codex Phase 5 audit P1 #2: read log + invoke adapter.parseResult
+    // so exit-0 failure modes (kimi HTTP 402, agy silent auth-fail) are
+    // classified correctly. Without this, false-success status leaks through.
+    let stdoutTail = '';
+    let stderrTail = '';
+    let logFileContent;
+    try {
+      if (existsSync(logPath)) {
+        const full = readFileSync(logPath, 'utf-8');
+        // log holds BOTH stdout and stderr interleaved; pass it as both for
+        // adapters that pattern-match (kimi looks at stdout; agy at stderr/log)
+        stdoutTail = full;
+        stderrTail = full;
+        logFileContent = full;
+      }
+    } catch (_) {
+      // log unreadable; fall back to exit-code-only classification
+    }
+
+    let adapterStatus;
+    let adapterError;
+    try {
+      const parsed = adapter.parseResult({
+        exitCode: code === null ? -1 : code,
+        stdout: stdoutTail,
+        stderr: stderrTail,
+        timedOut,
+        durationMs: duration_ms,
+        logFileContent,
+      });
+      adapterStatus = parsed.status;       // success | auth-fail | timeout | permission-fail | unknown-fail
+      adapterError = parsed.error || null;
+    } catch (err) {
+      adapterStatus = 'unknown-fail';
+      adapterError = `parseResult threw: ${err.message}`;
+    }
+
+    // Map adapter classification → queue-legal status (per spec §14.4)
+    let status;
+    if (adapterStatus === 'success') status = 'done';
+    else status = 'failed';                // auth-fail / timeout / permission-fail / unknown-fail → failed
+
+    try {
+      const fm = readFrontmatter(outputMdPath);
+      const endTime = new Date().toISOString();
+      const phase = terminalPhaseFor(status, adapterStatus, timedOut);
+      const message = terminalMessageFor(status, adapterStatus);
+      let event = null;
+      try {
+        event = appendRunnerTerminalEvent(outputMdPath, fm, {
+          taskId,
+          hopperDir,
+          adapterName,
+          status,
+          phase,
+          message,
+          duration_ms,
+          exit_code: code === null ? -1 : code,
+          signal: signal || null,
+          adapter_status: adapterStatus,
+          timed_out: timedOut || null,
+        });
+      } catch (_) {
+        // Progress writing is best-effort; final frontmatter is still authoritative.
+      }
+      writeFrontmatter(outputMdPath, {
+        ...terminalFrontmatterPatch(fm, event, phase, message),
+        status,
+        end_time: endTime,
+        exit_code: code === null ? -1 : code,
+        signal: signal || null,
+        timed_out: timedOut || null,
+        duration_ms,
+        adapter_status: adapterStatus,     // preserve the granular classification
+        _body: (fm._body || '') +
+          `\n## Status (background completion)\n` +
+          `- queue_status: ${status}\n` +
+          `- adapter_status: ${adapterStatus}\n` +
+          `- exit_code: ${code === null ? -1 : code}\n` +
+          (signal ? `- signal: ${signal}\n` : '') +
+          (timedOut ? `- timed_out: true\n` : '') +
+          `- duration_ms: ${duration_ms}\n` +
+          `- end_time: ${endTime}\n` +
+          (adapterError ? `\n### Adapter error\n\`\`\`\n${adapterError.slice(0, 2000)}\n\`\`\`\n` : '') +
+          `- log: see \`${logPath.split(/[\\/]/).pop()}\` for raw output\n`,
+      });
+    } catch (err) {
+      process.stderr.write(`hopper-runner: failed to write final frontmatter: ${err.message}\n`);
+      process.exit(2);
+    }
+
+    // Exit code reflects queue_status semantics: 0 only if adapter parseResult said success
+    process.exit(status === 'done' ? 0 : (code === null ? 1 : (code === 0 ? 1 : code)));
+  });
+
+  vendor.on('error', (err) => {
+    clearTimeout(killTimer);
+    fail(outputMdPath, `Vendor spawn error: ${err.message} (command: ${adapter.command})`, { taskId, hopperDir, adapterName });
+  });
+
+  vendor.on('error', () => {
+    releaseVendorLockOnce();
+  });
+}
+
+main().catch((err) => {
+  process.stderr.write(`hopper-runner fatal: ${err.message}\n`);
+  process.exit(2);
+});

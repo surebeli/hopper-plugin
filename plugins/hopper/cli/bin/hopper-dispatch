@@ -1,0 +1,1240 @@
+#!/usr/bin/env node
+// hopper-dispatch — standalone CLI entry (Phase 1 wired)
+// Anchor: cli/bin/hopper-dispatch
+//
+// Per spec §3 #4 (no harness reaction core): ONE invocation = ONE action = ONE exit.
+// No retry, no fallback, no state across invocations.
+
+import { resolveDispatch, getStatus, executeWithAdapter } from '../src/dispatch.js';
+import { listTaskTypes } from '../src/tasks.js';
+import { listAdapters, getAdapter, installCheckForAdapter, capabilitiesForAdapter, probeVendor } from '../src/vendors/index.js';
+import { readCache, readCacheWithDiagnostics, getVendorCache, setVendorCache, isStale, staleness } from '../src/cache.js';
+import { writeOutput } from '../src/output.js';
+import {
+  validateTaskId,
+  validateDispatchFlags,
+  validateModelName,
+  validateReasoning,
+  validateHostVendorSeparation,
+  ALLOWED_DISPATCH_FLAGS,
+  ALLOWED_DISPATCH_VALUE_FLAGS,
+} from '../src/validation.js';
+import {
+  spawnDetached,
+  listInProgressJobs,
+  reapStaleJobs,
+  readFrontmatter,
+  isAlive,
+  hoursSince,
+} from '../src/background.js';
+import { readProgressEvents } from '../src/progress.js';
+import { notify } from '../src/notify.js';
+import { watchFile, unwatchFile, readFileSync, existsSync, openSync, readSync, closeSync, statSync, readdirSync } from 'node:fs';
+import { resolve, join, dirname, basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const args = process.argv.slice(2);
+const VERSION = '0.6.1-phase-6c';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const RUNNER_PATH = join(__dirname, 'hopper-runner');
+
+function printUsage() {
+  console.log(`hopper-dispatch v${VERSION}`);
+  console.log('');
+  console.log('Usage:');
+  console.log('  hopper-dispatch <task-id>                       Dispatch + spawn (sync); print result');
+  console.log('  hopper-dispatch <task-id> --background          Dispatch + return immediately; result in .md (spec §14)');
+  console.log('  hopper-dispatch <task-id> --write [--force]     Dispatch + write output.md (sync mode only)');
+  console.log('  hopper-dispatch <task-id> --model <name>        Override vendor model (e.g. gpt-5.5, claude-opus-4-7)');
+  console.log('  hopper-dispatch <task-id> --reasoning <level>   Override reasoning effort (minimal|low|medium|high|xhigh)');
+  console.log('  hopper-dispatch --watch <task-id>               Tail-follow a background job until exit');
+  console.log('  hopper-dispatch --progress <task-id>            Show background task phase + recent progress events');
+  console.log('  hopper-dispatch --watch-events [--once]         Emit terminal task events as stdout JSONL');
+  console.log('  hopper-dispatch --result <task-id>              Print completed task result (verdict body + log tail) to stdout');
+  console.log('  hopper-dispatch --jobs                          List all in-progress background jobs');
+  console.log('  hopper-dispatch --reap                          Re-classify stale (>24h or dead-PID) jobs as orphaned');
+  console.log('  hopper-dispatch --resolve <id>                  Resolve dispatch without spawning');
+  console.log('  hopper-dispatch --status                        Show queue summary');
+  console.log('  hopper-dispatch --smoke                         Standalone CLI smoke test');
+  console.log('  hopper-dispatch --task-types                    List available task-type frames');
+  console.log('  hopper-dispatch --vendors                       List registered vendor adapters');
+  console.log('  hopper-dispatch --check [<vendor>]              Show install + auth status (all, or single vendor)');
+  console.log('  hopper-dispatch --capabilities <vendor>         Show static model/reasoning/feature support + cached data if probed');
+  console.log('  hopper-dispatch --probe [<vendor>]              Run vendor introspection, write cache to ~/.hopper/cache/');
+  console.log('  hopper-dispatch --models [<vendor>]             Show cached model list per vendor (run --probe first)');
+  console.log('  hopper-dispatch --help                          Show this message');
+  console.log('  hopper-dispatch --version                       Print version');
+  console.log('');
+  console.log('Adapter opts (forwarded to vendor adapter; ignored if adapter does not honor):');
+  console.log('  --model <name>       Examples: gpt-5.5, claude-opus-4-7, deepseek/v4-flash, kimi-thinking');
+  console.log('                       Honored by: kimi, opencode, copilot, grok');
+  console.log('  --reasoning <level>  minimal | low | medium | high | xhigh');
+  console.log('                       Honored by: codex (others ignore harmlessly)');
+  console.log('');
+  console.log('Env: HOPPER_DIR overrides .hopper/ location');
+  console.log('     HOPPER_DEBUG=1 prints composed prompt + raw subprocess result');
+  console.log('     HOPPER_HOST_VENDOR set by Tier B/C hosts; host and vendor must differ');
+}
+
+function printSmoke() {
+  console.log(`hopper standalone (CLI v${VERSION})`);
+  console.log('Phase 1 Prong 3 OK — standalone CLI is callable from this terminal.');
+  console.log('Dispatch resolution wired (queue parser + tasks loader + vendor router).');
+  console.log('Vendor subprocess spawning lands in T-PLUGIN-05a-e (Phase 2).');
+  process.exit(0);
+}
+
+function findHopperDir() {
+  if (process.env.HOPPER_DIR) {
+    const p = resolve(process.env.HOPPER_DIR);
+    if (existsSync(p)) return p;
+  }
+  // Walk up from cwd looking for .hopper/
+  let cur = process.cwd();
+  for (let i = 0; i < 5; i++) {
+    const candidate = join(cur, '.hopper');
+    if (existsSync(candidate)) return candidate;
+    const parent = resolve(cur, '..');
+    if (parent === cur) break;
+    cur = parent;
+  }
+  return null;
+}
+
+async function main() {
+  if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
+    printUsage();
+    return;
+  }
+  if (args.includes('--version') || args.includes('-v')) {
+    console.log(VERSION);
+    return;
+  }
+  if (args.includes('--smoke')) {
+    printSmoke();
+    return;
+  }
+
+  // Phase 6a discovery commands — project-agnostic (don't need hopperDir).
+  if (args.includes('--check')) {
+    const checkIdx = args.indexOf('--check');
+    const target = args[checkIdx + 1] && !args[checkIdx + 1].startsWith('-') ? args[checkIdx + 1] : null;
+    await runCheck(target);
+    return;
+  }
+  const capIdx = args.indexOf('--capabilities');
+  if (capIdx !== -1) {
+    const target = args[capIdx + 1];
+    if (!target || target.startsWith('-')) {
+      console.error('Error: --capabilities requires a vendor name.');
+      console.error(`Available: ${listAdapters().join(', ')}`);
+      process.exit(1);
+    }
+    runCapabilities(target);
+    return;
+  }
+
+  // Phase 6b probe-cache commands
+  if (args.includes('--probe')) {
+    const probeIdx = args.indexOf('--probe');
+    const target = args[probeIdx + 1] && !args[probeIdx + 1].startsWith('-') ? args[probeIdx + 1] : null;
+    await runProbe(target);
+    return;
+  }
+  if (args.includes('--models')) {
+    const modelsIdx = args.indexOf('--models');
+    const target = args[modelsIdx + 1] && !args[modelsIdx + 1].startsWith('-') ? args[modelsIdx + 1] : null;
+    runModels(target);
+    return;
+  }
+
+  const hopperDir = findHopperDir();
+  if (!hopperDir) {
+    console.error('Error: no .hopper/ directory found in cwd or ancestors.');
+    console.error('Set HOPPER_DIR env var OR run from a directory containing .hopper/.');
+    process.exit(1);
+  }
+
+  if (args.includes('--status')) {
+    const summary = await getStatus(hopperDir);
+    console.log(`hopper-dispatch v${VERSION} — queue summary`);
+    console.log(`  Total:       ${summary.total}`);
+    console.log(`  Pending:     ${summary.pending}`);
+    console.log(`  In-progress: ${summary['in-progress']}`);
+    console.log(`  Done:        ${summary.done}`);
+    console.log(`  Failed:      ${summary.failed}`);
+    console.log(`  Removed:     ${summary.removed}`);
+    return;
+  }
+
+  // Background job mgmt commands (spec §14.8)
+  if (args.includes('--jobs')) {
+    runJobsList(hopperDir);
+    return;
+  }
+  if (args.includes('--reap')) {
+    runReap(hopperDir);
+    return;
+  }
+  if (args.includes('--watch-events')) {
+    runWatchEvents(hopperDir, { once: args.includes('--once') });
+    return;
+  }
+  const watchIdx = args.indexOf('--watch');
+  if (watchIdx !== -1) {
+    const taskId = args[watchIdx + 1];
+    if (!taskId || taskId.startsWith('-')) {
+      console.error('Error: --watch requires a task-id.');
+      process.exit(1);
+    }
+    await runWatch(hopperDir, taskId);
+    return;
+  }
+  const progressIdx = args.indexOf('--progress');
+  if (progressIdx !== -1) {
+    const taskId = args[progressIdx + 1];
+    if (!taskId || taskId.startsWith('-')) {
+      console.error('Error: --progress requires a task-id.');
+      process.exit(2);
+    }
+    runProgress(hopperDir, taskId);
+    return;
+  }
+  const resultIdx = args.indexOf('--result');
+  if (resultIdx !== -1) {
+    const taskId = args[resultIdx + 1];
+    if (!taskId || taskId.startsWith('-')) {
+      console.error('Error: --result requires a task-id.');
+      process.exit(1);
+    }
+    runResult(hopperDir, taskId);
+    return;
+  }
+
+  if (args.includes('--task-types')) {
+    const types = await listTaskTypes(hopperDir);
+    console.log(`hopper-dispatch v${VERSION} — available task-types:`);
+    for (const t of types) console.log(`  - ${t}`);
+    return;
+  }
+
+  if (args.includes('--vendors')) {
+    const vendors = listAdapters();
+    console.log(`hopper-dispatch v${VERSION} — registered vendor adapters:`);
+    for (const v of vendors) console.log(`  - ${v}`);
+    return;
+  }
+
+  // --resolve <id>: Phase 1 behavior (no spawn)
+  const resolveIdx = args.indexOf('--resolve');
+  if (resolveIdx !== -1) {
+    const taskId = args[resolveIdx + 1];
+    if (!taskId || taskId.startsWith('-')) {
+      console.error('Error: --resolve requires a task-id argument.');
+      process.exit(1);
+    }
+    await runResolve(hopperDir, taskId);
+    return;
+  }
+
+  // Parse argv into: task-id (first bare arg), bare flags, value flags.
+  // Value flags consume the next argv ("--model gpt-5.5") and must not be
+  // mistaken for task-id when present elsewhere in argv.
+  let parsed;
+  try {
+    parsed = parseDispatchArgs(args);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(2);
+  }
+
+  const { taskId, bareFlags, valueFlags } = parsed;
+  if (!taskId) {
+    console.error('Error: no task-id provided. Use --help for usage.');
+    process.exit(1);
+  }
+
+  // Per codex Phase 4 audit P1: validate task-id + flags at CLI entry using
+  // the canonical validator so every host path applies identical rules.
+  try {
+    validateTaskId(taskId);
+    if (bareFlags.length > 0) validateDispatchFlags(bareFlags);
+    if (valueFlags.model !== undefined) validateModelName(valueFlags.model);
+    if (valueFlags.reasoning !== undefined) validateReasoning(valueFlags.reasoning);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(2);
+  }
+
+  const writeFlag = bareFlags.includes('--write');
+  const forceFlag = bareFlags.includes('--force');
+  const backgroundFlag = bareFlags.includes('--background');
+  const adapterOpts = {};
+  if (valueFlags.model !== undefined) adapterOpts.model = valueFlags.model;
+  if (valueFlags.reasoning !== undefined) adapterOpts.reasoning = valueFlags.reasoning;
+
+  if (backgroundFlag) {
+    await runBackgroundDispatch(hopperDir, taskId, { adapterOpts });
+  } else {
+    await runDispatch(hopperDir, taskId, { write: writeFlag, force: forceFlag, adapterOpts });
+  }
+}
+
+/**
+ * Parse argv into task-id + bare flags + value flags.
+ * Skips meta-flags (--help, --version, --resolve, etc.) that main() handles
+ * before reaching this point. Value flags consume the next argv element;
+ * bare flags don't.
+ */
+function parseDispatchArgs(args) {
+  const META_FLAGS = new Set(['--help', '-h', '--version', '-v', '--smoke', '--status',
+    '--task-types', '--vendors', '--resolve', '--watch', '--progress', '--watch-events', '--jobs', '--reap',
+    '--check', '--capabilities', '--probe', '--models']);
+  const VALUE_FLAGS = new Set(ALLOWED_DISPATCH_VALUE_FLAGS);
+  const BARE_FLAGS = new Set(ALLOWED_DISPATCH_FLAGS);
+
+  const bareFlags = [];
+  const valueFlags = {};
+  let taskId = null;
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+
+    if (META_FLAGS.has(arg)) continue;  // handled by main() before parseDispatchArgs
+
+    if (VALUE_FLAGS.has(arg)) {
+      const v = args[i + 1];
+      if (v === undefined || v.startsWith('-')) {
+        throw new Error(`${arg} requires a value (got: ${v === undefined ? 'nothing' : v}).`);
+      }
+      // Strip leading "--" for the opt key: --model → model
+      const key = arg.replace(/^--/, '');
+      valueFlags[key] = v;
+      i++;  // consume the value
+      continue;
+    }
+
+    if (BARE_FLAGS.has(arg)) {
+      bareFlags.push(arg);
+      continue;
+    }
+
+    if (arg.startsWith('-')) {
+      throw new Error(`Unknown flag "${arg}". Bare flags allowed: ${[...BARE_FLAGS].join(', ')}. Value flags: ${[...VALUE_FLAGS].join(', ')}.`);
+    }
+
+    // First non-flag, non-value arg becomes task-id
+    if (taskId === null) {
+      taskId = arg;
+    } else {
+      throw new Error(`Unexpected extra positional argument "${arg}" (task-id already set to "${taskId}").`);
+    }
+  }
+
+  return { taskId, bareFlags, valueFlags };
+}
+
+async function runResolve(hopperDir, taskId) {
+  try {
+    const result = await resolveDispatch({ hopperDir, taskId });
+    console.log(`hopper-dispatch v${VERSION} — resolved dispatch for ${taskId}`);
+    console.log(`  Task-type: ${result.task.taskType}`);
+    console.log(`  Vendor:    ${result.vendor}`);
+    console.log(`  Brief:     ${result.task.brief}`);
+    console.log(`  Composed prompt length: ${result.composedPrompt.length} chars`);
+    if (process.env.HOPPER_DEBUG) {
+      console.log('');
+      console.log('=== COMPOSED PROMPT ===');
+      console.log(result.composedPrompt);
+      console.log('=== END PROMPT ===');
+    }
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * P3a-fix: shared soft-warn helper, called from both sync and background dispatch
+ * paths. Non-blocking, advisory only — vendor may have a fresh model not yet
+ * probed. Caller catches any error to ensure dispatch is never blocked.
+ */
+function warnIfModelUnknown(vendor, model) {
+  if (!model) return;
+  const cached = getVendorCache(vendor);
+  if (!cached || !Array.isArray(cached.models) || cached.models.length === 0) return;
+  if (!cached.models.includes(model)) {
+    console.error(`  warn: model '${model}' not in cached list for ${vendor}`);
+    console.error(`  cached models (${staleness(cached.probed_at)}): ${cached.models.slice(0, 8).join(', ')}${cached.models.length > 8 ? '...' : ''}`);
+    console.error(`  proceeding anyway; three fix paths:`);
+    // Phase 6c follow-up (user question 2026-05-21 "what if I don't know
+    // the model name?"): generalize the omit-model hint across ALL vendors.
+    // Every vendor has an implicit default — --model is optional. This
+    // makes "omit --model" the first-class recommended path for users who
+    // don't remember a specific model identifier.
+    console.error(`  (a) RECOMMENDED — omit --model entirely; ${vendor} has an implicit default model.`);
+    console.error(`      hopper-dispatch <task-id>                              # default model + default reasoning`);
+    console.error(`      hopper-dispatch <task-id> --reasoning high             # default model + elevated reasoning`);
+    console.error(`  (b) Refresh the cache: \`hopper-dispatch --probe ${vendor}\` (the vendor may have added '${model}' since last probe).`);
+    if (vendor === 'kimi' && cached.introspection_supported === 'config-only') {
+      console.error(`  (c) Add a kimi alias to ~/.kimi-code/config.toml (Kimi Code 0.x; legacy ~/.kimi/ for the old Python kimi-cli) then re-probe:`);
+      console.error(`      [models."${model}"]`);
+      console.error(`      model = "kimi-for-coding"   # or another Moonshot upstream ID`);
+      console.error(`      capabilities = ["thinking"]   # if your target supports thinking`);
+    } else {
+      console.error(`  (c) Verify the exact identifier with \`hopper-dispatch --models ${vendor}\` (or /hopper:models ${vendor}).`);
+    }
+  } else if (isStale(cached.probed_at)) {
+    console.error(`  note: cache for ${vendor} is ${staleness(cached.probed_at)}; consider \`hopper-dispatch --probe ${vendor}\` to refresh`);
+  }
+}
+
+async function runDispatch(hopperDir, taskId, { write = false, force = false, adapterOpts = {} } = {}) {
+  try {
+    const optsSummary = Object.keys(adapterOpts).length > 0
+      ? ` [opts: ${Object.entries(adapterOpts).map(([k, v]) => `${k}=${v}`).join(', ')}]`
+      : '';
+    console.error(`hopper-dispatch v${VERSION} — dispatching ${taskId}${optsSummary}...`);
+
+    const resolved = await resolveDispatch({ hopperDir, taskId });
+
+    const hostVendor = process.env.HOPPER_HOST_VENDOR;
+    validateHostVendorSeparation(hostVendor, resolved.vendor);
+
+    // Soft-warn: --model passed but X not in cached list. Non-blocking. Single-
+    // spawn invariant unaffected (resolveDispatch is in-process; cache read is FS).
+    if (adapterOpts.model) {
+      try { warnIfModelUnknown(resolved.vendor, adapterOpts.model); } catch (_) { /* never block dispatch */ }
+    }
+
+    const startedAt = Date.now();
+    const adapter = getAdapter(resolved.vendor);
+    if (!adapter) {
+      throw new Error(`unknown vendor '${resolved.vendor}'`);
+    }
+    const result = await executeWithAdapter({ resolved, adapter, adapterOpts });
+    const elapsedMs = Date.now() - startedAt;
+
+    console.log('');
+    console.log('=== DISPATCH RESULT ===');
+    console.log(`Task:     ${result.task.id} (${result.task.taskType})`);
+    console.log(`Vendor:   ${result.vendor}`);
+    console.log(`Status:   ${result.output.status}`);
+    console.log(`Duration: ${elapsedMs}ms`);
+    if (result.output.usage) {
+      console.log(`Usage:    ${JSON.stringify(result.output.usage)}`);
+    }
+    console.log('');
+    if (result.output.status === 'success') {
+      console.log('--- OUTPUT ---');
+      console.log(result.output.text);
+      console.log('--- END OUTPUT ---');
+    } else {
+      console.log(`--- ${result.output.status.toUpperCase()} ---`);
+      console.log(result.output.error || '(no error message)');
+      if (result.output.text) {
+        console.log('');
+        console.log('--- PARTIAL OUTPUT ---');
+        console.log(result.output.text);
+      }
+      console.log('--- END ---');
+    }
+
+    if (process.env.HOPPER_DEBUG) {
+      console.log('');
+      console.log('=== RAW SUBPROCESS RESULT ===');
+      console.log(JSON.stringify({
+        exitCode: result.raw.exitCode,
+        timedOut: result.raw.timedOut,
+        durationMs: result.raw.durationMs,
+        stdoutLen: result.raw.stdout.length,
+        stderrLen: result.raw.stderr.length,
+        logFileLen: result.raw.logFileContent ? result.raw.logFileContent.length : null,
+      }, null, 2));
+    }
+
+    if (write) {
+      try {
+        const written = await writeOutput({ hopperDir, dispatchResult: result, force });
+        console.log('');
+        console.log('=== OUTPUT.MD WRITTEN ===');
+        console.log(`Wrote: ${written.path}${written.overwritten ? ' (overwritten)' : ''}`);
+        console.log('');
+        console.log('--- Suggested queue.md edit ---');
+        console.log(written.queueEdit);
+        console.log('');
+        console.log('--- Suggested COST-LOG.md row ---');
+        console.log(written.costEdit);
+        console.log('');
+        console.log('Per spec §11 unified user-action gate: apply suggested edits only after manual review.');
+      } catch (writeErr) {
+        console.error(`Error writing output.md: ${writeErr.message}`);
+        if (result.output.status === 'success') process.exit(2);  // distinct exit code for write failure
+      }
+    }
+
+    if (result.output.status !== 'success') process.exit(1);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+// ─── Background mode (spec §14) ───────────────────────────────────────
+
+async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {} } = {}) {
+  // We need a resolved adapter + argv WITHOUT executing. resolveDispatch
+  // returns the composed prompt; we then ask the adapter for argv.
+  let resolved;
+  try {
+    resolved = await resolveDispatch({ hopperDir, taskId });
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
+
+  // P3a-fix: soft-warn also fires on --background path. Same warnIfModelUnknown
+  // helper as sync dispatch; advisory only, never blocks.
+  if (adapterOpts.model) {
+    try { warnIfModelUnknown(resolved.vendor, adapterOpts.model); } catch (_) { /* never block */ }
+  }
+
+  const adapter = getAdapter(resolved.vendor);
+  if (!adapter) {
+    console.error(`Error: unknown vendor '${resolved.vendor}'`);
+    process.exit(1);
+  }
+
+  // Enforce host != vendor across all host adapters.
+  const hostVendor = process.env.HOPPER_HOST_VENDOR;
+  try {
+    validateHostVendorSeparation(hostVendor, resolved.vendor);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
+
+  // Adapter envPreflight gate
+  const preflight = adapter.envPreflight();
+  if (!preflight.ok) {
+    console.error(`Error: adapter ${resolved.vendor} preflight failed: ${preflight.missing.join(' | ')}`);
+    process.exit(1);
+  }
+  if (preflight.missing && preflight.missing.length > 0) {
+    for (const msg of preflight.missing) console.error(`Note: ${msg}`);
+  }
+
+  // Adapter stdin handling
+  if (adapter.stdinMode === 'pipe') {
+    console.error(`Error: adapter ${resolved.vendor} requires stdinMode='pipe'; background mode does not support stdin piping (spec §14).`);
+    console.error('Use sync mode (omit --background) for this vendor, or update the adapter to accept prompt as argv.');
+    process.exit(1);
+  }
+
+  // Build argv. logFile gets injected by spawnDetached path NOT here — adapter
+  // sees logFile via opts only if it needs it. For background, the log lives
+  // at <task-id>-output.log next to the .md.
+  const handoffDir = join(hopperDir, 'handoffs');
+  const outputMdPath = join(handoffDir, `${taskId}-output.md`);
+  const logPath = outputMdPath.replace(/\.md$/, '.log');
+  // Phase 6c F1: thread taskType through so runner's timeoutMs() applies review floor.
+  const effectiveOpts = { ...adapterOpts, background: true, logFile: logPath, taskType: resolved.task.taskType };
+  const adapterArgv = adapter.args(resolved.composedPrompt, effectiveOpts);
+
+  try {
+    const result = spawnDetached({
+      hopperDir,
+      taskId,
+      adapterName: resolved.vendor,
+      adapterArgv: [resolved.vendor, ...adapterArgv].slice(1), // pass argv only, adapter name passed via --adapter
+      runnerPath: RUNNER_PATH,
+      hostNative: hostVendor || null,
+      adapterOpts: effectiveOpts,  // codex Phase 5 F2: opts → runner via env for timeoutMs
+    });
+    console.log('=== BACKGROUND DISPATCH STARTED ===');
+    console.log(`Task:        ${taskId}`);
+    console.log(`Vendor:      ${resolved.vendor}`);
+    console.log(`Runner PID:  ${result.pid}`);
+    console.log(`Started at:  ${result.startTime}`);
+    console.log(`Output (md): ${result.outputMdPath}`);
+    console.log(`Log (raw):   ${result.logPath}`);
+    console.log('');
+    console.log(`Follow with: hopper-dispatch --watch ${taskId}`);
+    console.log(`List jobs:   hopper-dispatch --jobs`);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(err.code === 'EALREADYRUNNING' ? 3 : 1);
+  }
+}
+
+function runJobsList(hopperDir) {
+  const jobs = listInProgressJobs(hopperDir);
+  if (jobs.length === 0) {
+    console.log('No in-progress background jobs.');
+    return;
+  }
+  console.log(`hopper-dispatch v${VERSION} — ${jobs.length} in-progress job(s):`);
+  console.log('');
+  console.log('TASK ID                  VENDOR     PID     AGE     ALIVE  STARTED');
+  console.log('-----------------------  ---------  ------  ------  -----  -------------------------');
+  for (const job of jobs) {
+    console.log(
+      `${(job.task_id || '?').padEnd(23)}  ` +
+      `${(job.adapter || '?').padEnd(9)}  ` +
+      `${String(job.pid || '?').padEnd(6)}  ` +
+      `${(isFinite(job.age_hours) ? job.age_hours.toFixed(1) + 'h' : '?').padEnd(6)}  ` +
+      `${(job.alive ? 'yes' : 'no').padEnd(5)}  ` +
+      `${job.start_time || '?'}`
+    );
+  }
+  console.log('');
+  console.log('Stale jobs (>24h or dead PID) can be cleaned with: hopper-dispatch --reap');
+}
+
+function runReap(hopperDir) {
+  const reaped = reapStaleJobs(hopperDir);
+  if (reaped.length === 0) {
+    console.log('No stale jobs to reap.');
+    return;
+  }
+  console.log(`Reaped ${reaped.length} job(s) to status=orphaned:`);
+  for (const id of reaped) console.log(`  - ${id}`);
+}
+
+function pathFromFrontmatter(handoffDir, value, fallbackName) {
+  if (!value) return join(handoffDir, fallbackName);
+  if (value.startsWith('./')) return join(handoffDir, value.slice(2));
+  if (value.includes('/') || value.includes('\\')) return resolve(handoffDir, value);
+  return join(handoffDir, value);
+}
+
+function formatMs(ms) {
+  if (!Number.isFinite(ms)) return 'n/a';
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s (${ms}ms)`;
+}
+
+function progressEventMeta(event) {
+  const meta = [];
+  if (event.status) meta.push(`status=${event.status}`);
+  if (event.adapter_status) meta.push(`adapter_status=${event.adapter_status}`);
+  if (event.exit_code !== undefined) meta.push(`exit_code=${event.exit_code}`);
+  if (event.duration_ms !== undefined) meta.push(`duration_ms=${event.duration_ms}`);
+  return meta.length > 0 ? ` [${meta.join(' ')}]` : '';
+}
+
+function runProgress(hopperDir, taskId) {
+  try { validateTaskId(taskId); }
+  catch (err) { console.error(`Error: ${err.message}`); process.exit(2); }
+
+  const handoffDir = join(hopperDir, 'handoffs');
+  const outputMdPath = join(handoffDir, `${taskId}-output.md`);
+  if (!existsSync(outputMdPath)) {
+    console.error(`Error: no output file at ${outputMdPath}. Has this task been dispatched?`);
+    process.exit(1);
+  }
+
+  let fm;
+  try { fm = readFrontmatter(outputMdPath); }
+  catch (err) { console.error(`Error reading frontmatter: ${err.message}`); process.exit(1); }
+
+  let events = [];
+  try { events = readProgressEvents({ hopperDir, taskId, limit: 5 }); }
+  catch (err) { console.error(`Error reading progress events: ${err.message}`); process.exit(1); }
+
+  const now = Date.now();
+  const startMs = Date.parse(fm.start_time || '');
+  const endMs = Date.parse(fm.end_time || '');
+  const elapsedMs = Number.isFinite(startMs)
+    ? (Number.isFinite(endMs) ? endMs - startMs : now - startMs)
+    : NaN;
+  const durationMs = Number.isFinite(fm.duration_ms) ? fm.duration_ms : elapsedMs;
+  const rawLogPath = pathFromFrontmatter(handoffDir, fm.raw_log || fm.log, `${taskId}-output.log`);
+  const progressLogPath = pathFromFrontmatter(handoffDir, fm.progress_log, `${taskId}-progress.log`);
+
+  console.log(`=== ${taskId} - PROGRESS ===`);
+  console.log(`Task:          ${taskId}`);
+  console.log(`Vendor:        ${fm.adapter || 'unknown'}`);
+  console.log(`Status:        ${fm.status || 'unknown'}`);
+  console.log(`Phase:         ${fm.phase || fm.status || 'unknown'}`);
+  console.log(`PID:           ${fm.pid || 'n/a'}${fm.pid ? ` (${isAlive(fm.pid) ? 'alive' : 'not alive'})` : ''}`);
+  console.log(`Started:       ${fm.start_time || 'n/a'}`);
+  if (fm.end_time) console.log(`Ended:         ${fm.end_time}`);
+  console.log(`Elapsed:       ${formatMs(elapsedMs)}`);
+  if (fm.status !== 'in-progress') console.log(`Duration:      ${formatMs(durationMs)}`);
+  console.log(`Last progress: ${fm.last_progress || '(none)'}`);
+  if (fm.last_progress_at) console.log(`Last update:   ${fm.last_progress_at}`);
+  console.log(`Progress seq:  ${fm.progress_seq ?? '(none)'}`);
+  console.log(`Terminal:      ${fm.terminal_event_emitted ? 'yes' : 'no'}`);
+  console.log('');
+  console.log('Paths:');
+  console.log(`  Output:      ${outputMdPath}`);
+  console.log(`  Raw log:     ${rawLogPath}`);
+  console.log(`  Progress:    ${progressLogPath}`);
+  console.log('');
+  console.log('Recent events:');
+  if (events.length === 0) {
+    console.log('  (none)');
+  } else {
+    for (const event of events) {
+      const marker = event.terminal ? ' terminal' : '';
+      console.log(`  #${event.seq} ${event.ts} ${event.phase}/${event.kind}${marker}: ${event.message}${progressEventMeta(event)}`);
+    }
+  }
+}
+
+const TERMINAL_TASK_STATUSES = new Set(['done', 'failed', 'timeout', 'cancelled', 'orphaned']);
+const WATCH_EVENTS_INTERVAL_MS = 500;
+
+function taskIdFromOutputPath(outputMdPath, fm) {
+  return fm.task_id || basename(outputMdPath).replace(/-output\.md$/, '');
+}
+
+function isTerminalFrontmatter(fm) {
+  return fm.terminal_event_emitted === true && TERMINAL_TASK_STATUSES.has(fm.status);
+}
+
+function listOutputMarkdownFiles(handoffDir) {
+  if (!existsSync(handoffDir)) return [];
+  return readdirSync(handoffDir)
+    .filter((name) => name.endsWith('-output.md'))
+    .sort()
+    .map((name) => join(handoffDir, name));
+}
+
+function terminalPayload(handoffDir, outputMdPath, fm) {
+  const taskId = taskIdFromOutputPath(outputMdPath, fm);
+  return {
+    type: 'hopper.task.terminal',
+    task_id: taskId,
+    status: fm.status,
+    phase: fm.phase || fm.status,
+    vendor: fm.adapter || 'unknown',
+    seq: Number.isInteger(fm.progress_seq) ? fm.progress_seq : null,
+    output_md: outputMdPath,
+    progress_log: pathFromFrontmatter(handoffDir, fm.progress_log, `${taskId}-progress.log`),
+    raw_log: pathFromFrontmatter(handoffDir, fm.raw_log || fm.log, `${taskId}-output.log`),
+  };
+}
+
+export function runWatchEvents(
+  hopperDir,
+  {
+    once = false,
+    notifyFn = notify,
+    writeLine = (line) => console.log(line),
+    exitFn = (code) => process.exit(code),
+  } = {},
+) {
+  const handoffDir = join(hopperDir, 'handoffs');
+  const watched = new Set();
+  const lastSeenSeq = new Map();
+  let scanTimer = null;
+  let stopped = false;
+
+  function cleanup(code = null) {
+    if (stopped) return;
+    stopped = true;
+    if (scanTimer) clearInterval(scanTimer);
+    for (const outputMdPath of watched) unwatchFile(outputMdPath);
+    if (code !== null) exitFn(code);
+  }
+
+  function maybeEmit(outputMdPath) {
+    if (stopped || !existsSync(outputMdPath)) return;
+
+    let fm;
+    try {
+      fm = readFrontmatter(outputMdPath);
+    } catch (err) {
+      console.error(`watch-events: could not read ${outputMdPath}: ${err.message}`);
+      return;
+    }
+    if (!isTerminalFrontmatter(fm)) return;
+
+    const taskId = taskIdFromOutputPath(outputMdPath, fm);
+    const seq = Number.isInteger(fm.progress_seq) ? fm.progress_seq : 0;
+    const previousSeq = lastSeenSeq.get(taskId);
+    if (previousSeq !== undefined && previousSeq >= seq) return;
+
+    lastSeenSeq.set(taskId, seq);
+    const payload = terminalPayload(handoffDir, outputMdPath, fm);
+    writeLine(JSON.stringify(payload));
+    notifyFn({
+      title: `hopper: ${taskId}`,
+      message: `${fm.adapter || 'unknown'} → ${fm.status}${fm.duration_ms ? ` (${(fm.duration_ms / 1000).toFixed(1)}s)` : ''}`,
+      taskId,
+    }).catch(() => {});
+    if (once) cleanup(0);
+  }
+
+  function watchOutput(outputMdPath) {
+    if (watched.has(outputMdPath)) return;
+    watched.add(outputMdPath);
+    watchFile(outputMdPath, { interval: WATCH_EVENTS_INTERVAL_MS }, (curr, prev) => {
+      if (curr.mtimeMs === prev.mtimeMs && curr.size === prev.size) return;
+      maybeEmit(outputMdPath);
+    });
+    maybeEmit(outputMdPath);
+  }
+
+  function scanOutputs() {
+    for (const outputMdPath of listOutputMarkdownFiles(handoffDir)) {
+      watchOutput(outputMdPath);
+    }
+  }
+
+  scanOutputs();
+  scanTimer = setInterval(scanOutputs, WATCH_EVENTS_INTERVAL_MS);
+  process.once('SIGINT', () => cleanup(0));
+  process.once('SIGTERM', () => cleanup(0));
+  return () => cleanup();
+}
+
+/**
+ * Phase 6c follow-up (user request 2026-05-21): print a completed task's
+ * result in the HOST session. Background dispatch returns immediately, so
+ * results land in `.hopper/handoffs/<task-id>-output.md` + .log — invisible
+ * to the host session without explicit retrieval. This is that retrieval.
+ *
+ * Format optimized for chat-readability:
+ *   1. One-line summary (vendor, status, duration, exit_code)
+ *   2. Output.md body (skips the auto-appended `## Status (background completion)`
+ *      tail so we don't print the same status twice)
+ *   3. Tail of the .log file (vendor's actual stdout — last ~3000 chars by default)
+ *
+ * Exit codes: 0 if status=done, 1 otherwise, 2 if task is still in-progress
+ * (caller should use --watch to tail instead).
+ */
+function runResult(hopperDir, taskId) {
+  try { validateTaskId(taskId); }
+  catch (err) { console.error(`Error: ${err.message}`); process.exit(2); }
+
+  const outputMdPath = join(hopperDir, 'handoffs', `${taskId}-output.md`);
+  if (!existsSync(outputMdPath)) {
+    console.error(`Error: no output file at ${outputMdPath}. Has this task been dispatched?`);
+    process.exit(1);
+  }
+
+  let fm;
+  try { fm = readFrontmatter(outputMdPath); }
+  catch (err) { console.error(`Error reading frontmatter: ${err.message}`); process.exit(1); }
+
+  // In-progress: tell the user explicitly and suggest --watch.
+  if (fm.status === 'in-progress') {
+    console.error(`Task ${taskId} is still in-progress (PID ${fm.pid}, started ${fm.start_time}).`);
+    console.error(`Run \`hopper-dispatch --watch ${taskId}\` to follow until done.`);
+    process.exit(2);
+  }
+
+  // Terminal: print summary + body + log tail.
+  console.log(`=== ${taskId} — ${fm.status.toUpperCase()} ===`);
+  console.log(`Vendor:    ${fm.adapter}`);
+  console.log(`Status:    ${fm.status}${fm.adapter_status ? ' (' + fm.adapter_status + ')' : ''}`);
+  if (fm.duration_ms != null) console.log(`Duration:  ${(fm.duration_ms / 1000).toFixed(1)}s (${fm.duration_ms}ms)`);
+  if (fm.exit_code != null) console.log(`Exit code: ${fm.exit_code}`);
+  if (fm.timed_out) console.log(`Timed out: yes`);
+  console.log('');
+
+  // Output.md body: read the whole file, strip frontmatter + leading auto-text,
+  // and stop at "## Status (background completion)" (runner-appended).
+  const raw = readFileSync(outputMdPath, 'utf-8');
+  let body = raw;
+  // Strip leading frontmatter
+  if (body.startsWith('---\n')) {
+    const closingFm = body.indexOf('\n---\n', 4);
+    if (closingFm !== -1) body = body.slice(closingFm + 5);
+  }
+  // Trim the runner's "Output streaming to ... .log" boilerplate
+  body = body.replace(/^# [^\n]+\n\nOutput streaming to[^\n]+\n+/, '');
+  // Stop at runner-appended status section
+  const statusIdx = body.indexOf('\n## Status (background completion)');
+  if (statusIdx !== -1) body = body.slice(0, statusIdx);
+  body = body.trim();
+
+  if (body.length > 0) {
+    console.log('--- OUTPUT.MD BODY ---');
+    console.log(body);
+    console.log('--- END BODY ---');
+    console.log('');
+  } else {
+    console.log('(output.md body is empty — vendor likely streamed to .log; printing log tail below.)');
+    console.log('');
+  }
+
+  // Log tail: useful for vendors (codex, copilot in some cases) that write
+  // their verdict to stdout rather than the output.md body.
+  const logPath = outputMdPath.replace(/\.md$/, '.log');
+  const LOG_TAIL_BYTES = 4000;
+  if (existsSync(logPath)) {
+    try {
+      const st = statSync(logPath);
+      if (st.size > 0) {
+        const log = readFileSync(logPath, 'utf-8');
+        const tail = log.length > LOG_TAIL_BYTES ? '... [truncated; full log at .log file] ...\n' + log.slice(-LOG_TAIL_BYTES) : log;
+        console.log(`--- LOG TAIL (last ${Math.min(LOG_TAIL_BYTES, st.size)} of ${st.size} bytes) ---`);
+        console.log(tail);
+        console.log('--- END LOG ---');
+      } else {
+        console.log('(log file is empty)');
+      }
+    } catch (err) {
+      console.error(`Could not read log file: ${err.message}`);
+    }
+  } else {
+    console.log('(no log file found)');
+  }
+
+  process.exit(fm.status === 'done' ? 0 : 1);
+}
+
+async function runWatch(hopperDir, taskId) {
+  // Per codex Phase 5 audit P1 #3: validate task-id BEFORE constructing path
+  try {
+    validateTaskId(taskId);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(2);
+  }
+  const outputMdPath = join(hopperDir, 'handoffs', `${taskId}-output.md`);
+  if (!existsSync(outputMdPath)) {
+    console.error(`Error: no output file at ${outputMdPath}. Has this task been dispatched?`);
+    process.exit(1);
+  }
+
+  let initialFm;
+  try {
+    initialFm = readFrontmatter(outputMdPath);
+  } catch (err) {
+    console.error(`Error reading frontmatter: ${err.message}`);
+    process.exit(1);
+  }
+
+  console.error(`Watching ${taskId} (status: ${initialFm.status}, pid: ${initialFm.pid || 'n/a'})`);
+  console.error(`Log: ${initialFm.log || 'n/a'}`);
+  console.error('');
+
+  // Per codex Phase 5 audit F6: if the task is ALREADY terminal at the time
+  // --watch is invoked, surface result + exit immediately. Previously
+  // `lastStatus = initialFm.status` made the watch loop think nothing
+  // changed, so the file got tailed once and then we waited forever.
+  if (initialFm.status === 'done' || initialFm.status === 'failed' || initialFm.status === 'orphaned') {
+    const logPath = outputMdPath.replace(/\.md$/, '.log');
+    if (existsSync(logPath)) {
+      try {
+        const stat = statSync(logPath);
+        if (stat.size > 0) process.stdout.write(readFileSync(logPath, 'utf-8'));
+      } catch (_) {}
+    }
+    console.error('');
+    console.error(`=== TASK ${initialFm.status.toUpperCase()} ===`);
+    console.error(`exit_code: ${initialFm.exit_code} | duration: ${initialFm.duration_ms}ms${initialFm.signal ? ' | signal: ' + initialFm.signal : ''}${initialFm.timed_out ? ' | TIMED OUT' : ''}`);
+    process.exit(initialFm.status === 'done' ? 0 : 1);
+  }
+
+  const logPath = outputMdPath.replace(/\.md$/, '.log');
+  let lastSize = 0;
+  let lastStatus = initialFm.status;
+
+  // Emit any existing log content first
+  if (existsSync(logPath)) {
+    try {
+      const stat = statSync(logPath);
+      if (stat.size > 0) {
+        process.stdout.write(readFileSync(logPath, 'utf-8'));
+        lastSize = stat.size;
+      }
+    } catch (_) {}
+  }
+
+  // Watch loop
+  const handler = (curr, prev) => {
+    if (curr.mtimeMs === prev.mtimeMs && curr.size === prev.size) return;
+    // Read new log content
+    if (existsSync(logPath)) {
+      try {
+        const stat = statSync(logPath);
+        if (stat.size > lastSize) {
+          const fd = openSync(logPath, 'r');
+          const buf = Buffer.alloc(stat.size - lastSize);
+          readSync(fd, buf, 0, buf.length, lastSize);
+          closeSync(fd);
+          process.stdout.write(buf);
+          lastSize = stat.size;
+        }
+      } catch (_) {}
+    }
+    // Check status
+    try {
+      const fm = readFrontmatter(outputMdPath);
+      if (fm.status !== lastStatus) {
+        lastStatus = fm.status;
+        if (fm.status === 'done' || fm.status === 'failed' || fm.status === 'orphaned') {
+          unwatchFile(outputMdPath, handler);
+          console.error('');
+          console.error(`=== TASK ${fm.status.toUpperCase()} ===`);
+          console.error(`exit_code: ${fm.exit_code} | duration: ${fm.duration_ms}ms${fm.signal ? ' | signal: ' + fm.signal : ''}${fm.timed_out ? ' | TIMED OUT' : ''}`);
+          process.exit(fm.status === 'done' ? 0 : 1);
+        }
+      }
+    } catch (_) {}
+  };
+
+  watchFile(outputMdPath, { interval: 500 }, handler);
+
+  // Tick once now in case state is already terminal
+  handler(statSync(outputMdPath), { mtimeMs: -1, size: -1 });
+}
+
+// ─── Discovery commands (Phase 6a) ────────────────────────────────────
+
+async function runCheck(target) {
+  const vendors = target ? [target] : listAdapters();
+  if (target && !listAdapters().includes(target)) {
+    console.error(`Error: unknown vendor '${target}'. Known: ${listAdapters().join(', ')}`);
+    process.exit(1);
+  }
+
+  // Per codex Phase 6a strict audit P2 #6: probe each vendor ONCE; reuse
+  // for both table row + notes section. Halves filesystem probes and
+  // eliminates row/notes inconsistency under mid-command env/file changes.
+  const results = [];
+  for (const v of vendors) {
+    try {
+      results.push({ name: v, r: await installCheckForAdapter(v), err: null });
+    } catch (err) {
+      results.push({ name: v, r: null, err });
+    }
+  }
+
+  // Per codex Phase 6a strict audit P2 #2 + recheck F2 #2 tightening:
+  // redact home-dir in resolved paths to avoid leaking username + install
+  // layout into pasted logs. Case-insensitive comparison on Windows AND
+  // separator-boundary check to avoid `/home/al` matching `/home/alice`.
+  const { homedir } = await import('node:os');
+  const { sep } = await import('node:path');
+  const home = homedir();
+  const isWin = process.platform === 'win32';
+  const norm = (s) => (isWin ? s.toLowerCase() : s);
+  const homeN = home ? norm(home) : null;
+  const redact = (p) => {
+    if (!p || !homeN) return p;
+    const pN = norm(p);
+    if (pN === homeN) return '~';
+    if (pN.startsWith(homeN + sep.toLowerCase())) {
+      return '~' + p.slice(home.length);
+    }
+    return p;
+  };
+
+  console.log(`hopper-dispatch v${VERSION} — vendor install + auth check`);
+  console.log('');
+  console.log('| Vendor    | Command resolution                                 | Auth      | Status         |');
+  console.log('|-----------|----------------------------------------------------|-----------|----------------|');
+  for (const { name: v, r, err } of results) {
+    if (err) {
+      // Defensive: if a non-Error is thrown, err.message might be undefined.
+      const errMsg = String((err && err.message) || err || 'unknown');
+      console.log(`| ${v.padEnd(9)} | ERROR: ${errMsg.slice(0, 40).padEnd(40)} |           | ERROR          |`);
+      continue;
+    }
+    const cmd = r.binaryFound
+      ? `${redact(r.resolvedPath) || r.command}${r.needsShellWrap ? ' (cmd.exe /c wrap)' : ''}`
+      : '(not on PATH)';
+    const auth = r.authOk ? 'OK' : (r.authNotes.length > 0 ? 'note' : 'missing');
+    console.log(`| ${v.padEnd(9)} | ${cmd.slice(0, 50).padEnd(50)} | ${auth.padEnd(9)} | ${r.overallStatus.padEnd(14)} |`);
+  }
+  console.log('');
+  console.log('Notes (auth):');
+  for (const { name: v, r } of results) {
+    if (r && r.authNotes.length > 0) {
+      console.log(`  ${v}:`);
+      for (const note of r.authNotes) console.log(`    - ${note}`);
+    }
+  }
+  console.log('');
+  console.log('No vendor subprocess is spawned for this check (spec §3 #4 single-spawn proof preserved).');
+  console.log('Paths shown with `~` home-dir redaction. PATH is trusted input — review your $PATH if unsure.');
+
+  // Per Phase 6a dogfood 2026-05-21: emit diagnostic hint when any vendor
+  // reports NOT_INSTALLED. PATH coverage varies between shells on Windows
+  // (PowerShell sees more entries than Git-Bash/MSYS2 by default).
+  const notInstalled = results.filter(({ r }) => r && r.overallStatus === 'NOT_INSTALLED');
+  if (notInstalled.length > 0) {
+    console.log('');
+    console.log('Diagnostic — NOT_INSTALLED vendors:');
+    console.log('  PATH coverage is shell-dependent on Windows. If you can run the vendor');
+    console.log('  from PowerShell but `--check` reports NOT_INSTALLED in Git-Bash/MSYS2,');
+    console.log('  the binary likely lives in a Windows-app install dir that PowerShell sees');
+    console.log('  on PATH but your shell does not (e.g. ~/AppData/Local/<vendor>/bin/).');
+    console.log('  Either: (a) run hopper-dispatch from PowerShell, or');
+    console.log('          (b) add the vendor bin dir to your shell PATH.');
+  }
+}
+
+function runCapabilities(vendor) {
+  if (!listAdapters().includes(vendor)) {
+    console.error(`Error: unknown vendor '${vendor}'. Known: ${listAdapters().join(', ')}`);
+    process.exit(1);
+  }
+  const caps = capabilitiesForAdapter(vendor);
+  if (!caps) {
+    console.error(`Vendor '${vendor}' has no capabilities() metadata yet (Phase 6a adapter pending).`);
+    process.exit(1);
+  }
+  console.log(`hopper-dispatch v${VERSION} — capabilities for ${vendor}`);
+  console.log('');
+  console.log(`  --model      ${caps.modelArg.accepted}`);
+  if (caps.modelArg.knownGood.length > 0) {
+    console.log(`               Known good: ${caps.modelArg.knownGood.join(', ')}`);
+  }
+  console.log(`               Note: ${caps.modelArg.sourceNote}`);
+  console.log('');
+  console.log(`  --reasoning  ${caps.reasoningArg.accepted}`);
+  if (caps.reasoningArg.knownGood.length > 0) {
+    console.log(`               Values: ${caps.reasoningArg.knownGood.join(' | ')}`);
+  }
+  console.log(`               Note: ${caps.reasoningArg.sourceNote}`);
+  console.log('');
+  console.log('  Features:');
+  for (const [feat, info] of Object.entries(caps.features)) {
+    const mark = info.supported ? 'YES' : 'NO ';
+    console.log(`    ${feat.padEnd(16)} ${mark}  ${info.mechanism}`);
+  }
+  console.log('');
+  console.log(`  Capability data stale after: ${caps.staleAfter}`);
+  console.log(`  Re-verify quarterly. Source: docs/research/ — see notes above.`);
+  console.log('');
+  console.log('No vendor subprocess is spawned for this lookup (static data only).');
+
+  // Phase 6b: merge in cached probe data if present
+  const cached = getVendorCache(vendor);
+  if (cached) {
+    console.log('');
+    console.log(`  Cached probe data (${staleness(cached.probed_at)}${isStale(cached.probed_at) ? ' — STALE' : ''}):`);
+    console.log(`    introspection_supported:  ${cached.introspection_supported}`);
+    if (cached.version) console.log(`    version:                  ${cached.version}`);
+    if (cached.binary_path) console.log(`    binary_path:              ${cached.binary_path}`);
+    if (cached.models && cached.models.length > 0) {
+      const preview = cached.models.slice(0, 8).join(', ');
+      const more = cached.models.length > 8 ? ` (+${cached.models.length - 8} more)` : '';
+      console.log(`    models (${cached.models.length}):              ${preview}${more}`);
+    }
+    console.log(`    models_source:            ${cached.models_source}`);
+    if (cached.reasoning_levels && cached.reasoning_levels.length > 0) {
+      console.log(`    reasoning_levels:         ${cached.reasoning_levels.join(' | ')}`);
+    }
+    if (cached.notes && cached.notes.length > 0) {
+      console.log(`    notes:`);
+      for (const n of cached.notes) console.log(`      - ${n}`);
+    }
+    console.log(`    duration_ms:              ${cached.duration_ms}`);
+  } else {
+    console.log('');
+    console.log(`  No cached probe data. Run \`hopper-dispatch --probe ${vendor}\` for live introspection.`);
+  }
+}
+
+// ─── Phase 6b commands ────────────────────────────────────────────────
+
+async function runProbe(target) {
+  const vendors = target ? [target] : listAdapters();
+  if (target && !listAdapters().includes(target)) {
+    console.error(`Error: unknown vendor '${target}'. Known: ${listAdapters().join(', ')}`);
+    process.exit(1);
+  }
+
+  console.log(`hopper-dispatch v${VERSION} — probing ${vendors.length} vendor(s)...`);
+  console.log('Per spec §3 #4 + §14.6 carve-out: --probe is opt-in, diagnostic,');
+  console.log('single-attempt-per-vendor. Results cached at ~/.hopper/cache/vendor-capabilities.json.');
+  console.log('');
+
+  let totalSubprocesses = 0;
+  for (const v of vendors) {
+    process.stderr.write(`  ${v.padEnd(9)} ... `);
+    const start = Date.now();
+    try {
+      const result = await probeVendor(v);
+      setVendorCache(v, { ...result, probed_at: new Date().toISOString() });
+      const elapsed = Date.now() - start;
+      const modelCount = result.models ? result.models.length : 0;
+      process.stderr.write(`${result.introspection_supported} | ${modelCount} model(s) | ${elapsed}ms\n`);
+      totalSubprocesses += estimateSpawns(v, result.introspection_supported);
+    } catch (err) {
+      process.stderr.write(`ERROR: ${err.message}\n`);
+    }
+  }
+
+  console.log('');
+  console.log(`Probe complete. ~${totalSubprocesses} vendor subprocess(es) spawned total.`);
+  console.log(`Run \`hopper-dispatch --models\` or \`--capabilities <vendor>\` to read cached results.`);
+}
+
+function estimateSpawns(vendorName, introspectionSupported) {
+  // N1-fix: per-vendor counts instead of bucketed approximation.
+  // codex: --version + debug models = 2
+  // opencode: --version + models + auth list = 3
+  // copilot: version = 1 (plus zero-spawn FS scan)
+  // kimi: config file read only = 0
+  // agy: static = 0
+  if (vendorName === 'opencode') return 3;
+  if (vendorName === 'codex') return 2;
+  if (vendorName === 'copilot') return 1;
+  // Fall back to the introspection-level approximation for unknown vendors
+  switch (introspectionSupported) {
+    case 'full': return 2;
+    case 'partial': return 1;
+    case 'config-only': return 0;
+    case 'none': return 0;
+    default: return 0;
+  }
+}
+
+function runModels(target) {
+  // P3b-fix: distinguish "no cache yet" from "cache is corrupt" so user knows
+  // whether to run --probe (no cache) vs delete + re-probe (corrupt).
+  const { cache, error } = readCacheWithDiagnostics();
+  if (error) {
+    console.error(`Error reading cache: ${error}`);
+    process.exit(1);
+  }
+  if (!cache) {
+    console.error('No cache found. Run `hopper-dispatch --probe` first to populate it.');
+    process.exit(1);
+  }
+  const vendors = target ? [target] : Object.keys(cache.vendors);
+  if (target && !cache.vendors[target]) {
+    console.error(`No cached entry for vendor '${target}'. Run \`hopper-dispatch --probe ${target}\` first.`);
+    console.error(`Cached vendors: ${Object.keys(cache.vendors).join(', ') || '(none)'}`);
+    process.exit(1);
+  }
+
+  console.log(`hopper-dispatch v${VERSION} — cached models per vendor`);
+  console.log(`Cache: ${cache.probed_at_global} (global) | host: ${cache.host}`);
+  console.log('');
+
+  for (const v of vendors) {
+    const entry = cache.vendors[v];
+    if (!entry) continue;
+    const stale = isStale(entry.probed_at) ? ' [STALE]' : '';
+    console.log(`${v} (${entry.introspection_supported}, ${staleness(entry.probed_at)})${stale}`);
+    if (entry.models && entry.models.length > 0) {
+      for (const m of entry.models) console.log(`  - ${m}`);
+    } else {
+      console.log(`  (no models in cache; source: ${entry.models_source})`);
+    }
+    if (entry.reasoning_levels && entry.reasoning_levels.length > 0) {
+      console.log(`  reasoning: ${entry.reasoning_levels.join(' | ')}`);
+    }
+    console.log('');
+  }
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === __filename) {
+  main().catch((err) => {
+    console.error(`Fatal: ${err.message}`);
+    process.exit(1);
+  });
+}
