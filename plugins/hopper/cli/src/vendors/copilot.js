@@ -41,6 +41,7 @@ export const copilotAdapter = {
   },
 
   args(input, opts) {
+    const sandbox = opts.sandbox ?? 'danger-full-access';
     return [
       '-p', input,
       // Phase 6c follow-up (T-AUDIT-PH6C-copilot sub-agent escape investigation):
@@ -50,12 +51,11 @@ export const copilotAdapter = {
       // output.md. Copilot then escalates to a General-purpose sub-agent which
       // runs in a DIFFERENT permission scope and writes content to a DIFFERENT
       // file (T-AUDIT-PH6C-agy-output.md got contaminated in the dogfood run).
-      // --allow-all-tools makes the permission model match what hopper expects:
-      // copilot can use shell/file-edit tools needed to write its own output.
-      // Background dispatches are non-interactive; this is the explicit grant.
-      // Per --help: equivalent of COPILOT_ALLOW_ALL=true env-var.
-      '--allow-all-tools',
-      '--allow-all-paths',
+      // --allow-all-tools makes the permission model match hopper's default:
+      // implementation dispatches can use shell/file-edit tools and write their
+      // own output. Explicit read-only tasks omit this grant and rely on
+      // Copilot's native permission model.
+      ...(sandbox === 'danger-full-access' ? ['--allow-all-tools', '--allow-all-paths'] : []),
       // Optional --model when explicitly chosen
       ...(opts.model ? ['--model', opts.model] : []),
     ];

@@ -5,7 +5,7 @@
 // Per spec §3 #4 (no harness reaction core): ONE invocation = ONE action = ONE exit.
 // No retry, no fallback, no state across invocations.
 
-import { resolveDispatch, getStatus, executeWithAdapter } from '../src/dispatch.js';
+import { resolveDispatch, getStatus, executeWithAdapter, resolveAdapterOptsForTask } from '../src/dispatch.js';
 import { listTaskTypes } from '../src/tasks.js';
 import { listAdapters, getAdapter, installCheckForAdapter, capabilitiesForAdapter, probeVendor } from '../src/vendors/index.js';
 import { readCache, readCacheWithDiagnostics, getVendorCache, setVendorCache, isStale, staleness } from '../src/cache.js';
@@ -15,6 +15,7 @@ import {
   validateDispatchFlags,
   validateModelName,
   validateReasoning,
+  validateSandbox,
   validateHostVendorSeparation,
   ALLOWED_DISPATCH_FLAGS,
   ALLOWED_DISPATCH_VALUE_FLAGS,
@@ -35,7 +36,7 @@ import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
-const VERSION = '0.7.1';
+const VERSION = '0.8.0';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -50,6 +51,7 @@ function printUsage() {
   console.log('  hopper-dispatch <task-id> --write [--force]     Dispatch + write output.md (sync mode only)');
   console.log('  hopper-dispatch <task-id> --model <name>        Override vendor model (e.g. gpt-5.5, claude-opus-4-7)');
   console.log('  hopper-dispatch <task-id> --reasoning <level>   Override reasoning effort (minimal|low|medium|high|xhigh)');
+  console.log('  hopper-dispatch <task-id> --sandbox <mode>      Override vendor permission (read-only|workspace-write|danger-full-access)');
   console.log('  hopper-dispatch --watch <task-id>               Tail-follow a background job until exit');
   console.log('  hopper-dispatch --progress <task-id>            Show background task phase + recent progress events');
   console.log('  hopper-dispatch --watch-events [--once]         Emit terminal task events as stdout JSONL');
@@ -69,10 +71,12 @@ function printUsage() {
   console.log('  hopper-dispatch --version                       Print version');
   console.log('');
   console.log('Adapter opts (forwarded to vendor adapter; ignored if adapter does not honor):');
-  console.log('  --model <name>       Examples: gpt-5.5, claude-opus-4-7, deepseek/v4-flash, kimi-thinking');
-  console.log('                       Honored by: kimi, opencode, copilot, grok');
+  console.log('  --model <name>       Examples: gpt-5.5, claude-opus-4-7, deepseek/v4-flash, kimi-code/kimi-for-coding, xiaomi/mimo-v2.5-pro');
+  console.log('                       Honored by: kimi, opencode, copilot, grok, mimo');
   console.log('  --reasoning <level>  minimal | low | medium | high | xhigh');
-  console.log('                       Honored by: codex (others ignore harmlessly)');
+  console.log('                       Honored by: codex; mimo maps this to --variant (xhigh -> max)');
+  console.log('  --sandbox <mode>     read-only | workspace-write | danger-full-access');
+  console.log('                       Default: danger-full-access unless task text explicitly says read-only');
   console.log('');
   console.log('Env: HOPPER_DIR overrides .hopper/ location');
   console.log('     HOPPER_VENDOR_CWD overrides the vendor working dir (default: repo root that owns .hopper/);');
@@ -155,6 +159,9 @@ async function main() {
 
   const hopperDir = findHopperDir();
   if (!hopperDir) {
+    if (args.includes('--watch-events') && !process.env.HOPPER_DIR) {
+      return;
+    }
     console.error('Error: no .hopper/ directory found in cwd or ancestors.');
     console.error('Set HOPPER_DIR env var OR run from a directory containing .hopper/.');
     process.exit(1);
@@ -266,6 +273,7 @@ async function main() {
     if (bareFlags.length > 0) validateDispatchFlags(bareFlags);
     if (valueFlags.model !== undefined) validateModelName(valueFlags.model);
     if (valueFlags.reasoning !== undefined) validateReasoning(valueFlags.reasoning);
+    if (valueFlags.sandbox !== undefined) validateSandbox(valueFlags.sandbox);
   } catch (err) {
     console.error(`Error: ${err.message}`);
     process.exit(2);
@@ -277,6 +285,7 @@ async function main() {
   const adapterOpts = {};
   if (valueFlags.model !== undefined) adapterOpts.model = valueFlags.model;
   if (valueFlags.reasoning !== undefined) adapterOpts.reasoning = valueFlags.reasoning;
+  if (valueFlags.sandbox !== undefined) adapterOpts.sandbox = valueFlags.sandbox;
 
   if (backgroundFlag) {
     await runBackgroundDispatch(hopperDir, taskId, { adapterOpts });
@@ -381,8 +390,8 @@ function warnIfModelUnknown(vendor, model) {
     console.error(`      hopper-dispatch <task-id>                              # default model + default reasoning`);
     console.error(`      hopper-dispatch <task-id> --reasoning high             # default model + elevated reasoning`);
     console.error(`  (b) Refresh the cache: \`hopper-dispatch --probe ${vendor}\` (the vendor may have added '${model}' since last probe).`);
-    if (vendor === 'kimi' && cached.introspection_supported === 'config-only') {
-      console.error(`  (c) Add a kimi alias to ~/.kimi-code/config.toml (Kimi Code 0.x; legacy ~/.kimi/ for the old Python kimi-cli) then re-probe:`);
+    if (vendor === 'kimi' && ['partial', 'config-only'].includes(cached.introspection_supported)) {
+      console.error(`  (c) Refresh Kimi's configured aliases with \`kimi provider list --json\`, or add one to ~/.kimi-code/config.toml (legacy ~/.kimi/ for old Python kimi-cli) then re-probe:`);
       console.error(`      [models."${model}"]`);
       console.error(`      model = "kimi-for-coding"   # or another Moonshot upstream ID`);
       console.error(`      capabilities = ["thinking"]   # if your target supports thinking`);
@@ -402,6 +411,11 @@ async function runDispatch(hopperDir, taskId, { write = false, force = false, ad
     console.error(`hopper-dispatch v${VERSION} — dispatching ${taskId}${optsSummary}...`);
 
     const resolved = await resolveDispatch({ hopperDir, taskId });
+    const effectiveAdapterOpts = resolveAdapterOptsForTask(resolved, adapterOpts);
+    if (effectiveAdapterOpts.sandbox) {
+      const source = adapterOpts.sandbox ? 'explicit' : 'auto';
+      console.error(`  permission: sandbox=${effectiveAdapterOpts.sandbox} (${source})`);
+    }
 
     const hostVendor = process.env.HOPPER_HOST_VENDOR;
     validateHostVendorSeparation(hostVendor, resolved.vendor);
@@ -417,7 +431,7 @@ async function runDispatch(hopperDir, taskId, { write = false, force = false, ad
     if (!adapter) {
       throw new Error(`unknown vendor '${resolved.vendor}'`);
     }
-    const result = await executeWithAdapter({ resolved, adapter, adapterOpts });
+    const result = await executeWithAdapter({ resolved, adapter, adapterOpts: effectiveAdapterOpts });
     const elapsedMs = Date.now() - startedAt;
 
     console.log('');
@@ -497,11 +511,12 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {} } = {
     console.error(`Error: ${err.message}`);
     process.exit(1);
   }
+  const effectiveAdapterOpts = resolveAdapterOptsForTask(resolved, adapterOpts);
 
   // P3a-fix: soft-warn also fires on --background path. Same warnIfModelUnknown
   // helper as sync dispatch; advisory only, never blocks.
-  if (adapterOpts.model) {
-    try { warnIfModelUnknown(resolved.vendor, adapterOpts.model); } catch (_) { /* never block */ }
+  if (effectiveAdapterOpts.model) {
+    try { warnIfModelUnknown(resolved.vendor, effectiveAdapterOpts.model); } catch (_) { /* never block */ }
   }
 
   const adapter = getAdapter(resolved.vendor);
@@ -543,7 +558,7 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {} } = {
   const outputMdPath = join(handoffDir, `${taskId}-output.md`);
   const logPath = outputMdPath.replace(/\.md$/, '.log');
   // Phase 6c F1: thread taskType through so runner's timeoutMs() applies review floor.
-  const effectiveOpts = { ...adapterOpts, background: true, logFile: logPath, taskType: resolved.task.taskType, cwd: resolveVendorCwd(hopperDir) };
+  const effectiveOpts = { ...effectiveAdapterOpts, background: true, logFile: logPath, taskType: resolved.task.taskType, cwd: resolveVendorCwd(hopperDir) };
   const adapterArgv = adapter.args(resolved.composedPrompt, effectiveOpts);
 
   try {
@@ -559,6 +574,7 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {} } = {
     console.log('=== BACKGROUND DISPATCH STARTED ===');
     console.log(`Task:        ${taskId}`);
     console.log(`Vendor:      ${resolved.vendor}`);
+    console.log(`Sandbox:     ${effectiveOpts.sandbox}`);
     console.log(`Runner PID:  ${result.pid}`);
     console.log(`Started at:  ${result.startTime}`);
     console.log(`Output (md): ${result.outputMdPath}`);
@@ -1180,11 +1196,14 @@ function estimateSpawns(vendorName, introspectionSupported) {
   // codex: --version + debug models = 2
   // opencode: --version + models + auth list = 3
   // copilot: version = 1 (plus zero-spawn FS scan)
-  // kimi: config file read only = 0
-  // agy: static = 0
+  // kimi: --version + provider list = 2 when installed; config fallback = 0
+  // mimo: --version + models + auth list = 3
+  // agy/grok: static = 0
   if (vendorName === 'opencode') return 3;
+  if (vendorName === 'mimo') return 3;
   if (vendorName === 'codex') return 2;
   if (vendorName === 'copilot') return 1;
+  if (vendorName === 'kimi') return 2;
   // Fall back to the introspection-level approximation for unknown vendors
   switch (introspectionSupported) {
     case 'full': return 2;

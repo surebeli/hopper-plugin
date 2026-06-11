@@ -19,10 +19,10 @@ This is **Tier B** of the cross-host architecture:
 
 | Command                | What it does                                                                     |
 |------------------------|----------------------------------------------------------------------------------|
-| `/hopper:dispatch <task-id> [--write] [--force]` | Dispatch a task; with `--write` also creates `.hopper/handoffs/<task-id>-output.md` |
+| `/hopper:dispatch <task-id> [--write] [--force] [--model <name>] [--reasoning <level>] [--sandbox <mode>]` | Dispatch a task; with `--write` also creates `.hopper/handoffs/<task-id>-output.md` |
 | `/hopper:status`        | Show queue summary (pending / in-progress / done / failed)                       |
 | `/hopper:smoke`         | Plugin host-lifecycle smoke test (Prong 1 verifier)                              |
-| `/hopper:vendors`       | List registered vendor adapters (codex, kimi, opencode, copilot, agy, grok)      |
+| `/hopper:vendors`       | List registered vendor adapters (codex, kimi, opencode, copilot, agy, grok, mimo) |
 
 Slash command source files: `commands/*.md` at the **repo root** (one prompt template per command).
 The completion monitor lives at `monitors/monitors.json` at the **repo root**.
@@ -90,7 +90,7 @@ After install + restart, type:
 /hopper:smoke
 ```
 
-Expected: a `hopper standalone (CLI v0.7.1)` banner. If you see it, **Prong 1 PASSES** — record this in `.hopper/HOPPER-FEEDBACK.md` per the unified user-action gate (spec §11).
+Expected: a `hopper standalone (CLI v0.8.0)` banner. If you see it, **Prong 1 PASSES** — record this in `.hopper/HOPPER-FEEDBACK.md` per the unified user-action gate (spec §11).
 
 If the slash command is not recognized:
 - The plugin manifest may not match current Claude Code schema. Run `claude --debug` to inspect plugin discovery
@@ -112,6 +112,10 @@ Claude Code delivers those stdout lines to the interactive session as monitor
 notifications. The monitor is active only in Claude Code hosts where the
 Monitor tool is available.
 
+If Claude Code starts in a directory that is not a hopper workspace, the monitor
+quietly exits without notifications. Set `HOPPER_DIR=/path/to/.hopper` when you
+want the monitor to follow a different workspace.
+
 The runner terminal state is authoritative: a task is complete only when
 `.hopper/handoffs/<task-id>-output.md` reaches a terminal status with
 `terminal_event_emitted: true`. Wrapper completion, background Bash completion,
@@ -132,8 +136,13 @@ The plugin spawns vendor subprocesses; each needs its own auth set up **outside*
 | copilot   | `GH_TOKEN` / `GITHUB_TOKEN` / `COPILOT_GITHUB_TOKEN` env OR `gh auth status`  |
 | agy       | Interactive OAuth via `agy` (one-time), then `agy -p` headless                |
 | grok      | `XAI_API_KEY` OR `~/.grok/` credentials from `grok login --device-auth` / browser OAuth |
+| mimo      | `~/.local/share/mimocode/auth.json` or first-launch MiMo Auto setup via `mimo` |
 
-Run `/hopper:vendors` after install to confirm all 6 are registered.
+Run `/hopper:vendors` after install to confirm all 7 are registered.
+
+## Dispatch permissions
+
+Vendor dispatch defaults to `danger-full-access` so implementation tasks can edit files. Hopper automatically downgrades to `read-only` only when the queue brief or detailed task spec explicitly says `read-only` / `只读`. You can override one dispatch with `--sandbox <read-only|workspace-write|danger-full-access>`.
 
 ## What this plugin does NOT do
 

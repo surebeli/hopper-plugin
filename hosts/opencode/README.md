@@ -59,7 +59,7 @@ New-Item -ItemType SymbolicLink `
 ## Usage
 
 ```bash
-hopper-opencode <task-id> [--write] [--force] [--model <name>] [--reasoning <level>]
+hopper-opencode <task-id> [--write] [--force] [--model <name>] [--reasoning <level>] [--sandbox <mode>]
 ```
 
 Examples:
@@ -75,13 +75,18 @@ hopper-opencode T-PLUGIN-05a --write --model "deepseek/v4-flash"
 # Force reasoning effort (honored by codex adapter; others ignore)
 hopper-opencode T-PLUGIN-05a --write --reasoning xhigh
 
+# Force vendor permission
+hopper-opencode T-PLUGIN-05a --write --sandbox danger-full-access
+
 # Combine
-hopper-opencode T-PLUGIN-05a --write --model "claude-opus-4-7" --reasoning high
+hopper-opencode T-PLUGIN-05a --write --model "claude-opus-4-7" --reasoning high --sandbox danger-full-access
 ```
 
 **`--model` accepts**: `^[A-Za-z][A-Za-z0-9._/:-]{0,99}$` (e.g. `gpt-5.5`, `claude-opus-4-7`, `deepseek/v4-flash`). No spaces, no shell metachars.
 
 **`--reasoning` accepts**: `minimal | low | medium | high | xhigh`. Adapters that don't honor reasoning ignore it harmlessly.
+
+**`--sandbox` accepts**: `read-only | workspace-write | danger-full-access`. Default is `danger-full-access` unless the task brief/spec explicitly says `read-only` / `只读`.
 
 ## Environment variables
 

@@ -66,6 +66,7 @@ for (const spec of HOSTS) {
     assert.match(sh, /\*\.\.\*|contain.*\.\./i);
     assert.match(sh, /\^\[A-Za-z\]\[A-Za-z0-9\._\/:-\]\{0,99\}\$/);
     assert.match(sh, /minimal\|low\|medium\|high\|xhigh/);
+    assert.match(sh, /read-only\|workspace-write\|danger-full-access/);
     assert.match(sh, /resolve_script_dir|readlink/);
   });
 

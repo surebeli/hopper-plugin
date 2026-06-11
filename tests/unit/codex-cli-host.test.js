@@ -78,11 +78,13 @@ test('wrapper validates flags against explicit whitelist', () => {
     'wrapper must reject unknown flags');
 });
 
-test('wrapper supports --model + --reasoning value flags (gap-fix 2026-05-21)', () => {
+test('wrapper supports --model + --reasoning + --sandbox value flags', () => {
   const content = readFileSync(WRAPPER, 'utf-8');
   assert.match(content, /--model\)/, 'wrapper must handle --model case');
   assert.match(content, /--reasoning\)/, 'wrapper must handle --reasoning case');
+  assert.match(content, /--sandbox\)/, 'wrapper must handle --sandbox case');
   assert.match(content, /minimal\|low\|medium\|high\|xhigh/, 'wrapper must enforce reasoning whitelist');
+  assert.match(content, /read-only\|workspace-write\|danger-full-access/, 'wrapper must enforce sandbox whitelist');
   assert.match(content, /\^\[A-Za-z\]\[A-Za-z0-9\._\/:-\]\{0,99\}\$/, 'wrapper must validate model name regex');
 });
 
@@ -206,6 +208,22 @@ test('wrapper rejects --reasoning with invalid level (dry-run)', { skip: platfor
   }
   assert.equal(exitCode, 2);
   assert.match(stderr, /reasoning.*minimal\|low\|medium\|high\|xhigh/i);
+});
+
+test('wrapper rejects --sandbox with invalid level (dry-run)', { skip: platform() === 'win32' ? 'bash not standardly available on Windows CI' : false }, () => {
+  let stderr = '';
+  let exitCode = 0;
+  try {
+    execFileSync('bash', [WRAPPER, 'T-OK', '--sandbox', 'full'], {
+      env: { ...process.env, HOPPER_PLUGIN_ROOT: REPO_ROOT, PATH: process.env.PATH },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    stderr = err.stderr ? err.stderr.toString() : '';
+    exitCode = err.status;
+  }
+  assert.equal(exitCode, 2);
+  assert.match(stderr, /sandbox.*read-only\|workspace-write\|danger-full-access/i);
 });
 
 test('wrapper rejects --model with no value (dry-run)', { skip: platform() === 'win32' ? 'bash not standardly available on Windows CI' : false }, () => {

@@ -13,7 +13,7 @@ These examples assume:
 
 **Scenario**: Start a long review task and pass vendor-specific knobs.
 **Hosts**: standalone, Claude Code, Codex CLI, OpenCode, Copilot CLI, Grok Build, Cursor CLI
-**Vendors involved**: codex, kimi, opencode, copilot
+**Vendors involved**: codex, kimi, opencode, copilot, mimo
 
 ### Steps
 
@@ -43,7 +43,7 @@ Expected output includes a runner PID and `.hopper/handoffs/<task-id>-output.md`
 
 ### Notes
 
-Vendor selection comes from `.hopper/AGENTS.md`, not from `--model`. `--reasoning` is honored by codex; `--model` is honored by kimi, opencode, copilot, and grok. Unsupported flags are ignored by the adapter rather than remapping to another vendor.
+Vendor selection comes from `.hopper/AGENTS.md`, not from `--model`. `--reasoning` is honored by codex and mimo; Kimi reasoning is config/provider driven in `kimi -p`; `--model` is honored by kimi, opencode, copilot, grok, and mimo. Unsupported flags are ignored by the adapter rather than remapping to another vendor.
 
 ## Recipe 2 - Background dispatch and active progress checks
 
@@ -174,7 +174,7 @@ Every route eventually invokes the same dispatcher and reads the same `.hopper/A
 
 **Scenario**: Refresh per-machine model inventory before choosing a model override.
 **Hosts**: standalone, Claude Code through slash commands
-**Vendors involved**: codex, kimi, opencode, copilot, agy, grok
+**Vendors involved**: codex, kimi, opencode, copilot, agy, grok, mimo
 
 ### Steps
 
@@ -239,7 +239,7 @@ hopper-dispatch --result T-PROG-STALE
 
 **Scenario**: Ask two vendors to review the same spec from different angles, then compare their handoff files.
 **Hosts**: standalone, Claude Code
-**Vendors involved**: codex, kimi, opencode, copilot, agy, grok
+**Vendors involved**: codex, kimi, opencode, copilot, agy, grok, mimo
 
 ### Steps
 
@@ -303,6 +303,7 @@ Claude Code users get this automatically: the bundled monitor (`monitors/monitor
 
 - `--resolve` / `--check` / `--status` / `--capabilities` / `--models` are all **zero-spawn** read-only commands. Use them freely to confirm routing *before* committing a real dispatch — this is the `--dry-run` workflow.
 - The dispatched vendor is anchored to the repo root that owns `.hopper/` (retro #3 fix). You never need to `cd` into the plugin's CLI directory; run from your project or set `HOPPER_DIR=/path/to/project/.hopper`.
+- Real dispatch defaults to `--sandbox danger-full-access` for the vendor so implementation tasks can modify files. Hopper automatically uses `read-only` only when the queue brief or detailed task spec explicitly says `read-only` / `只读`; pass `--sandbox <mode>` to override for a single dispatch.
 - **Vendor needs to read a path OUTSIDE the repo** (external test evidence, a sibling repo)? The vendor's own sandbox enforces this — e.g. opencode's `external_directory` permission defaults to `ask` and is denied in headless mode. Two ways to handle it without disabling the vendor's permission model:
   1. **Widen the vendor working dir**: `HOPPER_VENDOR_CWD=/path/to/common-ancestor hopper-dispatch <task> --background`. hopper runs the vendor there (opencode receives it via `--dir`), so a subtree that contains both your project and the external path is reachable.
   2. **Authorize in the vendor**: for opencode, add an `opencode.json` rule, e.g. `{"permission": {"external_directory": {"~/path/to/evidence/**": "allow"}}}`.

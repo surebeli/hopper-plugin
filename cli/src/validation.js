@@ -21,7 +21,7 @@ export const TASK_ID_PATTERN = /^[A-Za-z][A-Za-z0-9._-]{0,99}$/;
 export const ALLOWED_DISPATCH_FLAGS = Object.freeze(['--write', '--force', '--background']);
 
 /** Value-taking flag whitelist (each consumes the next argv as its value). */
-export const ALLOWED_DISPATCH_VALUE_FLAGS = Object.freeze(['--model', '--reasoning']);
+export const ALLOWED_DISPATCH_VALUE_FLAGS = Object.freeze(['--model', '--reasoning', '--sandbox']);
 
 /**
  * Model-name pattern: alphanumeric + . - _ / : (for namespaced model strings
@@ -41,6 +41,16 @@ export const MODEL_PATTERN = /^[A-Za-z][A-Za-z0-9._/:-]{0,99}$/;
  * Our prior whitelist missed `minimal`. Source: official codex config-reference.
  */
 export const ALLOWED_REASONING = Object.freeze(['minimal', 'low', 'medium', 'high', 'xhigh']);
+
+/**
+ * Canonical sandbox / permission vocabulary for dispatch.
+ *
+ * `danger-full-access` is the product default for implementation work. The
+ * dispatcher only downgrades to `read-only` when the task text explicitly says
+ * it is read-only, or when the user passes --sandbox read-only.
+ */
+export const ALLOWED_SANDBOXES = Object.freeze(['read-only', 'workspace-write', 'danger-full-access']);
+export const DEFAULT_DISPATCH_SANDBOX = 'danger-full-access';
 
 /**
  * Legal queue status values per .hopper/queue.md schema convention.
@@ -119,6 +129,16 @@ export function validateReasoning(reasoning) {
   if (typeof reasoning !== 'string') throw new Error(`--reasoning value must be string, got ${typeof reasoning}`);
   if (!ALLOWED_REASONING.includes(reasoning)) {
     throw new Error(`--reasoning "${reasoning}" invalid. Allowed: ${ALLOWED_REASONING.join(', ')}.`);
+  }
+}
+
+/**
+ * Validate a dispatch sandbox / permission mode. Throws on rejection.
+ */
+export function validateSandbox(sandbox) {
+  if (typeof sandbox !== 'string') throw new Error(`--sandbox value must be string, got ${typeof sandbox}`);
+  if (!ALLOWED_SANDBOXES.includes(sandbox)) {
+    throw new Error(`--sandbox "${sandbox}" invalid. Allowed: ${ALLOWED_SANDBOXES.join(', ')}.`);
   }
 }
 

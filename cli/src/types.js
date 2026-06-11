@@ -25,7 +25,7 @@
  * @typedef {object} AgentBinding
  * @property {string} nickname        e.g. "codex-builder"
  * @property {string} uuid            Stable across model swaps
- * @property {string} vendor          CLI command name (e.g. "codex", "kimi", "opencode")
+ * @property {string} vendor          CLI command name (e.g. "codex", "kimi", "opencode", "mimo")
  * @property {string[]} taskTypePref  Task-types this binding prefers (e.g. ["code-impl", "spec-write"])
  */
 
@@ -40,8 +40,8 @@
 /**
  * Adapter invocation options.
  * @typedef {object} AdapterOpts
- * @property {string} [sandbox]       Vendor-specific sandbox flag (e.g. 'read-only' for codex)
- * @property {string} [reasoning]     Reasoning effort hint (codex honors the enum directly; kimi/opencode/grok currently ignore or use config/vendor-specific knobs instead of argv)
+ * @property {'read-only'|'workspace-write'|'danger-full-access'} [sandbox]  Vendor permission mode. Dispatcher defaults to danger-full-access unless task text explicitly says read-only.
+ * @property {string} [reasoning]     Reasoning effort hint (codex honors the enum directly; mimo maps it to --variant; kimi/opencode/grok currently ignore or use config/vendor-specific knobs instead of argv)
  * @property {string} [model]         Optional model override
  * @property {boolean} [webSearch]    Optional web search enable
  * @property {string} [conversationId] Optional session resume ID
@@ -85,7 +85,7 @@
  * One adapter call = one subprocess attempt = success OR specific failure.
  *
  * @typedef {object} VendorAdapter
- * @property {string} name                                    Vendor name (e.g. "codex", "kimi", "agy")
+ * @property {string} name                                    Vendor name (e.g. "codex", "kimi", "agy", "mimo")
  * @property {string} command                                 CLI command to spawn
  * @property {function(string, AdapterOpts): string[]} args   Build CLI args from input + opts
  * @property {function(): PreflightResult} envPreflight       Check auth / env readiness

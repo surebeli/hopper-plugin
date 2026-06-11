@@ -16,7 +16,7 @@ This command surfaces the per-vendor cached model list — what each vendor adap
 
 ## Argument validation (BEFORE Bash)
 
-`$ARGUMENTS` is either empty OR a single vendor name. If non-empty, validate it matches `^(codex|kimi|opencode|copilot|agy|grok)$`. Reject anything else. Do NOT splat unvalidated input.
+`$ARGUMENTS` is either empty OR a single vendor name. If non-empty, validate it matches `^(codex|kimi|opencode|copilot|agy|grok|mimo)$`. Reject anything else. Do NOT splat unvalidated input.
 
 ## Invocation
 
@@ -41,14 +41,14 @@ The CLI prints one block per vendor:
   reasoning: <level1> | <level2> | ...
 ```
 
-- **introspection-level**: `full` (codex/opencode — live `--models`/`debug models`), `partial` (copilot — limited inspection), `config-only` (kimi — reads `~/.kimi-code/config.toml`), `none` (agy/grok — static).
+- **introspection-level**: `full` (codex/opencode/mimo — live model commands), `partial` (kimi 0.14+ via `provider list --json`; copilot limited inspection), `config-only` (kimi fallback reads `~/.kimi-code/config.toml`), `none` (agy/grok — static).
 - **staleness**: e.g. `6m ago`, `2d ago`. Older than ~14 days → adapter prints `[STALE]`; recommend `/hopper:probe <vendor>` to refresh.
 
 ## What to tell the user
 
 Surface the raw output and then a short summary like:
 
-> Codex has 6 models with 5 reasoning levels. Kimi has 1 alias from your config. OpenCode has 13 models. Copilot reports no model list (server-side per-tier). Agy is static (gemini-3.5-flash). Grok is static (`grok-build`, `grok-4.3`). For dispatch, you can also **omit `--model`** entirely — each vendor has an implicit default.
+> Codex has 6 models with 5 reasoning levels. Kimi reports configured aliases from `provider list --json` on 0.14+ or from config fallback. OpenCode has 13 models. MiMo reports configured models from `mimo models`. Copilot reports no model list (server-side per-tier). Agy is static (gemini-3.5-flash). Grok is static (`grok-build`, `grok-4.3`). For dispatch, you can also **omit `--model`** entirely — each vendor has an implicit default.
 
 If the user asked about a specific vendor, focus on that one's models + the "omit --model" alternative.
 

@@ -25,17 +25,94 @@ test('agy probe returns introspection_supported=none, no spawn', async () => {
   assert.ok(typeof r.duration_ms === 'number');
 });
 
-test('kimi probe declares config-only introspection', async () => {
-  const r = await probeVendor('kimi');
-  assert.equal(r.introspection_supported, 'config-only');
-  assert.ok(Array.isArray(r.models));
-  assert.deepEqual(r.reasoning_levels, ['low', 'medium', 'high', 'xhigh', 'max'],
-    'Kimi Code 0.x reasoning is config-driven [thinking].effort enum (no argv toggle)');
-  // duration ms should be fast (file-read only, no spawn)
-  assert.ok(r.duration_ms < 5000, `kimi probe should be <5s (no spawn); got ${r.duration_ms}ms`);
+test('kimi probe falls back to config-only introspection when binary is not on PATH', async () => {
+  const savedPath = process.env.PATH;
+  process.env.PATH = '';
+  try {
+    const r = await probeVendor('kimi');
+    assert.equal(r.introspection_supported, 'config-only');
+    assert.ok(Array.isArray(r.models));
+    assert.deepEqual(r.reasoning_levels, ['low', 'medium', 'high', 'xhigh', 'max'],
+      'Kimi Code 0.x reasoning is config/provider-driven (no argv toggle)');
+    assert.ok(r.duration_ms < 5000, `config fallback should be <5s; got ${r.duration_ms}ms`);
+  } finally {
+    if (savedPath === undefined) delete process.env.PATH;
+    else process.env.PATH = savedPath;
+  }
 });
 
-test('all 6 adapters have a probe-module that exports probe()', async () => {
+test('kimi probe uses provider list JSON when Kimi Code 0.14+ is available', async (t) => {
+  const { mkdtempSync, writeFileSync, rmSync, chmodSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join, delimiter } = await import('node:path');
+  const { probe } = await import('../../cli/src/vendor-probe/kimi.js');
+
+  const tmp = mkdtempSync(join(tmpdir(), 'kimi-probe-'));
+  t.after(() => rmSync(tmp, { recursive: true, force: true }));
+  const isWindows = process.platform === 'win32';
+  const fakeKimi = join(tmp, isWindows ? 'kimi.cmd' : 'kimi');
+  const providerJson = JSON.stringify({
+    providers: { 'managed:kimi-code': { type: 'kimi' } },
+    models: {
+      'kimi-code/kimi-for-coding': {
+        provider: 'managed:kimi-code',
+        model: 'kimi-for-coding',
+        capabilities: ['thinking', 'tool_use'],
+      },
+      'custom/fast': { capabilities: ['tool_use'] },
+    },
+  });
+  if (isWindows) {
+    writeFileSync(fakeKimi, [
+      '@echo off',
+      'if "%1"=="--version" (',
+      '  echo 0.14.0',
+      '  exit /b 0',
+      ')',
+      'if "%1"=="provider" if "%2"=="list" if "%3"=="--json" (',
+      `  echo ${providerJson.replace(/%/g, '%%')}`,
+      '  exit /b 0',
+      ')',
+      'exit /b 2',
+    ].join('\r\n'));
+  } else {
+    const quotedJson = `'${providerJson.replace(/'/g, "'\\''")}'`;
+    writeFileSync(fakeKimi, [
+      '#!/bin/sh',
+      'if [ "$1" = "--version" ]; then',
+      "  printf '%s\\n' '0.14.0'",
+      '  exit 0',
+      'fi',
+      'if [ "$1" = "provider" ] && [ "$2" = "list" ] && [ "$3" = "--json" ]; then',
+      `  printf '%s\\n' ${quotedJson}`,
+      '  exit 0',
+      'fi',
+      'exit 2',
+      '',
+    ].join('\n'));
+    chmodSync(fakeKimi, 0o755);
+  }
+
+  const savedPath = process.env.PATH;
+  const savedHome = process.env.KIMI_CODE_HOME;
+  process.env.PATH = `${tmp}${delimiter}${savedPath || ''}`;
+  process.env.KIMI_CODE_HOME = join(tmp, 'empty-home');
+  try {
+    const r = await probe();
+    assert.equal(r.introspection_supported, 'partial');
+    assert.equal(r.version, '0.14.0');
+    assert.deepEqual(r.models, ['kimi-code/kimi-for-coding', 'custom/fast']);
+    assert.match(r.models_source, /provider list --json/);
+    assert.ok(r.notes.some((n) => /managed:kimi-code/.test(n)), 'provider note should be surfaced');
+  } finally {
+    if (savedPath === undefined) delete process.env.PATH;
+    else process.env.PATH = savedPath;
+    if (savedHome === undefined) delete process.env.KIMI_CODE_HOME;
+    else process.env.KIMI_CODE_HOME = savedHome;
+  }
+});
+
+test('all 7 adapters have a probe-module that exports probe()', async () => {
   for (const name of listAdapters()) {
     const mod = await import(`../../cli/src/vendor-probe/${name}.js`);
     assert.equal(typeof mod.probe, 'function', `${name} must export probe()`);
@@ -43,7 +120,7 @@ test('all 6 adapters have a probe-module that exports probe()', async () => {
 });
 
 test('probe result shape is consistent across all adapters', async () => {
-  // Only probe the zero-spawn ones to keep tests deterministic + fast.
+  // Probe the cheap ones only; Kimi may spawn two fast local CLI commands when installed.
   for (const name of ['agy', 'kimi']) {
     const r = await probeVendor(name);
     assert.ok(['full', 'partial', 'config-only', 'none'].includes(r.introspection_supported),
@@ -86,6 +163,7 @@ test('zero-spawn discovery surface unchanged: --check / --capabilities still spa
     join(REPO_ROOT, 'cli', 'src', 'vendors', 'copilot.js'),
     join(REPO_ROOT, 'cli', 'src', 'vendors', 'agy.js'),
     join(REPO_ROOT, 'cli', 'src', 'vendors', 'grok.js'),
+    join(REPO_ROOT, 'cli', 'src', 'vendors', 'mimo.js'),
   ];
   for (const f of discoveryHotPath) {
     const src = readFileSync(f, 'utf-8');
@@ -169,6 +247,25 @@ test('opencode parser: extracts model identifiers and EXCLUDES header lines', as
   assert.equal(got.length, 4, `expected 4 model identifiers, got ${got.length}: ${got.join(', ')}`);
 });
 
+test('mimo parser: extracts model identifiers and excludes decorative output', async () => {
+  const { parseMimoModelsList } = await import('../../cli/src/vendor-probe/mimo.js');
+  const stdout = [
+    '\x1B[1mAvailable models:\x1B[0m',
+    '',
+    'mimo/mimo-auto',
+    'xiaomi/mimo-v2-flash',
+    'xiaomi/mimo-v2.5-pro-ultraspeed',
+    '┌ Credentials',
+    'some prose with spaces',
+  ].join('\n');
+  const got = parseMimoModelsList(stdout);
+  assert.deepEqual(got, [
+    'mimo/mimo-auto',
+    'xiaomi/mimo-v2-flash',
+    'xiaomi/mimo-v2.5-pro-ultraspeed',
+  ]);
+});
+
 test('kimi parser: handles bare TOML section names', async () => {
   const { parseKimiTomlConfig } = await import('../../cli/src/vendor-probe/kimi.js');
   const content = `
@@ -230,6 +327,24 @@ test('kimi parser: empty config returns empty result', async () => {
   const r = parseKimiTomlConfig('# just comments\n# no model blocks\n');
   assert.deepEqual(r.models, []);
   assert.deepEqual(r.modelsCaps, []);
+});
+
+test('kimi parser: provider list JSON extracts configured aliases and capabilities', async () => {
+  const { parseKimiProviderListJson } = await import('../../cli/src/vendor-probe/kimi.js');
+  const stdout = `${JSON.stringify({
+    providers: { 'managed:kimi-code': { type: 'kimi' } },
+    models: {
+      'kimi-code/kimi-for-coding': { capabilities: ['thinking', 'image_in', 'tool_use'] },
+      'local/custom': { capabilities: ['tool_use'] },
+    },
+  })}\n[logger] write failed: EPERM\n`;
+  const r = parseKimiProviderListJson(stdout);
+  assert.deepEqual(r.providers, ['managed:kimi-code']);
+  assert.deepEqual(r.models, ['kimi-code/kimi-for-coding', 'local/custom']);
+  assert.deepEqual(r.modelsCaps[0], {
+    name: 'kimi-code/kimi-for-coding',
+    caps: ['thinking', 'image_in', 'tool_use'],
+  });
 });
 
 test('copilot scanner: lists *.agent.md files with name stripping', async (t) => {

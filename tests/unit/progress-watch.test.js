@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { delimiter, join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { readFrontmatter, writeFrontmatter } from '../../cli/src/background.js';
@@ -157,6 +157,61 @@ async function waitForExit(child, timeoutMs = 6000) {
 function stop(child) {
   if (child.exitCode === null && !child.killed) child.kill();
 }
+
+test('--watch-events is a quiet no-op outside hopper workspaces', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-progress-watch-no-workspace-'));
+  try {
+    const env = { ...process.env, HOPPER_NOTIFY: '0' };
+    delete env.HOPPER_DIR;
+
+    const result = spawnSync(process.execPath, [DISPATCH, '--watch-events', '--once'], {
+      cwd: tmp,
+      env,
+      encoding: 'utf-8',
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.equal(result.stderr, '');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('--watch-events still reports an explicitly invalid HOPPER_DIR', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-progress-watch-bad-env-'));
+  try {
+    const result = spawnSync(process.execPath, [DISPATCH, '--watch-events', '--once'], {
+      cwd: tmp,
+      env: { ...process.env, HOPPER_NOTIFY: '0', HOPPER_DIR: join(tmp, 'missing-hopper') },
+      encoding: 'utf-8',
+    });
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /no \.hopper\/ directory found/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('workspace-bound commands still fail outside hopper workspaces', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-progress-watch-status-no-workspace-'));
+  try {
+    const env = { ...process.env, HOPPER_NOTIFY: '0' };
+    delete env.HOPPER_DIR;
+
+    const result = spawnSync(process.execPath, [DISPATCH, '--status'], {
+      cwd: tmp,
+      env,
+      encoding: 'utf-8',
+    });
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /no \.hopper\/ directory found/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
 
 test('two --watch-events subscribers both receive terminal event JSONL', async () => {
   const { tmp, hopperDir } = setup();

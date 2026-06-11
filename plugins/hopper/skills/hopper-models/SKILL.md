@@ -10,7 +10,7 @@ Show Hopper's cached vendor model inventory. This is read-only and does not spaw
 ## Steps
 
 1. Locate the target project root containing `.hopper/`, then locate `hopper-dispatch` from `PATH` or the plugin root near this `SKILL.md`.
-2. Accept either no argument or one vendor: `codex`, `kimi`, `opencode`, `copilot`, `agy`, or `grok`.
+2. Accept either no argument or one vendor: `codex`, `kimi`, `opencode`, `copilot`, `agy`, `grok`, or `mimo`.
 3. Run `hopper-dispatch --models` or `hopper-dispatch --models <vendor>`.
 4. Surface the raw output, then briefly call out stale or missing cache entries.
 5. If cache is empty or stale, suggest `hopper-dispatch --probe [vendor]` as the explicit refresh path.
@@ -20,4 +20,3 @@ Show Hopper's cached vendor model inventory. This is read-only and does not spaw
 - Do not dispatch a task from this skill.
 - Do not refresh the cache unless the user asks; use `hopper-probe` for refreshes.
 - Do not pass an unrecognized vendor to the shell.
-

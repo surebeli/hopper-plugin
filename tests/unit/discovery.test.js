@@ -204,6 +204,7 @@ test('installCheckForAdapter does NOT spawn vendor subprocess (single-spawn proo
     join(REPO_ROOT, 'cli', 'src', 'vendors', 'copilot.js'),
     join(REPO_ROOT, 'cli', 'src', 'vendors', 'agy.js'),
     join(REPO_ROOT, 'cli', 'src', 'vendors', 'grok.js'),
+    join(REPO_ROOT, 'cli', 'src', 'vendors', 'mimo.js'),
   ];
 
   const stripCodeOnly = (src) => src
@@ -258,8 +259,8 @@ test('capabilities: codex declares reasoning enumerated with all 5 levels (Phase
     'codex adapter uses reasoning not model — accurate per code (args() uses opts.reasoning only)');
 });
 
-test('capabilities: kimi/opencode/copilot accept --model freeform', () => {
-  for (const name of ['kimi', 'opencode', 'copilot']) {
+test('capabilities: kimi/opencode/copilot/mimo accept --model freeform', () => {
+  for (const name of ['kimi', 'opencode', 'copilot', 'mimo']) {
     const caps = capabilitiesForAdapter(name);
     assert.equal(caps.modelArg.accepted, 'freeform',
       `${name} adapter passes opts.model through to vendor CLI`);
@@ -268,13 +269,20 @@ test('capabilities: kimi/opencode/copilot accept --model freeform', () => {
 
 test('capabilities: opencode/copilot/agy/kimi ignore --reasoning (kimi 0.x dropped --thinking argv)', () => {
   // T-KIMI-MIGRATE: Kimi Code 0.x removed the --thinking/--no-thinking argv toggle;
-  // reasoning is now config-driven ([thinking] in ~/.kimi-code/config.toml), so the
+  // reasoning is now config/provider-driven rather than a prompt-mode argv flag, so the
   // adapter no longer forwards opts.reasoning → reasoningArg.accepted is 'ignored'.
   for (const name of ['opencode', 'copilot', 'agy', 'kimi']) {
     const caps = capabilitiesForAdapter(name);
     assert.equal(caps.reasoningArg.accepted, 'ignored',
       `${name} adapter does not forward opts.reasoning as an argv flag`);
   }
+});
+
+test('capabilities: mimo maps reasoning to provider variant', () => {
+  const caps = capabilitiesForAdapter('mimo');
+  assert.equal(caps.reasoningArg.accepted, 'enumerated');
+  assert.deepEqual(caps.reasoningArg.knownGood, ['minimal', 'low', 'medium', 'high', 'xhigh']);
+  assert.match(caps.reasoningArg.sourceNote, /--variant/);
 });
 
 test('capabilities: every adapter has staleAfter date for freshness tracking', () => {

@@ -40,7 +40,7 @@ test('integration: real queue.md uses v2 Task-type schema (not v1 Role)', async 
   }
 });
 
-test('integration: all 6 real task-type frames pass anti-persona check', async () => {
+test('integration: all real task-type frames pass anti-persona check', async () => {
   const types = await listTaskTypes(HOPPER_DIR);
   assert.equal(types.length, 6, `expected 6 frames, got ${types.length}`);
 

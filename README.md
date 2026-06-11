@@ -11,7 +11,7 @@
 
 ## What
 
-hopper-plugin is a thin plugin layer over the llm-hopper file protocol. It lets Claude Code, Codex CLI, OpenCode, Copilot CLI, Grok Build, Cursor CLI, or a standalone shell dispatch task-typed work to vendor CLIs such as codex, kimi, opencode, copilot, agy, and grok. State stays in `.hopper/` markdown and JSONL files: no hidden database, no harness reaction core, and no automatic vendor retry or fallback.
+hopper-plugin is a thin plugin layer over the llm-hopper file protocol. It lets Claude Code, Codex CLI, OpenCode, Copilot CLI, Grok Build, Cursor CLI, or a standalone shell dispatch task-typed work to vendor CLIs such as codex, kimi, opencode, copilot, agy, grok, and mimo. State stays in `.hopper/` markdown and JSONL files: no hidden database, no harness reaction core, and no automatic vendor retry or fallback.
 
 ## Architecture
 
@@ -43,6 +43,8 @@ For vendor adapters that honor `--model`:
 hopper-dispatch T-PROG-REVIEW --background --model kimi-code/kimi-for-coding
 hopper-dispatch T-PROG-UI --background --model deepseek/v4-flash
 ```
+
+Dispatch permissions default to `danger-full-access` so implementation tasks can edit files. If a task brief/spec explicitly says `read-only` / `只读`, hopper automatically downgrades the vendor sandbox to `read-only`; pass `--sandbox <read-only|workspace-write|danger-full-access>` to override.
 
 ### Scenario 2: Background dispatch + watch via dashboard
 

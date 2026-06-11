@@ -119,6 +119,8 @@ test('OpenCode wrapper and Codex CLI wrapper share validation logic', () => {
   for (const w of [oc, cx]) assert.match(w, /--write\|--force/);
   // Same reasoning whitelist
   for (const w of [oc, cx]) assert.match(w, /minimal\|low\|medium\|high\|xhigh/);
+  // Same sandbox whitelist
+  for (const w of [oc, cx]) assert.match(w, /read-only\|workspace-write\|danger-full-access/);
 });
 
 // ─── dry-run validation (Unix only) ────────────────────────────────────

@@ -16,8 +16,12 @@ import { getAdapter } from './vendors/index.js';
 import { resolveCommandWithKnownPaths } from './path-resolve.js';
 import { runSubprocessOnce } from './subprocess.js';
 import { resolveVendorCwd } from './background.js';
+import { DEFAULT_DISPATCH_SANDBOX } from './validation.js';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+
+const READ_ONLY_TASK_RE = /\b(?:read[-_\s]?only|readonly)\b|只读/i;
+const NEGATED_READ_ONLY_RE = /\b(?:not|non|is\s+not|isn't)\s+(?:read[-_\s]?only|readonly)\b|(?:不是|非)\s*只读/i;
 
 /**
  * Resolve a task for dispatch (Phase 1 stops here; Phase 2 calls vendor adapter).
@@ -98,6 +102,41 @@ export async function getStatus(hopperDir) {
 }
 
 /**
+ * Return true only when the queue brief or detailed task spec explicitly says
+ * the task is read-only. We intentionally do not infer read-only from task-type
+ * names like "review"; the product default is full vendor write access unless
+ * the task description itself says read-only / 只读.
+ *
+ * @param {object} resolved
+ */
+export function taskTextRequestsReadOnly(resolved) {
+  const text = [
+    resolved?.task?.brief,
+    resolved?.taskSpec,
+  ].filter(Boolean).join('\n');
+  if (!text) return false;
+  if (NEGATED_READ_ONLY_RE.test(text)) return false;
+  return READ_ONLY_TASK_RE.test(text);
+}
+
+/**
+ * Apply the product-level default permission policy to adapter opts.
+ * Explicit --sandbox always wins; otherwise read-only text downgrades, and all
+ * other tasks default to danger-full-access.
+ *
+ * @param {object} resolved
+ * @param {import('./types.js').AdapterOpts} [adapterOpts]
+ * @returns {import('./types.js').AdapterOpts}
+ */
+export function resolveAdapterOptsForTask(resolved, adapterOpts = {}) {
+  if (adapterOpts.sandbox) return { ...adapterOpts };
+  return {
+    ...adapterOpts,
+    sandbox: taskTextRequestsReadOnly(resolved) ? 'read-only' : DEFAULT_DISPATCH_SANDBOX,
+  };
+}
+
+/**
  * Execute dispatch end-to-end: resolve + adapter preflight + subprocess spawn + parse.
  *
  * Per spec §3 #4 (no harness reaction core): ONE adapter call = ONE subprocess
@@ -135,6 +174,7 @@ export async function executeDispatch({ hopperDir, taskId, adapterOpts = {} }) {
  */
 export async function executeWithAdapter({ resolved, adapter, adapterOpts = {}, cwd = null }) {
   const { task, vendor, composedPrompt } = resolved;
+  const dispatchAdapterOpts = resolveAdapterOptsForTask(resolved, adapterOpts);
 
   // envPreflight — if not ok, fail FAST without spawning subprocess
   const preflight = adapter.envPreflight();
@@ -162,7 +202,7 @@ export async function executeWithAdapter({ resolved, adapter, adapterOpts = {}, 
   // Phase 6c F1: include task.taskType so timeoutMs can apply review-task floor.
   // Thread the resolved vendor CWD through opts so adapters that take a
   // working-dir flag (e.g. opencode --dir) can pass it explicitly.
-  const effectiveOpts = { ...adapterOpts, logFile: logPath, taskType: task.taskType, cwd: cwd || undefined };
+  const effectiveOpts = { ...dispatchAdapterOpts, logFile: logPath, taskType: task.taskType, cwd: cwd || undefined };
   const args = adapter.args(composedPrompt, effectiveOpts);
 
   // Spawn subprocess ONCE (per spec §3 #4).

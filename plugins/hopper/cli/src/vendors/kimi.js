@@ -3,19 +3,19 @@
 //
 // MIGRATION (2026-05-23): the `kimi` CLI was REPLACED, not version-bumped.
 //   OLD: MoonshotAI/kimi-cli (Python, `pip install kimi-cli`, ~/.kimi/, v1.x)
-//   NEW: @moonshot-ai/kimi-code (TypeScript/Node>=22, npm/curl, ~/.kimi-code/, v0.x)
+//   NEW: Kimi Code CLI (single-binary/curl/brew/npm, ~/.kimi-code/, v0.x)
 // The binary name is STILL `kimi` (npm bin map), so `command: 'kimi'` is unchanged,
 // but the headless flags, config path, and reasoning model all changed.
 //
 // ⚠ BINARY NAME COLLISION: both products ship a `kimi` binary; whichever is on
 // PATH wins, and their version numbers collide (legacy 1.x vs new 0.x). Do NOT
 // branch on the version string. This adapter targets the NEW Kimi Code 0.x and
-// uses ONLY flags that exist in both-or-new (`-p`, `-m`, `--session`); the new
-// tool uses Commander allowUnknownOption(false), so emitting a removed legacy
-// flag (--print/--afk/--final-message-only/--thinking) would make it ERROR OUT.
+// uses ONLY prompt-mode flags accepted by the new CLI (`-p`, `-m`, `--session`);
+// the new tool rejects unknown/conflicting flags, so emitting removed legacy
+// flags (--print/--afk/--final-message-only/--thinking) would make it error out.
 //
 // SOURCE & CONFIDENCE: migrated from a 3-way web research sweep of
-// moonshotai.github.io/kimi-code + npm @moonshot-ai/kimi-code@0.6.0 binary
+// moonshotai.github.io/kimi-code + local Kimi Code 0.14.0 help/provider output
 // inspection + adversarial verification (verdict: proceed-with-corrections,
 // overall_confidence high). Items marked UNCONFIRMED handled defensively.
 
@@ -34,28 +34,32 @@ export const kimiAdapter = {
     modelArg: {
       accepted: 'freeform',
       knownGood: ['kimi-code/kimi-for-coding'],
-      sourceNote: 'Kimi Code 0.x `-m, --model <ALIAS>` takes the config ALIAS KEY (from `[models."NAME"]` blocks in ~/.kimi-code/config.toml), NOT an upstream Moonshot model id. Default alias when -m omitted: `kimi-code/kimi-for-coding` (provider managed:kimi-code, upstream id kimi-for-coding, 262144 ctx). `-m ""` is rejected ("Model cannot be empty"). Underlying flagship coding model this era: Kimi K2.5. Do NOT hardcode upstream ids (kimi-k2.6 / kimi-k2-thinking UNCONFIRMED). No `kimi models` introspection command — config file is the source of truth (now ~/.kimi-code/, not legacy ~/.kimi/).',
+      sourceNote: 'Kimi Code 0.x `-m, --model <ALIAS>` takes the configured ALIAS KEY, NOT a raw upstream Moonshot model id. `kimi provider list --json` (0.14+) reports configured providers/models; older installs fall back to `[models."NAME"]` blocks in ~/.kimi-code/config.toml. Default alias when -m omitted is controlled by Kimi config; on the managed Kimi Code setup it is typically `kimi-code/kimi-for-coding` (provider managed:kimi-code, upstream id kimi-for-coding, 262144 ctx). Do NOT hardcode upstream ids.',
     },
     reasoningArg: {
       accepted: 'ignored',
       knownGood: [],
-      sourceNote: 'Kimi Code 0.x REMOVED the --thinking/--no-thinking argv toggle (CONFIRMED moonshotai.github.io + binary Commander has no such flag, allowUnknownOption(false)). Reasoning is now CONFIG-driven in ~/.kimi-code/config.toml: top-level default_thinking (bool) + [thinking] table mode=auto|on|off, effort=low|medium|high|xhigh|max|off (also via KIMI_MODEL_THINKING_MODE / KIMI_MODEL_THINKING_EFFORT env). There is NO per-invocation argv reasoning flag in -p mode. kimi.com legacy product docs still list --thinking (UNCONFIRMED cross-source conflict, that is the wound-down Python tool) — adapter emits NO reasoning flag so it degrades safely on both binaries.',
+      sourceNote: 'Kimi Code 0.x has no prompt-mode reasoning argv. Reasoning is config/provider driven (model capabilities + Kimi config/env such as KIMI_MODEL_THINKING_MODE / KIMI_MODEL_THINKING_EFFORT where supported). There is NO per-invocation `--reasoning` equivalent in `kimi -p`; adapter emits NO reasoning flag.',
     },
     features: {
       sessionResume: { supported: true, mechanism: '`kimi --session <id>` / `-S <id>` (documented short flag in 0.x; was `-r` in legacy) / `-C` (continue most recent in cwd). `-r` retained as a hidden alias of --session. Prompt mode rejects --session without an id, so adapter forwards it only when opts.conversationId is set.' },
       fileOutput: { supported: false, mechanism: 'stdout only; no --output-file flag. Use --output-format stream-json + shell redirect if needed.' },
-      streaming: { supported: true, mechanism: '`-p` streams assistant text to stdout; thinking, tool progress, and the "To resume this session: kimi -r <id>" hint go to stderr. `--output-format stream-json` emits one JSON object per stdout line (thinking excluded); default `text`.' },
+      streaming: { supported: true, mechanism: '`-p` streams assistant text to stdout; thinking, tool progress, and resume notices go to stderr. `--output-format stream-json` emits one JSON object per stdout line (thinking excluded); default `text`.' },
+      permissions: { supported: true, mechanism: '`kimi -p` uses Kimi prompt-mode auto permission policy by default. Kimi 0.14 rejects `--prompt` combined with `--yolo`, `--auto`, or `--plan`; adapter therefore does not forward hopper sandbox flags. Static deny rules in Kimi config still apply.' },
     },
-    staleAfter: '2026-08-31',
+    staleAfter: '2026-09-11',
   },
 
   args(input, opts) {
     // Kimi Code 0.x headless form (CONFIRMED): kimi -p "<prompt>" [-m <alias>] [--session <id>]
     // REMOVED in the 0.x rewrite (would ERROR OUT — Commander allowUnknownOption(false)):
     //   --print, --afk, --final-message-only, --thinking, --no-thinking.
-    // Do NOT emit --yolo/--auto/--plan: prompt mode forces 'auto' permission and
-    // throws OptionConflictError if combined with them. Reasoning is config-driven
-    // (no argv flag), so opts.reasoning is intentionally not forwarded.
+    // Do NOT emit --yolo/--auto/--plan: Kimi 0.14 rejects those when combined
+    // with --prompt, and prompt mode already uses Kimi's auto permission policy.
+    // Reasoning has no per-invocation argv, so opts.reasoning is intentionally
+    // not forwarded. opts.sandbox is also not forwarded: danger-full-access maps
+    // only to Kimi prompt mode's native auto policy, and read-only cannot be
+    // enforced by argv in `kimi -p`.
     return [
       '-p', input,
       ...(opts.model ? ['-m', opts.model] : []),
@@ -103,7 +107,7 @@ export const kimiAdapter = {
       return {
         text: '',
         status: 'permission-fail',
-        error: 'kimi binary not found in PATH. Install: curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash (Windows: irm https://code.kimi.com/kimi-code/install.ps1 | iex; or npm i -g @moonshot-ai/kimi-code, Node >=22.19.0).',
+        error: 'kimi binary not found in PATH. Install: curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash (Windows: irm https://code.kimi.com/kimi-code/install.ps1 | iex; Homebrew: brew install kimi-code).',
       };
     }
     // Primary auth-fail (0.x routes auth errors to stderr + sets non-zero exit;

@@ -47,8 +47,10 @@ New-Item -ItemType SymbolicLink `
 ## Usage
 
 ```bash
-hopper-grok <task-id> [--write] [--force] [--background] [--model <name>] [--reasoning <level>]
+hopper-grok <task-id> [--write] [--force] [--background] [--model <name>] [--reasoning <level>] [--sandbox <mode>]
 ```
+
+`--sandbox` accepts `read-only | workspace-write | danger-full-access`. Default is `danger-full-access` unless the task brief/spec explicitly says `read-only` / `只读`.
 
 ## Cross-host note
 

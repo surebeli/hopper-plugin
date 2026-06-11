@@ -42,6 +42,7 @@ export const opencodeAdapter = {
   },
 
   args(input, opts) {
+    const sandbox = opts.sandbox ?? 'danger-full-access';
     const argv = [
       'run',
       input,
@@ -59,10 +60,10 @@ export const opencodeAdapter = {
       '--pure',
     ];
 
-    // Background dispatches build argv in the parent process before the runner
-    // owns stdio, so treat an injected log path as another headless signal.
-    const headless = Boolean(opts.background || opts.logFile || !process.stdout.isTTY);
-    if (headless) argv.push('--dangerously-skip-permissions');
+    // Product default is full vendor write access. For opencode, that maps to
+    // skipping interactive permission prompts. If the task is explicitly
+    // read-only, omit the bypass and let opencode's own permission model apply.
+    if (sandbox === 'danger-full-access') argv.push('--dangerously-skip-permissions');
 
     return argv;
   },

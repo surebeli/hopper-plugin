@@ -9,7 +9,7 @@ This command runs the Phase 6b probe — actually invokes each vendor's CLI to e
 ## What this command does
 
 1. Invokes `hopper-dispatch --probe [<vendor>]`.
-   - No argument: probes all 6 vendors (~6 subprocesses total: codex 2 + opencode 3 + copilot 1; kimi, agy, and grok are zero-spawn).
+   - No argument: probes all 7 vendors (~11 subprocesses total when Kimi and MiMo are installed: codex 2 + kimi 2 + opencode 3 + copilot 1 + mimo 3; agy and grok are zero-spawn).
    - One argument: probes a single vendor.
 2. Updates `~/.hopper/cache/vendor-capabilities.json` (atomic write + O_EXCL lock per Phase 6b F2).
 3. Surfaces the per-vendor result line (introspection level · model count · duration).
@@ -20,7 +20,7 @@ Probe is the **only** discovery surface that spawns vendor subprocesses. Per spe
 
 ## Argument validation (BEFORE Bash)
 
-`$ARGUMENTS` is either empty OR a single vendor name. Validate against `^(codex|kimi|opencode|copilot|agy|grok)$` if non-empty. Reject anything else.
+`$ARGUMENTS` is either empty OR a single vendor name. Validate against `^(codex|kimi|opencode|copilot|agy|grok|mimo)$` if non-empty. Reject anything else.
 
 ## Invocation
 
@@ -36,7 +36,7 @@ Fallback if `$CLAUDE_PLUGIN_ROOT` is unset: see `/hopper:dispatch` for the stand
 
 ## After probe completes
 
-- Tell the user how many models per vendor were discovered (e.g. "Codex: 6 models, OpenCode: 13 models, Copilot: 0 (server-side per-tier), Kimi: 1 from config, Agy: 1 static").
+- Tell the user how many models per vendor were discovered (e.g. "Codex: 6 models, Kimi: 1 configured alias via provider JSON, OpenCode: 13 models, MiMo: 7 models, Copilot: 0 (server-side per-tier), Agy: 1 static").
 - If any vendor reported errors (auth-fail, timeout, missing binary), surface them — the user may need to install / OAuth-login that vendor.
 - Suggest `/hopper:models <vendor>` for the detailed model list.
 

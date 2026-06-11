@@ -11,6 +11,7 @@ import { opencodeAdapter } from './opencode.js';
 import { copilotAdapter } from './copilot.js';
 import { agyAdapter } from './agy.js';
 import { grokAdapter } from './grok.js';
+import { mimoAdapter } from './mimo.js';
 // Phase 6b probe entry points — each module exports an async probe() fn.
 // Imported lazily by probeVendor() below so that --check / --capabilities
 // (which don't probe) don't pull these subprocess-capable modules into
@@ -26,6 +27,7 @@ const REGISTRY = {
   copilot: copilotAdapter,
   agy: agyAdapter,
   grok: grokAdapter,
+  mimo: mimoAdapter,
 };
 
 /**

@@ -73,9 +73,10 @@ export const agyAdapter = {
   },
 
   args(input, opts) {
+    const sandbox = opts.sandbox ?? 'danger-full-access';
     return [
       '-p', input,
-      '--dangerously-skip-permissions',
+      ...(sandbox === 'danger-full-access' ? ['--dangerously-skip-permissions'] : []),
       // Cross-vendor working-dir support (mirrors opencode --dir / grok --cwd /
       // codex --cd). agy has no cwd-setting flag, but `--add-dir <path>`
       // (CONFIRMED present + repeatable via `agy --help`) grants a directory to

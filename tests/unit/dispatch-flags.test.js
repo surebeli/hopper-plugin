@@ -16,10 +16,16 @@ import { tmpdir } from 'node:os';
 import {
   MODEL_PATTERN,
   ALLOWED_REASONING,
+  ALLOWED_SANDBOXES,
   ALLOWED_DISPATCH_VALUE_FLAGS,
   validateModelName,
   validateReasoning,
+  validateSandbox,
 } from '../../cli/src/validation.js';
+import {
+  resolveAdapterOptsForTask,
+  taskTextRequestsReadOnly,
+} from '../../cli/src/dispatch.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -43,7 +49,7 @@ function runCli(args, opts = {}) {
   }
 }
 
-function makeMinimalHopper(vendor = 'codex-builder') {
+function makeMinimalHopper(vendor = 'codex-builder', { brief = 'test', taskSpec = '' } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'hopper-host-vendor-'));
   const hopperDir = join(root, '.hopper');
   mkdirSync(join(hopperDir, 'tasks'), { recursive: true });
@@ -51,10 +57,13 @@ function makeMinimalHopper(vendor = 'codex-builder') {
   writeFileSync(join(hopperDir, 'queue.md'), [
     '| ID | Task-type | Status | Depends | Brief |',
     '|----|-----------|--------|---------|-------|',
-    '| T-SAME | code-impl | pending | | test |',
+    `| T-SAME | code-impl | pending | | ${brief} |`,
     '',
   ].join('\n'));
   writeFileSync(join(hopperDir, 'tasks', 'code-impl.md'), '# code-impl\n');
+  if (taskSpec) {
+    writeFileSync(join(hopperDir, 'handoffs', 'leader-tasklist.md'), taskSpec);
+  }
   writeFileSync(join(hopperDir, 'AGENTS.md'), [
     '## Active Agent Instances',
     '',
@@ -101,8 +110,8 @@ test('ALLOWED_REASONING is the codex-vocabulary list (5 levels per Phase 6b rese
   assert.deepEqual([...ALLOWED_REASONING], ['minimal', 'low', 'medium', 'high', 'xhigh']);
 });
 
-test('validateReasoning accepts only the 4 canonical levels', () => {
-  for (const r of ['low', 'medium', 'high', 'xhigh']) {
+test('validateReasoning accepts only the 5 canonical levels', () => {
+  for (const r of ['minimal', 'low', 'medium', 'high', 'xhigh']) {
     assert.doesNotThrow(() => validateReasoning(r));
   }
   for (const bad of ['ultra', 'medium-low', 'HIGH', '', null]) {
@@ -110,8 +119,50 @@ test('validateReasoning accepts only the 4 canonical levels', () => {
   }
 });
 
-test('ALLOWED_DISPATCH_VALUE_FLAGS is exactly --model + --reasoning', () => {
-  assert.deepEqual([...ALLOWED_DISPATCH_VALUE_FLAGS], ['--model', '--reasoning']);
+test('ALLOWED_SANDBOXES is the dispatch permission vocabulary', () => {
+  assert.deepEqual([...ALLOWED_SANDBOXES], ['read-only', 'workspace-write', 'danger-full-access']);
+});
+
+test('validateSandbox accepts only canonical permission modes', () => {
+  for (const s of ALLOWED_SANDBOXES) {
+    assert.doesNotThrow(() => validateSandbox(s));
+  }
+  for (const bad of ['readonly', 'write', 'full', 'danger', '', null]) {
+    assert.throws(() => validateSandbox(bad));
+  }
+});
+
+test('ALLOWED_DISPATCH_VALUE_FLAGS is exactly --model + --reasoning + --sandbox', () => {
+  assert.deepEqual([...ALLOWED_DISPATCH_VALUE_FLAGS], ['--model', '--reasoning', '--sandbox']);
+});
+
+test('taskTextRequestsReadOnly detects explicit read-only task text only', () => {
+  assert.equal(taskTextRequestsReadOnly({
+    task: { brief: 'read-only task: inspect routing' },
+    taskSpec: '',
+  }), true);
+  assert.equal(taskTextRequestsReadOnly({
+    task: { brief: '只读任务：确认队列状态' },
+    taskSpec: '',
+  }), true);
+  assert.equal(taskTextRequestsReadOnly({
+    task: { brief: 'implementation task' },
+    taskSpec: '**T-SAME**\nThis is not read-only; modify files.',
+  }), false);
+});
+
+test('resolveAdapterOptsForTask defaults to danger-full-access unless task text says read-only', () => {
+  const writable = {
+    task: { brief: 'implement product fix' },
+    taskSpec: '**T-SAME**\nChange code and tests.',
+  };
+  const readOnly = {
+    task: { brief: 'read-only task: audit current state' },
+    taskSpec: '',
+  };
+  assert.equal(resolveAdapterOptsForTask(writable, {}).sandbox, 'danger-full-access');
+  assert.equal(resolveAdapterOptsForTask(readOnly, {}).sandbox, 'read-only');
+  assert.equal(resolveAdapterOptsForTask(readOnly, { sandbox: 'workspace-write' }).sandbox, 'workspace-write');
 });
 
 // ─── CLI end-to-end tests (via --resolve which doesn't spawn vendor) ──
@@ -138,6 +189,18 @@ test('CLI rejects --reasoning with no value', () => {
   const r = runCli(['T-PLUGIN-05a', '--reasoning']);
   assert.equal(r.exitCode, 2);
   assert.match(r.stderr, /--reasoning requires a value/i);
+});
+
+test('CLI rejects --sandbox with invalid level', () => {
+  const r = runCli(['T-PLUGIN-05a', '--sandbox', 'full']);
+  assert.equal(r.exitCode, 2);
+  assert.match(r.stderr, /sandbox.*invalid|Allowed/i);
+});
+
+test('CLI rejects --sandbox with no value', () => {
+  const r = runCli(['T-PLUGIN-05a', '--sandbox']);
+  assert.equal(r.exitCode, 2);
+  assert.match(r.stderr, /--sandbox requires a value/i);
 });
 
 test('CLI rejects unknown flag', () => {
@@ -187,11 +250,46 @@ test('CLI hard-rejects host == vendor before adapter execution', () => {
   }
 });
 
-test('CLI help mentions both --model and --reasoning', () => {
+test('CLI auto-defaults sandbox to danger-full-access for writable tasks', () => {
+  const { root, hopperDir } = makeMinimalHopper('codex', { brief: 'implement product fix' });
+  try {
+    const r = runCli(['T-SAME'], { hopperDir, env: { HOPPER_HOST_VENDOR: 'codex' } });
+    assert.equal(r.exitCode, 1);
+    assert.match(r.stderr, /permission: sandbox=danger-full-access \(auto\)/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI auto-downgrades sandbox to read-only when task text explicitly says read-only', () => {
+  const { root, hopperDir } = makeMinimalHopper('codex', { brief: 'read-only task: inspect only' });
+  try {
+    const r = runCli(['T-SAME'], { hopperDir, env: { HOPPER_HOST_VENDOR: 'codex' } });
+    assert.equal(r.exitCode, 1);
+    assert.match(r.stderr, /permission: sandbox=read-only \(auto\)/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI explicit --sandbox overrides task-text default', () => {
+  const { root, hopperDir } = makeMinimalHopper('codex', { brief: 'read-only task: inspect only' });
+  try {
+    const r = runCli(['T-SAME', '--sandbox', 'workspace-write'], { hopperDir, env: { HOPPER_HOST_VENDOR: 'codex' } });
+    assert.equal(r.exitCode, 1);
+    assert.match(r.stderr, /permission: sandbox=workspace-write \(explicit\)/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI help mentions --model, --reasoning, and --sandbox', () => {
   const r = runCli(['--help']);
   assert.equal(r.exitCode, 0);
   assert.match(r.stdout, /--model/);
   assert.match(r.stdout, /--reasoning/);
+  assert.match(r.stdout, /--sandbox/);
+  assert.match(r.stdout, /danger-full-access/);
   assert.match(r.stdout, /low \| medium \| high \| xhigh/);
 });
 
@@ -221,10 +319,11 @@ test('CLI accepts --model + --write in either order (flag ordering)', () => {
 
 test('CLI handles mixed bare + value flag interleaving', () => {
   // --reasoning xhigh interleaved with --write --force
-  const r = runCli(['T-MISSING', '--write', '--reasoning', 'xhigh', '--force', '--model', 'kimi-thinking']);
+  const r = runCli(['T-MISSING', '--write', '--reasoning', 'xhigh', '--force', '--model', 'kimi-thinking', '--sandbox', 'danger-full-access']);
   // Should reach dispatch banner with all 4 opts visible
   assert.match(r.stderr, /opts.*model=kimi-thinking/);
   assert.match(r.stderr, /reasoning=xhigh/);
+  assert.match(r.stderr, /sandbox=danger-full-access/);
 });
 
 test('CLI flag value must not start with dash (consumes-next-arg detection)', () => {

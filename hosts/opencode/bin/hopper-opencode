@@ -19,14 +19,15 @@ usage() {
   cat <<EOF >&2
 hopper-opencode — Tier C OpenCode host adapter for hopper-plugin
 
-Usage: hopper-opencode <task-id> [--write] [--force] [--model <name>] [--reasoning <level>]
+Usage: hopper-opencode <task-id> [--write] [--force] [--model <name>] [--reasoning <level>] [--sandbox <mode>]
 
 Arguments:
   <task-id>           Task ID matching ^[A-Za-z][A-Za-z0-9._-]{0,99}$ (no '..')
   --write             Write .hopper/handoffs/<task-id>-output.md after dispatch
   --force             Overwrite existing output.md (only with --write)
-  --model <name>      Forward to vendor adapter (honored by kimi/opencode/copilot/grok)
+  --model <name>      Forward to vendor adapter (honored by kimi/opencode/copilot/grok/mimo)
   --reasoning <lv>    Forward reasoning effort: minimal|low|medium|high|xhigh (honored by codex adapter)
+  --sandbox <mode>    Forward vendor permission: read-only|workspace-write|danger-full-access
 
 Environment:
   HOPPER_PLUGIN_ROOT   Override plugin root (defaults to wrapper-relative)
@@ -57,7 +58,7 @@ case "$TASK_ID" in
 esac
 
 # Validate flags against explicit whitelist + parse value-taking flags.
-# Bare flags: --write, --force, --background. Value flags: --model, --reasoning.
+# Bare flags: --write, --force, --background. Value flags: --model, --reasoning, --sandbox.
 # Same validation rules as Claude Code dispatch.md + Tier A + Tier C #1.
 FLAGS=""
 while [ $# -gt 0 ]; do
@@ -92,8 +93,21 @@ while [ $# -gt 0 ]; do
           ;;
       esac
       ;;
+    --sandbox)
+      shift
+      case "${1:-}" in
+        read-only|workspace-write|danger-full-access)
+          FLAGS="$FLAGS --sandbox $1"
+          shift
+          ;;
+        *)
+          echo "Error: --sandbox must be one of read-only|workspace-write|danger-full-access (got: ${1:-empty})." >&2
+          exit 2
+          ;;
+      esac
+      ;;
     *)
-      echo "Error: invalid flag '$1'. Allowed: --write, --force, --background, --model <name>, --reasoning <level>." >&2
+      echo "Error: invalid flag '$1'. Allowed: --write, --force, --background, --model <name>, --reasoning <level>, --sandbox <mode>." >&2
       exit 2
       ;;
   esac

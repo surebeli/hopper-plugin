@@ -1,7 +1,7 @@
 ---
 description: Dispatch a task from .hopper/queue.md to its preferred vendor CLI via hopper-dispatch. Supports --background for long-running tasks (spec §14).
 allowed-tools: Bash, Read
-argument-hint: <task-id> [--background] [--write] [--force] [--model <name>] [--reasoning <minimal|low|medium|high|xhigh>]
+argument-hint: <task-id> [--background] [--write] [--force] [--model <name>] [--reasoning <minimal|low|medium|high|xhigh>] [--sandbox <read-only|workspace-write|danger-full-access>]
 ---
 
 This command runs inside a Claude Code session and invokes the host-agnostic `hopper-dispatch` CLI to dispatch one task.
@@ -24,13 +24,16 @@ This command runs inside a Claude Code session and invokes the host-agnostic `ho
 3. The **remaining** tokens are one of these forms:
    - Bare flag: `--write`, `--force`, or `--background` (no value follows)
    - Value flag: `--model <name>` (consumes next token) — `<name>` must match `^[A-Za-z][A-Za-z0-9._/:-]{0,99}$`
-   - Value flag: `--reasoning <level>` (consumes next token) — `<level>` must be exactly one of `low`, `medium`, `high`, `xhigh`
+   - Value flag: `--reasoning <level>` (consumes next token) — `<level>` must be exactly one of `minimal`, `low`, `medium`, `high`, `xhigh`
+   - Value flag: `--sandbox <mode>` (consumes next token) — `<mode>` must be exactly one of `read-only`, `workspace-write`, `danger-full-access`
    - Reject anything else.
 4. If validation fails: STOP. Print the offending input verbatim and ask the user to correct it. Do **not** invoke Bash with rejected input.
 
-**What `--model` and `--reasoning` do**: they forward to the vendor adapter via `executeDispatch`'s `adapterOpts`. Adapters honor them differently:
-- `--model` honored by: kimi, opencode, copilot, grok (becomes `-m / --model <name>` to the vendor CLI)
-- `--reasoning` honored by: codex (becomes `model_reasoning_effort=<level>`); other adapters ignore it harmlessly
+**What `--model`, `--reasoning`, and `--sandbox` do**: they forward to the vendor adapter via `executeDispatch`'s `adapterOpts`. Adapters honor them differently:
+- `--model` honored by: kimi, opencode, copilot, grok, mimo (becomes `-m / --model <name>` to the vendor CLI)
+- `--reasoning` honored by: codex (becomes `model_reasoning_effort=<level>`) and mimo (becomes `--variant <level>`, with `xhigh` mapped to `max`); other adapters ignore it harmlessly
+- `--sandbox` default: `danger-full-access` unless the task brief/spec explicitly says `read-only` / `只读`; explicit `--sandbox` overrides the auto default
+- `--sandbox` mappings: codex uses `-s <mode>`; opencode/agy map `danger-full-access` to `--dangerously-skip-permissions`; copilot maps it to `--allow-all-tools --allow-all-paths`; grok maps it to `--always-approve`; mimo maps default full access to `--agent build --dangerously-skip-permissions` and read-only to `--agent plan`; kimi `-p` uses Kimi's native auto permission policy and rejects `--prompt` combined with `--yolo` / `--auto` / `--plan`, so hopper does not forward sandbox argv
 
 ## Invocation modes — pick ONE based on arguments
 
@@ -45,7 +48,7 @@ Build an explicit, properly-quoted command. Do not splat raw `$ARGUMENTS`:
 node "$CLAUDE_PLUGIN_ROOT/cli/bin/hopper-dispatch" "T-PLUGIN-05a" --write
 
 # With adapter opts
-node "$CLAUDE_PLUGIN_ROOT/cli/bin/hopper-dispatch" "T-PLUGIN-05a" --write --model "kimi-code/kimi-for-coding" --reasoning "high"
+node "$CLAUDE_PLUGIN_ROOT/cli/bin/hopper-dispatch" "T-PLUGIN-05a" --write --model "kimi-code/kimi-for-coding" --reasoning "high" --sandbox "danger-full-access"
 ```
 
 ### Mode B: BACKGROUND dispatch (`--background` flag present)

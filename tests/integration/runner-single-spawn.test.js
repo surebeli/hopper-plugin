@@ -6,9 +6,10 @@
 // (2) Failed dispatch does NOT re-spawn (counter stays at 1), (3) Watching
 // a job does not respawn it."
 //
-// Approach: PATH-shim a fake "codex" binary in a temp dir, prepend to PATH,
-// then invoke hopper-runner with adapter=codex. Counter file proves single
-// spawn.
+// Approach: PATH-shim a fake "opencode" binary in a temp dir, prepend to PATH,
+// then invoke hopper-runner with adapter=opencode. Counter file proves single
+// spawn. We intentionally avoid codex here because codex is globally serialized
+// by hopper-codex.lock; tests killed mid-run can otherwise block unrelated cases.
 //
 // **Windows skip rationale**: on Windows, child_process.spawn with no
 // shell:true tries .exe/.cmd/.bat extensions but CreateProcessW cannot
@@ -40,7 +41,7 @@ const RUNNER_PATH = join(REPO_ROOT, 'cli', 'bin', 'hopper-runner');
 
 /**
  * Spawn the runner with a fake vendor that increments a counter file.
- * We use the existing 'codex' adapter name + shim node-executable on PATH.
+ * We use the existing 'opencode' adapter name + shim node-executable on PATH.
  *
  * Cross-platform note: on Windows, spawn looks for codex.exe / codex.cmd /
  * codex.bat per PATHEXT. We write codex.cmd on Win, plain codex (chmod +x)
@@ -53,7 +54,7 @@ async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, exitCod
     const shimDir = join(tmp, 'shim');
     mkdirSync(shimDir);
 
-    // Fake "codex" command: increments counter, prints OK to stdout, exits with given code.
+    // Fake "opencode" command: increments counter, prints OK to stdout, exits with given code.
     // sleepMs lets timeout tests exercise runner killProcessTree without waiting
     // for a real vendor adapter's production timeout.
     const fakeScript = join(tmp, 'fake-vendor.js');
@@ -71,8 +72,8 @@ async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, exitCod
       }
     `, 'utf-8');
 
-    // Create shim: 'codex' on PATH → node fakeScript
-    const shimName = isWin ? 'codex.cmd' : 'codex';
+    // Create shim: 'opencode' on PATH → node fakeScript
+    const shimName = isWin ? 'opencode.cmd' : 'opencode';
     const shimPath = join(shimDir, shimName);
     if (isWin) {
       writeFileSync(shimPath, `@echo off\r\nnode "${fakeScript.replace(/\\/g, '\\\\')}" %*\r\n`, 'utf-8');
@@ -87,7 +88,7 @@ async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, exitCod
     // Seed frontmatter (normally spawnDetached does this)
     writeFrontmatter(outputMdPath, {
       task_id: taskId,
-      adapter: 'codex',
+      adapter: 'opencode',
       status: 'in-progress',
       pid: null,
       start_time: new Date().toISOString(),
@@ -114,12 +115,13 @@ async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, exitCod
         RUNNER_PATH,
         '--task-id', taskId,
         '--hopper-dir', hopperDir,
-        '--adapter', 'codex',
+        '--adapter', 'opencode',
         '--output-md', outputMdPath,
         '--log', logPath,
         '--',
-        // codex adapter argv: exec <prompt> -s read-only -c reasoning=medium
-        'exec', 'test prompt', '-s', 'read-only', '-c', 'model_reasoning_effort="medium"',
+        // opencode adapter argv shape is irrelevant to the fake shim, but keep
+        // it plausible for diagnostics.
+        'run', 'test prompt', '--format', 'json',
       ], {
         env: childEnv,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -316,8 +318,8 @@ test('hopper-runner appends exactly one timeout terminal progress event', async 
       hopperDir,
       counterFile,
       exitCode: 0,
-      sleepMs: 1000,
-      extraEnv: { HOPPER_TEST_ONLY_TIMEOUT_MS: '100' },
+      sleepMs: 2000,
+      extraEnv: { HOPPER_TEST_ONLY_TIMEOUT_MS: '500' },
     });
 
     const finalCount = parseInt(readFileSync(counterFile, 'utf-8'));

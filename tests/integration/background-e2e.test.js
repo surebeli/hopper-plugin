@@ -45,6 +45,12 @@ function setup() {
   return { tmp, hopperDir };
 }
 
+function makeFakeRunner(tmp, sleepMs = 50) {
+  const runnerPath = join(tmp, 'fake-runner.js');
+  writeFileSync(runnerPath, `setTimeout(() => process.exit(0), ${sleepMs});\n`, 'utf-8');
+  return runnerPath;
+}
+
 test('spawnDetached refuses when output.md status=in-progress + alive PID (concurrent protection)', () => {
   const { tmp, hopperDir } = setup();
   try {
@@ -77,15 +83,9 @@ test('spawnDetached refuses when output.md status=in-progress + alive PID (concu
 test('spawnDetached writes initial in-progress frontmatter + PID + start_time', async () => {
   const { tmp, hopperDir } = setup();
   try {
-    // Adapter command 'true' (Unix) or a real binary that exits 0 quickly.
-    // We don't await completion — just verify the seed frontmatter.
-    // On Windows there's no 'true' binary but `cmd /c exit 0` works.
-    // For safety: use process.execPath (node) with `-e ""` which exits 0 fast.
-    // But spawnDetached calls into hopper-runner which uses getAdapter() — so
-    // we still need a registered vendor. Use 'codex' adapter name; the runner
-    // will attempt to spawn `codex` which may not exist — but BEFORE that, the
-    // initial frontmatter write happens. We verify that frontmatter exists and
-    // then clean up.
+    // Use a fake runner so this infrastructure test never starts a real vendor
+    // CLI or holds a global vendor lock that can interfere with parallel tests.
+    const fakeRunner = makeFakeRunner(tmp);
 
     // Catch: spawnDetached may throw if it can't write frontmatter (it should
     // not throw on the spawn itself unless the runner script is missing).
@@ -96,7 +96,7 @@ test('spawnDetached writes initial in-progress frontmatter + PID + start_time', 
         taskId: 'T-spawn-seed',
         adapterName: 'codex',
         adapterArgv: ['exec', 'noop', '-s', 'read-only'],
-        runnerPath: RUNNER_PATH,
+        runnerPath: fakeRunner,
       });
     } catch (err) {
       // Spawn itself shouldn't fail; if it did, dump for diagnosis
@@ -137,14 +137,7 @@ test('spawnDetached writes initial in-progress frontmatter + PID + start_time', 
       assert.ok(fm.pid > 0, 'in-progress state must have a PID');
     }
 
-    // Give the runner up to 5s to exit cleanly (codex command likely fails
-    // since the binary may not be authenticated, but the runner WILL exit)
-    const start = Date.now();
-    while (Date.now() - start < 5000) {
-      const cur = readFrontmatter(result.outputMdPath);
-      if (cur.status === 'done' || cur.status === 'failed') break;
-      await new Promise(r => setTimeout(r, 200));
-    }
+    await new Promise(r => setTimeout(r, 100));
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -177,7 +170,7 @@ test('spawnDetached: re-running after the first completes is allowed (no false-p
         taskId: 'T-rerun',
         adapterName: 'codex',
         adapterArgv: ['exec', 'noop'],
-        runnerPath: RUNNER_PATH,
+        runnerPath: makeFakeRunner(tmp),
       });
     } catch (err) {
       assert.fail(`spawnDetached should allow re-dispatch after done; got: ${err.message}`);
@@ -190,8 +183,8 @@ test('spawnDetached: re-running after the first completes is allowed (no false-p
     assert.notEqual(fm.start_time, new Date(Date.now() - 60000).toISOString(),
       'start_time must be refreshed for the new dispatch');
 
-    // Wait for runner exit so we don't leave a child process behind
-    await new Promise(r => setTimeout(r, 3000));
+    // Wait for fake runner exit so we don't leave a child process behind
+    await new Promise(r => setTimeout(r, 100));
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -284,7 +277,7 @@ test('F3 atomic lock: stale lockfile (>60s) is reclaimed', () => {
         taskId: 'T-stale-lock',
         adapterName: 'codex',
         adapterArgv: ['exec', 'noop'],
-        runnerPath: RUNNER_PATH,
+        runnerPath: makeFakeRunner(tmp),
       });
     } catch (err) {
       assert.fail(`stale lock should be reclaimed; got: ${err.message}`);
@@ -303,7 +296,7 @@ test('F2 + F3: spawnDetached releases lock after PID seeded', async () => {
       taskId: 'T-lock-release',
       adapterName: 'codex',
       adapterArgv: ['exec', 'noop'],
-      runnerPath: RUNNER_PATH,
+      runnerPath: makeFakeRunner(tmp),
       adapterOpts: { reasoning: 'xhigh' },  // F2: opts propagation test
     });
 
@@ -324,8 +317,8 @@ test('F2 + F3: spawnDetached releases lock after PID seeded', async () => {
     assert.ok(fm.pid === result.pid || fm.pid === null || fm.status !== 'in-progress',
       `PID expected ${result.pid}; got ${fm.pid} with status ${fm.status}`);
 
-    // Give runner up to 5s to exit cleanly
-    await new Promise(r => setTimeout(r, 3000));
+    // Give fake runner time to exit cleanly
+    await new Promise(r => setTimeout(r, 100));
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

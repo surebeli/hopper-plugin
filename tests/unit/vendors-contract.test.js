@@ -1,7 +1,7 @@
 // Vendor contract conformance tests (Phase 2)
 // Anchor: tests/unit/vendors-contract.test.js
 //
-// Verifies all 5 vendor adapters conform to the VendorAdapter contract from
+// Verifies all vendor adapters conform to the VendorAdapter contract from
 // cli/src/types.js. Catches drift in adapter shape without invoking vendors.
 
 import { test } from 'node:test';
@@ -11,9 +11,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { listAdapters, getAdapter } from '../../cli/src/vendors/index.js';
 
-const VENDORS = ['codex', 'kimi', 'opencode', 'copilot', 'agy', 'grok'];
+const VENDORS = ['codex', 'kimi', 'opencode', 'copilot', 'agy', 'grok', 'mimo'];
 
-test('registry lists exactly the 6 functional vendors', () => {
+test('registry lists exactly the 7 functional vendors', () => {
   const names = listAdapters().sort();
   assert.deepEqual(names, [...VENDORS].sort(),
     `expected ${VENDORS.join(',')}; got ${names.join(',')}`);
@@ -99,9 +99,13 @@ test('codex adapter args() builds expected invocation', () => {
   const argv = a.args('test prompt', { reasoning: 'high' });
   assert.ok(argv.includes('exec'));
   assert.ok(argv.includes('-s'));
+  assert.equal(argv[argv.indexOf('-s') + 1], 'danger-full-access');
   assert.ok(argv.includes('-c'));
   assert.ok(argv.some((a) => a.includes('model_reasoning_effort="high"')));
   assert.ok(argv.includes('test prompt'));
+
+  const ro = a.args('test prompt', { sandbox: 'read-only' });
+  assert.equal(ro[ro.indexOf('-s') + 1], 'read-only');
 });
 
 test('kimi adapter args() uses Kimi Code 0.x headless form (no removed legacy flags)', () => {
@@ -114,12 +118,18 @@ test('kimi adapter args() uses Kimi Code 0.x headless form (no removed legacy fl
   assert.ok(!argv.includes('--print'), '--print removed in 0.x');
   assert.ok(!argv.includes('--final-message-only'), '--final-message-only removed in 0.x');
   assert.ok(!argv.includes('--thinking') && !argv.includes('--no-thinking'), 'reasoning is config-driven in 0.x, not argv');
+  assert.ok(!argv.includes('--yolo') && !argv.includes('--auto') && !argv.includes('--plan'),
+    'Kimi 0.14 rejects prompt mode combined with permission/plan flags');
   // -m only when model given; --session only when conversationId given
   assert.ok(!argv.includes('-m'), 'no -m without opts.model');
   const withModel = a.args('test', { model: 'kimi-code/kimi-for-coding' });
   assert.ok(withModel.includes('-m') && withModel.includes('kimi-code/kimi-for-coding'));
   const withSession = a.args('test', { conversationId: 'sess-1' });
   assert.ok(withSession.includes('--session') && withSession.includes('sess-1'));
+  const danger = a.args('test', { sandbox: 'danger-full-access' });
+  const readOnly = a.args('test', { sandbox: 'read-only' });
+  assert.deepEqual(danger, argv, 'sandbox opts are not argv-enforceable for kimi -p');
+  assert.deepEqual(readOnly, argv, 'read-only cannot be enforced by a kimi -p argv flag');
 });
 
 test('opencode adapter args() uses run subcommand', () => {
@@ -130,9 +140,10 @@ test('opencode adapter args() uses run subcommand', () => {
   assert.ok(argv.includes('--format'));
   assert.ok(argv.includes('json'));
   assert.ok(argv.includes('--pure'));
+  assert.ok(argv.includes('--dangerously-skip-permissions'), 'default sandbox is danger-full-access');
 
-  const bg = a.args('test', { background: true });
-  assert.ok(bg.includes('--dangerously-skip-permissions'));
+  const ro = a.args('test', { sandbox: 'read-only' });
+  assert.ok(!ro.includes('--dangerously-skip-permissions'), 'read-only tasks must not skip permissions');
 });
 
 test('opencode adapter parseResult() reconstructs assistant text from json event stream', () => {
@@ -151,6 +162,47 @@ test('opencode adapter parseResult() reconstructs assistant text from json event
   });
   assert.equal(result.status, 'success');
   assert.equal(result.text, 'HELLO_WORLD');
+});
+
+test('mimo adapter args() maps sandbox and reasoning to MiMoCode run flags', () => {
+  const a = getAdapter('mimo');
+  const argv = a.args('test', { cwd: '/tmp/project', model: 'xiaomi/mimo-v2.5-pro', reasoning: 'xhigh' });
+  assert.equal(argv[0], 'run');
+  assert.ok(argv.includes('test'));
+  assert.ok(argv.includes('--dir') && argv.includes('/tmp/project'));
+  assert.ok(argv.includes('--model') && argv.includes('xiaomi/mimo-v2.5-pro'));
+  assert.ok(argv.includes('--agent'));
+  assert.equal(argv[argv.indexOf('--agent') + 1], 'build');
+  assert.ok(argv.includes('--format') && argv.includes('json'));
+  assert.ok(argv.includes('--pure'));
+  assert.ok(argv.includes('--print-logs'));
+  assert.ok(argv.includes('--variant'));
+  assert.equal(argv[argv.indexOf('--variant') + 1], 'max', 'xhigh maps to MiMo variant max');
+  assert.ok(argv.includes('--dangerously-skip-permissions'), 'default sandbox is danger-full-access');
+
+  const ro = a.args('test', { sandbox: 'read-only', reasoning: 'high' });
+  assert.equal(ro[ro.indexOf('--agent') + 1], 'plan');
+  assert.ok(ro.includes('--variant') && ro.includes('high'));
+  assert.ok(!ro.includes('--dangerously-skip-permissions'), 'read-only tasks must not auto-approve tool calls');
+});
+
+test('mimo adapter parseResult() reconstructs text and token usage from json events', () => {
+  const a = getAdapter('mimo');
+  const result = a.parseResult({
+    exitCode: 0,
+    stdout: [
+      JSON.stringify({ type: 'step_start', part: { type: 'step-start' } }),
+      JSON.stringify({ type: 'text', part: { type: 'text', text: 'HELLO_' } }),
+      JSON.stringify({ type: 'text', part: { type: 'text', text: 'MIMO' } }),
+      JSON.stringify({ type: 'step_finish', part: { tokens: { total: 1234 } } }),
+    ].join('\n'),
+    stderr: '',
+    timedOut: false,
+    durationMs: 200,
+  });
+  assert.equal(result.status, 'success');
+  assert.equal(result.text, 'HELLO_MIMO');
+  assert.deepEqual(result.usage, { totalTokens: 1234 });
 });
 
 test('copilot adapter surfaces GH_TOKEN warning when no env token present', () => {
@@ -176,6 +228,16 @@ test('copilot adapter surfaces GH_TOKEN warning when no env token present', () =
   }
 });
 
+test('copilot adapter maps sandbox to allow-all permission flags', () => {
+  const a = getAdapter('copilot');
+  const argv = a.args('test', {});
+  assert.ok(argv.includes('--allow-all-tools'));
+  assert.ok(argv.includes('--allow-all-paths'));
+  const ro = a.args('test', { sandbox: 'read-only' });
+  assert.ok(!ro.includes('--allow-all-tools'));
+  assert.ok(!ro.includes('--allow-all-paths'));
+});
+
 test('agy adapter has prepareLog() method (codex F2 silent-fail detection)', () => {
   const a = getAdapter('agy');
   assert.equal(typeof a.prepareLog, 'function', 'agy must have prepareLog');
@@ -188,6 +250,8 @@ test('agy adapter args() includes --dangerously-skip-permissions for headless', 
   const a = getAdapter('agy');
   const argv = a.args('test', {});
   assert.ok(argv.includes('--dangerously-skip-permissions'));
+  const ro = a.args('test', { sandbox: 'read-only' });
+  assert.ok(!ro.includes('--dangerously-skip-permissions'), 'read-only tasks must not skip permissions');
 });
 
 test('grok adapter args() builds headless json invocation with explicit default model', () => {
@@ -201,10 +265,9 @@ test('grok adapter args() builds headless json invocation with explicit default 
   // Always passes explicit -m (avoids retired-slug grok-4.3 billing redirect)
   assert.ok(argv.includes('-m'));
   assert.ok(argv.includes('grok-build'), 'default model must be grok-build');
-  // --always-approve only in background mode (else agent hangs per tool call)
-  assert.ok(!argv.includes('--always-approve'), 'no --always-approve in sync mode');
-  const bg = a.args('test', { background: true });
-  assert.ok(bg.includes('--always-approve'), '--always-approve required for background');
+  assert.ok(argv.includes('--always-approve'), 'default sandbox is danger-full-access');
+  const ro = a.args('test', { sandbox: 'read-only' });
+  assert.ok(!ro.includes('--always-approve'), 'read-only tasks must not auto-approve tool calls');
   // honors explicit --model override
   const custom = a.args('test', { model: 'grok-4.3' });
   assert.ok(custom.includes('grok-4.3') && !custom.includes('grok-build'));

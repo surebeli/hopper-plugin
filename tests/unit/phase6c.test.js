@@ -304,11 +304,11 @@ test('kimi args() forwards -m and ignores opts.reasoning (0.x: no --thinking arg
     `0.x must not emit a reasoning flag even when opts.reasoning set; got: ${args.join(' ')}`);
 });
 
-// ─── P2: soft-warn enhancement for kimi config-only ───────────────────
+// ─── P2: soft-warn enhancement for Kimi alias introspection ────────────
 
-test('P2 (manual-check): kimi config-only soft-warn includes TOML snippet hint', async () => {
+test('P2 (manual-check): kimi soft-warn includes TOML snippet hint', async () => {
   // The hopper-dispatch warnIfModelUnknown helper writes to console.error
-  // when vendor=kimi + introspection_supported=config-only. Hard to unit
+  // when vendor=kimi + alias introspection misses a model. Hard to unit
   // test without exec'ing the bin — assert the bin file contains the
   // expected hint string + recommended TOML snippet structure.
   const { readFileSync } = await import('node:fs');
@@ -320,8 +320,8 @@ test('P2 (manual-check): kimi config-only soft-warn includes TOML snippet hint',
 
   assert.match(src, /vendor === 'kimi'/,
     'soft-warn must include vendor-specific branch for kimi');
-  assert.match(src, /config-only/,
-    'soft-warn must check introspection_supported === config-only');
+  assert.match(src, /\['partial', 'config-only'\]\.includes\(cached\.introspection_supported\)/,
+    'soft-warn must handle both Kimi provider-list and config fallback introspection');
   assert.match(src, /\[models\."\$\{model\}"\]/,
     'soft-warn must print the [models."X"] TOML block snippet (0.x quoted key — aliases like kimi-code/kimi-for-coding contain a slash)');
   assert.match(src, /capabilities = \["thinking"\]/,

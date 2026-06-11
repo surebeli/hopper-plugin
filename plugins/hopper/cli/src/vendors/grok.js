@@ -60,11 +60,13 @@ export const grokAdapter = {
   },
 
   args(input, opts) {
+    const sandbox = opts.sandbox ?? 'danger-full-access';
     // Headless single-prompt form (CONFIRMED): grok -p "<prompt>" --output-format json
     // -p long form is --single <PROMPT>. --always-approve is CONFIRMED required
-    // for background: -p does NOT auto-approve tool calls, so the agent hangs on
-    // each tool use without it (analog of agy --dangerously-skip-permissions /
-    // copilot --allow-all-tools). --no-auto-update suppresses CI update noise.
+    // for full-access headless dispatches: -p does NOT auto-approve tool calls,
+    // so the agent hangs on each tool use without it (analog of agy
+    // --dangerously-skip-permissions / copilot --allow-all-tools).
+    // --no-auto-update suppresses CI update noise.
     return [
       '-p', input,
       '--output-format', 'json',
@@ -75,7 +77,7 @@ export const grokAdapter = {
       // $HOPPER_VENDOR_CWD). grok's sandbox is relative to --cwd, so a widened
       // root reaches external paths without disabling grok's permission model.
       ...(opts.cwd ? ['--cwd', opts.cwd] : []),
-      ...(opts.background ? ['--always-approve'] : []),
+      ...(sandbox === 'danger-full-access' ? ['--always-approve'] : []),
       ...(opts.conversationId ? ['-r', opts.conversationId] : []),
     ];
   },
