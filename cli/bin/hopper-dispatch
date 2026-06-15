@@ -11,6 +11,7 @@ import { listAdapters, getAdapter, installCheckForAdapter, capabilitiesForAdapte
 import { readCache, readCacheWithDiagnostics, getVendorCache, setVendorCache, isStale, staleness } from '../src/cache.js';
 import { writeOutput } from '../src/output.js';
 import { scaffoldHopper } from '../src/scaffold.js';
+import { compatCheckForAdapter } from '../src/vendor-compat.js';
 import {
   validateTaskId,
   validateDispatchFlags,
@@ -38,7 +39,7 @@ import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
-const VERSION = '0.8.0';
+const VERSION = '0.8.1';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -131,8 +132,13 @@ async function main() {
   // Phase 6a discovery commands — project-agnostic (don't need hopperDir).
   if (args.includes('--check')) {
     const checkIdx = args.indexOf('--check');
-    const target = args[checkIdx + 1] && !args[checkIdx + 1].startsWith('-') ? args[checkIdx + 1] : null;
-    await runCheck(target);
+    // Target = first non-flag token after --check, so both `--check grok --compat`
+    // and `--check --compat grok` filter to grok.
+    let target = null;
+    for (let i = checkIdx + 1; i < args.length; i++) {
+      if (!args[i].startsWith('-')) { target = args[i]; break; }
+    }
+    await runCheck(target, { compat: args.includes('--compat') });
     return;
   }
   const capIdx = args.indexOf('--capabilities');
@@ -545,7 +551,7 @@ async function runDispatch(hopperDir, taskId, { write = false, force = false, ad
 
     if (write) {
       try {
-        const written = await writeOutput({ hopperDir, dispatchResult: result, force });
+        const written = await writeOutput({ hopperDir, dispatchResult: result, force, model: adapterOpts.model });
         console.log('');
         console.log('=== OUTPUT.MD WRITTEN ===');
         console.log(`Wrote: ${written.path}${written.overwritten ? ' (overwritten)' : ''}`);
@@ -1135,7 +1141,7 @@ async function runWatch(hopperDir, taskId) {
 
 // ─── Discovery commands (Phase 6a) ────────────────────────────────────
 
-async function runCheck(target) {
+async function runCheck(target, { compat = false } = {}) {
   const vendors = target ? [target] : listAdapters();
   if (target && !listAdapters().includes(target)) {
     console.error(`Error: unknown vendor '${target}'. Known: ${listAdapters().join(', ')}`);
@@ -1200,7 +1206,11 @@ async function runCheck(target) {
     }
   }
   console.log('');
-  console.log('No vendor subprocess is spawned for this check (spec §3 #4 single-spawn proof preserved).');
+  if (compat) {
+    console.log('Note: --compat spawns `<vendor> --help` once per vendor (diagnostic only, off the dispatch path).');
+  } else {
+    console.log('No vendor subprocess is spawned for this check (spec §3 #4 single-spawn proof preserved).');
+  }
   console.log('Paths shown with `~` home-dir redaction. PATH is trusted input — review your $PATH if unsure.');
 
   // Per Phase 6a dogfood 2026-05-21: emit diagnostic hint when any vendor
@@ -1216,6 +1226,32 @@ async function runCheck(target) {
     console.log('  on PATH but your shell does not (e.g. ~/AppData/Local/<vendor>/bin/).');
     console.log('  Either: (a) run hopper-dispatch from PowerShell, or');
     console.log('          (b) add the vendor bin dir to your shell PATH.');
+  }
+
+  // --compat: spawn `<vendor> --help` and verify the flags the adapter emits
+  // still exist, catching CLI-version drift before a dispatch silently fails.
+  if (compat) {
+    console.log('');
+    console.log('Flag compatibility (`<vendor> --help` vs adapter-emitted flags):');
+    for (const { name: v } of results) {
+      let c;
+      try {
+        c = compatCheckForAdapter(v);
+      } catch (err) {
+        console.log(`  ${v.padEnd(9)} ERROR — ${(err && err.message) || err}`);
+        continue;
+      }
+      if (!c.ran) {
+        console.log(`  ${v.padEnd(9)} skipped — ${c.reason}`);
+      } else if (c.missing.length === 0) {
+        console.log(`  ${v.padEnd(9)} OK — all ${c.present.length} expected flag(s) present in --help`);
+      } else {
+        console.log(`  ${v.padEnd(9)} DRIFT — missing: ${c.missing.join(', ')} | present: ${c.present.join(', ') || 'none'}`);
+      }
+    }
+    console.log('');
+    console.log('Verify model aliases with `hopper-dispatch --probe <vendor>` then `--models <vendor>`');
+    console.log('  (kimi resolves -m against ~/.kimi-code/config.toml; grok uses a static catalog).');
   }
 }
 

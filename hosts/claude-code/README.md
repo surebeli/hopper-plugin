@@ -90,7 +90,7 @@ After install + restart, type:
 /hopper:smoke
 ```
 
-Expected: a `hopper standalone (CLI v0.8.0)` banner. If you see it, **Prong 1 PASSES** — record this in `.hopper/HOPPER-FEEDBACK.md` per the unified user-action gate (spec §11).
+Expected: a `hopper standalone (CLI v0.8.1)` banner. If you see it, **Prong 1 PASSES** — record this in `.hopper/HOPPER-FEEDBACK.md` per the unified user-action gate (spec §11).
 
 If the slash command is not recognized:
 - The plugin manifest may not match current Claude Code schema. Run `claude --debug` to inspect plugin discovery

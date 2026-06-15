@@ -146,4 +146,8 @@ After the command returns:
 
 4. Do NOT diagnose the failure, propose fixes, suggest next steps, recommend retries, or suggest switching vendors. Dispatch + surface only."
 
-exec grok -p "$PROMPT" --always-approve --output-format plain -m "${GROK_HOST_MODEL:-grok-build}"
+# --permission-mode bypassPermissions: the outer grok host is non-interactive,
+# so without it grok can stall and return stopReason:"Cancelled" with
+# Auth(AuthorizationRequired) (vendor-preset feedback 2026-06-15). --always-approve
+# alone is insufficient.
+exec grok -p "$PROMPT" --permission-mode bypassPermissions --always-approve --output-format plain -m "${GROK_HOST_MODEL:-grok-build}"

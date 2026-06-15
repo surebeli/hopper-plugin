@@ -256,7 +256,8 @@ test('agy adapter args() includes --dangerously-skip-permissions for headless', 
 
 test('grok adapter args() builds headless json invocation with explicit default model', () => {
   const a = getAdapter('grok');
-  const argv = a.args('test prompt', {});
+  // Use background:true so headless detection is deterministic regardless of TTY.
+  const argv = a.args('test prompt', { background: true });
   assert.ok(argv.includes('-p'));
   assert.ok(argv.includes('test prompt'));
   assert.ok(argv.includes('--output-format'));
@@ -265,11 +266,18 @@ test('grok adapter args() builds headless json invocation with explicit default 
   // Always passes explicit -m (avoids retired-slug grok-4.3 billing redirect)
   assert.ok(argv.includes('-m'));
   assert.ok(argv.includes('grok-build'), 'default model must be grok-build');
-  assert.ok(argv.includes('--always-approve'), 'default sandbox is danger-full-access');
-  const ro = a.args('test', { sandbox: 'read-only' });
+  // Headless dispatch needs an explicit permission mode (and --always-approve for
+  // full-access) or grok stalls with stopReason:"Cancelled" (vendor-preset
+  // feedback 2026-06-15).
+  assert.ok(argv.includes('--permission-mode'), '--permission-mode required for headless');
+  assert.ok(argv.includes('bypassPermissions'));
+  assert.ok(argv.includes('--always-approve'), 'default sandbox is danger-full-access → auto-approve');
+  // read-only sandbox: still gets a permission mode, but NOT --always-approve.
+  const ro = a.args('test', { sandbox: 'read-only', background: true });
   assert.ok(!ro.includes('--always-approve'), 'read-only tasks must not auto-approve tool calls');
+  assert.ok(ro.includes('--permission-mode'), 'read-only headless still needs a permission mode (avoids the Cancelled stall)');
   // honors explicit --model override
-  const custom = a.args('test', { model: 'grok-4.3' });
+  const custom = a.args('test', { model: 'grok-4.3', background: true });
   assert.ok(custom.includes('grok-4.3') && !custom.includes('grok-build'));
 });
 

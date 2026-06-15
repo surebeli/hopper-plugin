@@ -49,7 +49,7 @@ export const VENDOR_OUTPUT_PREVIEW_LIMIT = 8000;
  *   overwritten: boolean
  * }>}
  */
-export async function writeOutput({ hopperDir, dispatchResult, force = false }) {
+export async function writeOutput({ hopperDir, dispatchResult, force = false, model = null }) {
   const { task, vendor, output, raw } = dispatchResult;
   if (!task || !task.id) throw new Error('writeOutput: dispatchResult.task.id is required');
 
@@ -120,7 +120,7 @@ export async function writeOutput({ hopperDir, dispatchResult, force = false }) 
     await writeFile(rawPath, fullText, 'utf-8');
   }
 
-  const content = renderOutputMarkdown({ task, vendor, output, raw, rawPath });
+  const content = renderOutputMarkdown({ task, vendor, output, raw, rawPath, model });
   await writeFile(path, content, 'utf-8');
 
   return {
@@ -153,7 +153,7 @@ export function validateTaskId(id) {
  * context, suggested protocol edits) land AFTER the schema, so Recipient
  * sessions see the familiar structure first.
  */
-export function renderOutputMarkdown({ task, vendor, output, raw, rawPath = null }) {
+export function renderOutputMarkdown({ task, vendor, output, raw, rawPath = null, model = null }) {
   const today = todayDate();
   const statusBadge = output.status === 'success' ? '[OK]' : '[FAIL]';
   const safeVendor = sanitizeInline(vendor);
@@ -223,6 +223,7 @@ _(Recipient fills in after verdict; e.g. "proceed to T-XX" or "REWORK before T-X
 - Task ID: \`${safeTaskId}\`
 - Task-type: \`${safeTaskType}\`
 - Resolved vendor: \`${safeVendor}\`
+- Resolved model: \`${model ? sanitizeInline(model) : '(vendor default)'}\`
 - Output status: \`${output.status}\`
 - Subprocess exit: ${raw.exitCode}
 - Duration: ${raw.durationMs}ms

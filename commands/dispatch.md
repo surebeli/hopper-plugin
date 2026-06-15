@@ -53,7 +53,7 @@ node "$CLAUDE_PLUGIN_ROOT/cli/bin/hopper-dispatch" "T-PLUGIN-05a" --write --mode
 
 ### Mode B: BACKGROUND dispatch (`--background` flag present)
 
-**Per spec §14**: the dispatcher returns immediately (<100ms) with a PID. The vendor subprocess runs detached, writes result to `.hopper/handoffs/<task-id>-output.md` (frontmatter + sidecar `.log`). Use this mode for long-running tasks (>1 min, kimi-thinking / codex xhigh / agy long reasoning).
+**Per spec §14**: the dispatcher returns immediately (<100ms) with a PID. The vendor subprocess runs detached, writes result to `.hopper/handoffs/<task-id>-output.md` (frontmatter + sidecar `.log`). Use this mode for long-running tasks (>1 min, e.g. kimi thinking-enabled models / codex xhigh / agy long reasoning).
 
 **You MUST use Claude Code's native background-Bash mechanism** to avoid freezing this session:
 

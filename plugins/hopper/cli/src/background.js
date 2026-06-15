@@ -447,6 +447,10 @@ export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, run
   writeFrontmatter(outputMdPath, {
     task_id: taskId,
     adapter: adapterName,
+    // Point 5 (vendor-preset feedback 2026-06-15): record the model hopper passed
+    // so a fallback from a canonical preset to the vendor's local default is
+    // visible. Persists through the terminal write (frontmatter is spread).
+    model: (adapterOpts && adapterOpts.model) || '(vendor default)',
     status: 'in-progress',
     pid: null,
     start_time: startTime,

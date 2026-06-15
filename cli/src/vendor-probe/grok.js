@@ -23,9 +23,11 @@ export async function probe() {
     // feedback corrected the coding-model slug from grok-build-0.1 → grok-build.
     models: binaryPath ? ['grok-build', 'grok-4.3'] : [],
     models_source: 'xAI Grok Build static catalog (source: docs.x.ai/developers/models + 2026-06-02 dogfood feedback); no CONFIRMED CLI models-introspection subcommand. Adapter passes grok-build by default.',
-    reasoning_levels: [],
+    // grok headless `--effort <LEVEL>` exists (CONFIRMED `grok --help`, 2026-06-15);
+    // adapter forwards opts.reasoning -> --effort opt-in. Levels not fully documented.
+    reasoning_levels: ['low', 'medium', 'high'],
     notes: binaryPath
-      ? ['grok: no CONFIRMED machine-readable models subcommand; default model grok-build passed explicitly by adapter. reasoning not flag-configurable. NAME COLLISION: same `grok` binary may resolve to the third-party grok-cli (GROK_API_KEY, --format json).']
+      ? ['grok: no CONFIRMED machine-readable models subcommand; default model grok-build passed explicitly by adapter. reasoning via `--effort` (opt-in when --reasoning set). NAME COLLISION: same `grok` binary may resolve to the third-party grok-cli (GROK_API_KEY, --format json).']
       : ['grok binary not found on PATH'],
     duration_ms: Date.now() - t0,
   };

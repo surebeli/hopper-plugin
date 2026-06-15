@@ -129,7 +129,7 @@ never route a task to the same CLI that is dispatching it.
 | \`opencode\` | \`-\` | opencode | \`opencode run "<input>" --model <provider/model>\` | Multi-provider |
 | \`copilot\` | \`-\` | copilot | \`copilot -p "<input>"\` | GitHub-tied; premium quota meters per call |
 | \`agy\` | \`-\` | agy | \`agy -p "<input>"\` | Antigravity (Gemini); OAuth-only |
-| \`grok\` | \`-\` | grok | \`grok -p "<input>" -m grok-build\` | xAI Grok Build |
+| \`grok\` | \`-\` | grok | \`grok -p "<input>" --permission-mode bypassPermissions --always-approve -m grok-build\` | xAI Grok Build (headless needs an explicit permission mode) |
 
 ---
 

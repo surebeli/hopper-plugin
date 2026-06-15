@@ -47,9 +47,9 @@ export const grokAdapter = {
       sourceNote: 'grok `-m, --model <MODEL>` (CONFIRMED docs.x.ai/build/cli/headless-scripting). Local dogfood feedback on 2026-06-02 confirmed `grok-build` as the working coding-model slug; `grok-build-0.1` returned `unknown model id`. CLI built-in default when -m omitted is still UNCONFIRMED, so this adapter ALWAYS passes -m (default grok-build). NAME COLLISION: the third-party grok-cli defaults to grok-code-fast-1 and uses different auth/output flags.',
     },
     reasoningArg: {
-      accepted: 'ignored',
-      knownGood: [],
-      sourceNote: 'No reasoning/effort CLI flag in grok headless reference (CONFIRMED absent docs.x.ai). grok-4.3 has API-layer reasoning effort (none/low/high) but whether the CLI forwards it is UNCONFIRMED. This adapter does NOT forward opts.reasoning. Do not invent --reasoning/--effort.',
+      accepted: 'enumerated',
+      knownGood: ['low', 'medium', 'high'],
+      sourceNote: 'grok headless `--effort <LEVEL>` exists (CONFIRMED via `grok --help`, vendor-preset feedback 2026-06-15). The adapter forwards opts.reasoning -> --effort ONLY when set (opt-in), so grok builds predating the flag are unaffected by default dispatches. Accepted level vocabulary is not fully documented; low|medium|high are known-good. Older docs.x.ai claimed no CLI effort flag — that is now stale.',
     },
     features: {
       sessionResume: { supported: true, mechanism: '`grok -s <id>` (named headless session) / `-r <id>` (resume) / `-c` (continue cwd). Adapter passes `-r <id>` only when opts.conversationId set. Background+session interaction UNCONFIRMED.' },
@@ -59,14 +59,28 @@ export const grokAdapter = {
     staleAfter: '2026-08-31',
   },
 
+  // HOPPER (vendor-preset feedback 2026-06-15): long-form flags the adapter
+  // relies on, checked by `hopper-dispatch --check --compat` against `grok --help`.
+  compatFlags: ['--single', '--output-format', '--model', '--permission-mode', '--cwd'],
+
   args(input, opts) {
     const sandbox = opts.sandbox ?? 'danger-full-access';
     // Headless single-prompt form (CONFIRMED): grok -p "<prompt>" --output-format json
-    // -p long form is --single <PROMPT>. --always-approve is CONFIRMED required
-    // for full-access headless dispatches: -p does NOT auto-approve tool calls,
-    // so the agent hangs on each tool use without it (analog of agy
-    // --dangerously-skip-permissions / copilot --allow-all-tools).
-    // --no-auto-update suppresses CI update noise.
+    // (-p is the short form of --single). --no-auto-update suppresses CI update noise.
+    //
+    // Headless = no interactive approval is possible: a background dispatch, an
+    // injected log file, or a non-TTY stdout (a host shell driving us). In that
+    // case grok needs an explicit permission mode (and, for full-access, also
+    // --always-approve) or it stalls and returns stopReason:"Cancelled" with
+    // Auth(AuthorizationRequired) + "worker quit" (vendor-preset feedback
+    // 2026-06-15 — --always-approve alone was insufficient). bypassPermissions is
+    // the headless-safe mode (CONFIRMED `grok --help`:
+    // default|acceptEdits|auto|dontAsk|bypassPermissions|plan). The --sandbox opt
+    // still gates --always-approve (full-access only). Escape hatch:
+    // HOPPER_GROK_PERMISSION_MODE overrides the mode (empty = omit it on grok
+    // builds that lack the flag).
+    const headless = Boolean(opts.background || opts.logFile || !process.stdout.isTTY);
+    const permMode = process.env.HOPPER_GROK_PERMISSION_MODE ?? 'bypassPermissions';
     return [
       '-p', input,
       '--output-format', 'json',
@@ -77,7 +91,11 @@ export const grokAdapter = {
       // $HOPPER_VENDOR_CWD). grok's sandbox is relative to --cwd, so a widened
       // root reaches external paths without disabling grok's permission model.
       ...(opts.cwd ? ['--cwd', opts.cwd] : []),
-      ...(sandbox === 'danger-full-access' ? ['--always-approve'] : []),
+      ...(headless && permMode ? ['--permission-mode', permMode] : []),
+      ...(headless && sandbox === 'danger-full-access' ? ['--always-approve'] : []),
+      // Reasoning effort (opt-in): forward only when the caller set --reasoning,
+      // so default dispatches stay safe on grok builds that predate --effort.
+      ...(opts.reasoning ? ['--effort', opts.reasoning] : []),
       ...(opts.conversationId ? ['-r', opts.conversationId] : []),
     ];
   },
@@ -121,19 +139,36 @@ export const grokAdapter = {
       };
     }
     // Auth-fail detection (exit codes UNDOCUMENTED → pattern-match like agy/kimi).
+    // Now also catches the headless permission-stall signature (vendor-preset
+    // feedback 2026-06-15): AuthorizationRequired / Transport channel closed /
+    // "worker quit with fatal" accompany a cancelled headless turn.
     const signal = `${raw.stdout || ''}\n${raw.stderr || ''}`;
-    if (/unauthorized|invalid api key|XAI_API_KEY|not logged in|\b401\b|\b403\b|authenticat/i.test(signal)) {
+    if (/unauthorized|invalid api key|XAI_API_KEY|not logged in|\b401\b|\b403\b|authenticat|authorizationrequired|transport channel closed|worker quit with fatal/i.test(signal)) {
       return {
         text: '',
         status: 'auth-fail',
-        error: 'grok is not authenticated. Set XAI_API_KEY="xai-..." OR run `grok login --device-auth`.',
+        error: 'grok is not authenticated or was blocked by its permission mode. Set XAI_API_KEY / run `grok login --device-auth`. hopper passes --permission-mode bypassPermissions + --always-approve for headless dispatch.',
       };
     }
-    if (raw.exitCode === 0 && raw.stdout) {
+    if (raw.exitCode === 0) {
       // --output-format json yields a single trailing JSON object. Field names
       // are UNDOCUMENTED → parse defensively: whole-stdout JSON, then last
       // non-empty line, then raw text fallback.
       const parsed = extractGrokText(raw.stdout);
+      const stop = (parsed.stopReason || '').toString().toLowerCase();
+      const badStop = /cancel|abort|refus|error|fatal/.test(stop);
+      // FAIL FAST instead of writing a silent empty result (the reported bug):
+      // grok can exit 0 yet return {"text":"","stopReason":"Cancelled"} when a
+      // headless turn is blocked. Treat a bad stopReason OR no usable text as a
+      // failure so the dispatcher records it as failed, not done-with-no-output.
+      if (badStop || !parsed.text.trim()) {
+        return {
+          text: parsed.text,
+          status: 'unknown-fail',
+          error: `grok produced no usable result${parsed.stopReason ? ` (stopReason="${parsed.stopReason}")` : ''}. ` +
+            'Common cause: a blocked/cancelled headless turn — confirm grok is authenticated and re-dispatch (hopper sets --permission-mode bypassPermissions for headless).',
+        };
+      }
       return parsed.usage
         ? { text: parsed.text, status: 'success', usage: parsed.usage }
         : { text: parsed.text, status: 'success' };
@@ -151,15 +186,16 @@ export const grokAdapter = {
  * Field names are UNCONFIRMED (docs never document the object shape), so try
  * common keys, fall back to last JSON line, then raw text.
  * @param {string} stdout
- * @returns {{ text: string, usage?: object }}
+ * @returns {{ text: string, usage?: object, stopReason?: string }}
  */
 function extractGrokText(stdout) {
-  const trimmed = stdout.trim();
+  const trimmed = (stdout || '').trim();
   const fromObj = (obj) => {
     if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
       const text = obj.text ?? obj.message ?? obj.content ?? obj.output ?? obj.result ?? obj.response;
-      if (typeof text === 'string') return { text, usage: obj.usage };
-      return { text: JSON.stringify(obj), usage: obj.usage };
+      const stopReason = obj.stopReason ?? obj.stop_reason ?? obj.finishReason ?? obj.finish_reason;
+      if (typeof text === 'string') return { text, usage: obj.usage, stopReason };
+      return { text: JSON.stringify(obj), usage: obj.usage, stopReason };
     }
     if (typeof obj === 'string') return { text: obj };
     return null;

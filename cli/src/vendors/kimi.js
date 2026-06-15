@@ -50,6 +50,12 @@ export const kimiAdapter = {
     staleAfter: '2026-09-11',
   },
 
+  // HOPPER (vendor-preset feedback 2026-06-15): long-form flags the adapter
+  // relies on, checked by `hopper-dispatch --check --compat` against `kimi --help`.
+  // The 0.x rewrite removed --print/--afk/--final-message-only, so a stale preset
+  // emitting them would ERROR (Commander allowUnknownOption(false)).
+  compatFlags: ['--prompt', '--output-format', '--model'],
+
   args(input, opts) {
     // Kimi Code 0.x headless form (CONFIRMED): kimi -p "<prompt>" [-m <alias>] [--session <id>]
     // REMOVED in the 0.x rewrite (would ERROR OUT — Commander allowUnknownOption(false)):
