@@ -12,9 +12,9 @@ Dispatch exactly one Hopper task unless the user explicitly provides multiple ta
 1. Locate the target project root: use the current directory when it contains `.hopper/`; otherwise walk upward. If no `.hopper/` exists, ask for the project root or `HOPPER_DIR`.
 2. Locate the CLI: prefer `hopper-dispatch` on `PATH`; otherwise search upward from this `SKILL.md` for `cli/bin/hopper-dispatch` and run it with `node`.
 3. Validate the task ID before shelling out: `^[A-Za-z][A-Za-z0-9._-]{0,99}$`. Reject `/`, `\`, `..`, shell metacharacters, quotes, whitespace, and newlines.
-4. Validate optional flags only from this set: `--background`, `--write`, `--force`, `--model <name>`, `--reasoning <minimal|low|medium|high|xhigh>`, `--sandbox <read-only|workspace-write|danger-full-access>`, `--resolve`, `--check`, `--capabilities`.
-5. For long-running tasks, prefer `--background`; for dry routing checks, use `--resolve <task-id>` or `--check <task-id>`.
-6. Surface the dispatcher output, including vendor, status, duration, output paths, stderr, and any failure context.
+4. Validate optional flags only from this set: `--background`, `--write`, `--force`, `--model <name>`, `--reasoning <minimal|low|medium|high|xhigh>`, `--sandbox <read-only|workspace-write|danger-full-access>`, `--resolve`, `--check`, `--capabilities`, `--stop <task-id>`, `--init-tasks`.
+5. For long-running tasks, prefer `--background`; for dry routing checks, use `--resolve <task-id>` or `--check <task-id>`. To stop a running background job, use `--stop <task-id>` (kills the process tree and marks the task `cancelled`). To bootstrap a new project, run `--init-tasks` (scaffolds `.hopper/` in the current directory; add `--force` to overwrite an existing one).
+6. Surface the dispatcher output, including vendor, status, duration, output paths, stderr, and any failure context. If `--resolve` reports that the resolved vendor is not a registered adapter, fix the `Vendor` column / AGENTS.md preference (or move a model name to `--model`) before dispatching.
 
 ## Safety
 

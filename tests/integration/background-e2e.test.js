@@ -28,6 +28,7 @@ import { strict as assert } from 'node:assert';
 import {
   spawnDetached, readFrontmatter, writeFrontmatter, isAlive,
 } from '../../cli/src/background.js';
+import { killProcessTree } from '../../cli/src/subprocess.js';
 import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
@@ -49,6 +50,25 @@ function makeFakeRunner(tmp, sleepMs = 50) {
   const runnerPath = join(tmp, 'fake-runner.js');
   writeFileSync(runnerPath, `setTimeout(() => process.exit(0), ${sleepMs});\n`, 'utf-8');
   return runnerPath;
+}
+
+// spawnDetached anchors the detached runner's CWD to `tmp` (the repo root that
+// owns .hopper/). On Windows a live process's CWD cannot be rmdir'd (EBUSY), so
+// a synchronous rmSync(tmp) right after spawn races the still-alive runner.
+// Wait for the runner to exit before cleanup.
+async function waitForPidExit(pid, capMs = 6000) {
+  const deadline = Date.now() + capMs;
+  while (pid && isAlive(pid) && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
+// Reliable teardown: tree-kill any still-alive runner (backstop for the rare
+// case it outlives the wait — e.g. a real vendor that actually runs), then rm
+// with retries to ride out the brief window before the OS releases the dir.
+function cleanup(tmp, pid) {
+  if (pid) { try { killProcessTree(pid, process.platform === 'win32'); } catch (_) {} }
+  try { rmSync(tmp, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); } catch (_) {}
 }
 
 test('spawnDetached refuses when output.md status=in-progress + alive PID (concurrent protection)', () => {
@@ -260,8 +280,9 @@ test('F3 atomic lock: concurrent spawnDetached on SAME task — second refuses',
   }
 });
 
-test('F3 atomic lock: stale lockfile (>60s) is reclaimed', () => {
+test('F3 atomic lock: stale lockfile (>60s) is reclaimed', async () => {
   const { tmp, hopperDir } = setup();
+  let result;
   try {
     const lockPath = join(hopperDir, 'handoffs', 'T-stale-lock.dispatching');
     // Create lockfile + backdate mtime to 2 minutes ago
@@ -270,7 +291,6 @@ test('F3 atomic lock: stale lockfile (>60s) is reclaimed', () => {
     utimesSync(lockPath, oldT, oldT);
 
     // spawnDetached should reclaim the stale lock and proceed
-    let result;
     try {
       result = spawnDetached({
         hopperDir,
@@ -283,8 +303,10 @@ test('F3 atomic lock: stale lockfile (>60s) is reclaimed', () => {
       assert.fail(`stale lock should be reclaimed; got: ${err.message}`);
     }
     assert.ok(result.pid > 0);
+    // Let the detached runner exit so it releases tmp as its CWD before cleanup.
+    await waitForPidExit(result.pid);
   } finally {
-    rmSync(tmp, { recursive: true, force: true });
+    cleanup(tmp, result?.pid);
   }
 });
 

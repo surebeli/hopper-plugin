@@ -18,6 +18,7 @@ import { appendProgressEvent } from '../src/progress.js';
 import { getAdapter } from '../src/vendors/index.js';
 import { acquireVendorLock, killProcessTree } from '../src/subprocess.js';
 import { resolveCommandOnPath, resolveCommandWithKnownPaths } from '../src/path-resolve.js';
+import { renderVendorOutputSection } from '../src/output.js';
 
 function parseRunnerArgs(argv) {
   // Format: --task-id X --hopper-dir Y --adapter Z --output-md A --log B -- <adapter argv...>
@@ -229,7 +230,9 @@ async function main() {
     // --cwd by spawnDetached), not the runner's own process.cwd(). Falls back to
     // process.cwd() only if --cwd was not supplied (older callers).
     cwd: vendorCwd || process.cwd(),
-    env: process.env,
+    // HOPPER-3: merge optional adapter env (e.g. codex CODEX_HOME auto-isolation)
+    // over the inherited environment.
+    env: { ...process.env, ...(typeof adapter.env === 'function' ? adapter.env(adapterOpts) : {}) },
     detached: !isWindows,
   });
 
@@ -282,6 +285,7 @@ async function main() {
 
     let adapterStatus;
     let adapterError;
+    let adapterText = '';                   // HOPPER-5: the parsed vendor answer
     try {
       const parsed = adapter.parseResult({
         exitCode: code === null ? -1 : code,
@@ -293,6 +297,7 @@ async function main() {
       });
       adapterStatus = parsed.status;       // success | auth-fail | timeout | permission-fail | unknown-fail
       adapterError = parsed.error || null;
+      adapterText = parsed.text || '';     // HOPPER-5: mirror into output.md body below
     } catch (err) {
       adapterStatus = 'unknown-fail';
       adapterError = `parseResult threw: ${err.message}`;
@@ -336,6 +341,9 @@ async function main() {
         duration_ms,
         adapter_status: adapterStatus,     // preserve the granular classification
         _body: (fm._body || '') +
+          // HOPPER-5: embed the parsed vendor answer so output.md is self-
+          // contained (was log-only). Full raw stream stays in the .log.
+          renderVendorOutputSection(adapterText, { rawLogName: logPath.split(/[\\/]/).pop() }) +
           `\n## Status (background completion)\n` +
           `- queue_status: ${status}\n` +
           `- adapter_status: ${adapterStatus}\n` +

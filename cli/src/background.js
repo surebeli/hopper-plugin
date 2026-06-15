@@ -20,6 +20,7 @@ import {
 import { resolve, dirname, basename, join, sep } from 'node:path';
 import { validateTaskId } from './validation.js';
 import { appendProgressEvent, progressLogPath } from './progress.js';
+import { killProcessTree, verifyPidImage } from './subprocess.js';
 
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/;
 
@@ -589,6 +590,117 @@ export function reapStaleJobs(hopperDir) {
     reaped.push(job.task_id);
   }
   return reaped;
+}
+
+/**
+ * HOPPER-6: actively stop a running background job. Reads the job's frontmatter,
+ * kills its process tree, and re-classifies it as `cancelled` with a terminal
+ * progress event. `cancelled` was already in the watcher's terminal-status set
+ * (cli/bin/hopper-dispatch TERMINAL_TASK_STATUSES) but nothing ever produced it
+ * — this closes that loop, so --watch / --watch-events resolve on a stop.
+ *
+ * Windows PID-reuse guard: fm.pid is the hopper-runner PID (a node process). On
+ * Windows a recycled PID could now belong to an unrelated program, so before
+ * killing we confirm the PID is still a node process (verifyPidImage). If it is
+ * clearly NOT (mismatch), we skip the kill — but still mark the task cancelled,
+ * since the original job is plainly gone. 'unknown' falls through to the kill
+ * (best-effort, the prior behavior).
+ *
+ * Idempotent: a job that is already terminal returns { ok:false, already:true }.
+ *
+ * @param {string} hopperDir
+ * @param {string} taskId
+ * @returns {{ ok: boolean, status?: string, pid?: number|null, killed?: boolean, killSkipped?: boolean, already?: boolean, reason?: string }}
+ */
+export function stopBackgroundJob(hopperDir, taskId) {
+  validateTaskId(taskId);
+  const outputMdPath = join(hopperDir, 'handoffs', `${taskId}-output.md`);
+  if (!existsSync(outputMdPath)) {
+    return { ok: false, reason: `no output file for ${taskId} at ${outputMdPath} (was it dispatched?)` };
+  }
+
+  let fm;
+  try {
+    fm = readFrontmatter(outputMdPath);
+  } catch (err) {
+    return { ok: false, reason: `could not read frontmatter: ${err.message}` };
+  }
+
+  if (fm.status !== 'in-progress') {
+    return { ok: false, already: true, status: fm.status, reason: `task ${taskId} is not in-progress (status=${fm.status})` };
+  }
+
+  const isWindows = process.platform === 'win32';
+  const pid = fm.pid;
+  let killed = false;
+  let killSkipped = false;
+  if (pid && isAlive(pid)) {
+    // PID-reuse guard (mgmt path → subprocess check is allowed; not dispatch).
+    // 'mismatch' = the PID is now a non-node process (a recycled PID owned by
+    // something unrelated) → never kill it. 'match'/'unknown' fall through to
+    // the kill: 'unknown' (tasklist/ps unavailable) is kept killable on purpose
+    // so --stop still works on locked-down systems; a live unrelated process
+    // almost always resolves to 'mismatch' rather than 'unknown', so the
+    // residual wrong-kill window is small. Set HOPPER off-path concerns aside —
+    // this only runs for --stop, never on the single-spawn dispatch path.
+    const image = verifyPidImage(pid, { expectImageIncludes: 'node', isWindows });
+    if (image === 'mismatch') {
+      killSkipped = true;  // recycled PID owned by an unrelated process — leave it
+    } else {
+      try { killProcessTree(pid, isWindows); killed = true; } catch (_) { /* best-effort */ }
+    }
+  }
+
+  const endTime = new Date().toISOString();
+  const startMs = Date.parse(fm.start_time || endTime);
+  const duration_ms = Number.isFinite(startMs) ? Date.now() - startMs : null;
+
+  let event = null;
+  try {
+    event = appendProgressEvent({
+      hopperDir,
+      taskId,
+      event: {
+        vendor: fm.adapter || 'unknown',
+        phase: 'cancelled',
+        kind: 'terminal',
+        message: 'Task cancelled by user (--stop).',
+        source: 'stop',
+        terminal: true,
+        status: 'cancelled',
+        duration_ms: duration_ms ?? undefined,
+      },
+    });
+  } catch (_) {
+    // progress writing is best-effort; frontmatter below is authoritative
+  }
+
+  const patch = {
+    ...fm,
+    status: 'cancelled',
+    phase: 'cancelled',
+    end_time: endTime,
+    duration_ms,
+    adapter_status: 'cancelled',
+  };
+  if (event) {
+    patch.last_progress_at = event.ts;
+    patch.last_progress = event.message;
+    patch.progress_seq = event.seq;
+    patch.terminal_event_emitted = true;
+  }
+  writeFrontmatter(outputMdPath, {
+    ...patch,
+    _body: (fm._body || '') +
+      `\n## Stopped (user --stop)\n` +
+      `- pid: ${pid ?? 'n/a'}\n` +
+      `- killed: ${killed}\n` +
+      (killSkipped ? `- kill_skipped: PID reused by an unrelated process (left alone)\n` : '') +
+      `- end_time: ${endTime}\n` +
+      (duration_ms != null ? `- duration_ms: ${duration_ms}\n` : ''),
+  });
+
+  return { ok: true, status: 'cancelled', pid: pid ?? null, killed, killSkipped };
 }
 
 // ORPHAN_CEILING_HOURS already exported via the const declaration above.

@@ -24,6 +24,13 @@ import { validateTaskId as canonicalValidateTaskId } from './validation.js';
 
 const PREVIEW_CHAR_LIMIT = 4096;
 
+// HOPPER-5: budget for the parsed-vendor-text preview embedded into the
+// BACKGROUND output.md body (see renderVendorOutputSection). Larger than the
+// sync preview because background dispatches are usually reviews/verdicts the
+// consumer reads straight from output.md; the full raw stream still lives in
+// the sibling <task-id>-output.log.
+export const VENDOR_OUTPUT_PREVIEW_LIMIT = 8000;
+
 /**
  * Write the .hopper/handoffs/<task-id>-output.md file based on a dispatch result.
  * Also writes a sidecar <task-id>-output-raw.txt when the vendor output exceeds
@@ -244,6 +251,38 @@ ${fence(suggestQueueEdit(task, output))}
 
 ${fence(suggestCostEdit(task, vendor, output, raw))}
 `;
+}
+
+/**
+ * HOPPER-5: render the "Vendor output (parsed)" section for the BACKGROUND
+ * output.md body. Background mode (hopper-runner) previously left the vendor's
+ * actual answer ONLY in the raw .log — output.md held boilerplate + a status
+ * footer — so grok/codex left effectively empty output.md files (the
+ * 2026-06-04 retrospective's "no .md produced" finding). This embeds a readable
+ * preview of the PARSED text (the answer/verdict the adapter extracted from
+ * stdout) directly in output.md, while the full raw stream stays in the .log.
+ *
+ * Distinct heading from the sync writer's "## Vendor output text" so the two
+ * code paths stay greppable/independent. Placed BEFORE the runner's
+ * "## Status (background completion)" footer so `--result` (which truncates the
+ * body at that footer) still surfaces it.
+ *
+ * @param {string} text        adapter.parseResult().text (the parsed answer)
+ * @param {object} [opts]
+ * @param {string} [opts.rawLogName]  basename of the raw .log for the pointer note
+ * @returns {string} a leading-newline markdown block
+ */
+export function renderVendorOutputSection(text, { rawLogName } = {}) {
+  const logRef = rawLogName ? `\`${sanitizeInline(rawLogName)}\`` : 'the .log file';
+  const full = typeof text === 'string' ? text : '';
+  if (!full.trim()) {
+    return `\n## Vendor output (parsed)\n\n_(vendor produced no parsed text; see ${logRef} for the raw output stream.)_\n`;
+  }
+  const preview = truncate(full, VENDOR_OUTPUT_PREVIEW_LIMIT);
+  const note = full.length > VENDOR_OUTPUT_PREVIEW_LIMIT
+    ? ` _(preview ${VENDOR_OUTPUT_PREVIEW_LIMIT}/${full.length} chars; full raw stream in ${logRef})_`
+    : '';
+  return `\n## Vendor output (parsed)${note}\n\n${fence(preview)}\n`;
 }
 
 /**

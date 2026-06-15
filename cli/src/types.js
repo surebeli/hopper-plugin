@@ -92,6 +92,7 @@
  * @property {function(AdapterOpts): number} timeoutMs        Hard timeout in milliseconds (Phase 6c: opts.taskType may elevate via applyTaskTypeFloor)
  * @property {function(SubprocessResult): TaskOutput} parseResult  Parse subprocess output to structured form
  * @property {string} [stdinMode]                             'none' (args carry input) | 'pipe' (input piped to stdin)
+ * @property {function(AdapterOpts): Record<string,string>} [env]  Optional extra env vars merged over process.env for the vendor spawn (e.g. codex CODEX_HOME auto-isolation). Threaded by dispatch.js + hopper-runner.
  * @property {function(string, string): {logPath: string|null}} [prepareLog]  Optional per-dispatch log file setup
  * @property {string[]} [knownInstallPaths]                   Phase 6c F2: deterministic vendor-installer locations (NOT vendor-retry orchestration). Walked by resolveCommandWithKnownPaths when PATH lookup fails. Each entry must be an absolute path to the binary (e.g. ~/AppData/Local/agy/bin/agy.exe; expand via os.homedir() before declaring).
  */

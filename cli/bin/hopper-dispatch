@@ -10,6 +10,7 @@ import { listTaskTypes } from '../src/tasks.js';
 import { listAdapters, getAdapter, installCheckForAdapter, capabilitiesForAdapter, probeVendor } from '../src/vendors/index.js';
 import { readCache, readCacheWithDiagnostics, getVendorCache, setVendorCache, isStale, staleness } from '../src/cache.js';
 import { writeOutput } from '../src/output.js';
+import { scaffoldHopper } from '../src/scaffold.js';
 import {
   validateTaskId,
   validateDispatchFlags,
@@ -24,6 +25,7 @@ import {
   spawnDetached,
   listInProgressJobs,
   reapStaleJobs,
+  stopBackgroundJob,
   readFrontmatter,
   isAlive,
   hoursSince,
@@ -58,7 +60,9 @@ function printUsage() {
   console.log('  hopper-dispatch --result <task-id>              Print completed task result (verdict body + log tail) to stdout');
   console.log('  hopper-dispatch --jobs                          List all in-progress background jobs');
   console.log('  hopper-dispatch --reap                          Re-classify stale (>24h or dead-PID) jobs as orphaned');
+  console.log('  hopper-dispatch --stop <task-id>                Stop a running background job (kill tree; status=cancelled)');
   console.log('  hopper-dispatch --resolve <id>                  Resolve dispatch without spawning');
+  console.log('  hopper-dispatch --init-tasks [--force]          Scaffold a .hopper/ workspace in the current directory');
   console.log('  hopper-dispatch --status                        Show queue summary');
   console.log('  hopper-dispatch --smoke                         Standalone CLI smoke test');
   console.log('  hopper-dispatch --task-types                    List available task-type frames');
@@ -157,6 +161,14 @@ async function main() {
     return;
   }
 
+  // HOPPER-4: project bootstrap — scaffolds .hopper/ in the CURRENT directory.
+  // Project-agnostic (must run BEFORE the findHopperDir gate, since the whole
+  // point is that no .hopper/ exists yet).
+  if (args.includes('--init-tasks')) {
+    runInitTasks(process.cwd(), { force: args.includes('--force') });
+    return;
+  }
+
   const hopperDir = findHopperDir();
   if (!hopperDir) {
     if (args.includes('--watch-events') && !process.env.HOPPER_DIR) {
@@ -186,6 +198,16 @@ async function main() {
   }
   if (args.includes('--reap')) {
     runReap(hopperDir);
+    return;
+  }
+  const stopIdx = args.indexOf('--stop');
+  if (stopIdx !== -1) {
+    const taskId = args[stopIdx + 1];
+    if (!taskId || taskId.startsWith('-')) {
+      console.error('Error: --stop requires a task-id.');
+      process.exit(2);
+    }
+    runStop(hopperDir, taskId);
     return;
   }
   if (args.includes('--watch-events')) {
@@ -302,8 +324,8 @@ async function main() {
  */
 function parseDispatchArgs(args) {
   const META_FLAGS = new Set(['--help', '-h', '--version', '-v', '--smoke', '--status',
-    '--task-types', '--vendors', '--resolve', '--watch', '--progress', '--watch-events', '--jobs', '--reap',
-    '--check', '--capabilities', '--probe', '--models']);
+    '--task-types', '--vendors', '--resolve', '--watch', '--progress', '--watch-events', '--jobs', '--reap', '--stop',
+    '--check', '--capabilities', '--probe', '--models', '--init-tasks']);
   const VALUE_FLAGS = new Set(ALLOWED_DISPATCH_VALUE_FLAGS);
   const BARE_FLAGS = new Set(ALLOWED_DISPATCH_FLAGS);
 
@@ -362,9 +384,46 @@ async function runResolve(hopperDir, taskId) {
       console.log(result.composedPrompt);
       console.log('=== END PROMPT ===');
     }
+
+    // HOPPER-1: --resolve used to print the resolved vendor verbatim even when
+    // it is NOT a registered adapter — e.g. a model id like `gpt-5.5` mistakenly
+    // placed in the queue.md Vendor column or the AGENTS.md preference table.
+    // The failure then surfaced much later at dispatch as the opaque
+    // "No vendor adapter registered for 'gpt-5.5'". Catch it at resolve time and
+    // distinguish a model-in-the-Vendor-column mistake from a typo'd adapter.
+    const known = listAdapters();
+    if (!known.includes(result.vendor)) {
+      console.error('');
+      reportUnregisteredVendor(result.vendor, result.task, known);
+      process.exit(1);
+    }
   } catch (err) {
     console.error(`Error: ${err.message}`);
     process.exit(1);
+  }
+}
+
+/**
+ * HOPPER-1: emit a targeted diagnostic when a resolved vendor is not a
+ * registered adapter. Adapter ids are short lowercase words (codex, kimi,
+ * opencode, ...); model ids carry version digits (gpt-5.5, claude-opus-4-7) or
+ * a provider namespace (deepseek/v4-flash, org/model:tag). That distinction
+ * tells a "you put a model where an adapter goes" mistake apart from a typo.
+ */
+function reportUnregisteredVendor(vendor, task, known) {
+  console.error(`Error: resolved vendor '${vendor}' is not a registered adapter.`);
+  console.error(`  Registered adapters: ${known.join(', ')}`);
+  const looksLikeModel = /[/:]/.test(vendor) || /\d/.test(vendor);
+  if (looksLikeModel) {
+    console.error(`  '${vendor}' looks like a MODEL name, not an adapter.`);
+    console.error(`  The Vendor column (queue.md) and task-vendor-preference table (AGENTS.md) name`);
+    console.error(`  an ADAPTER — the CLI to invoke — while the model is selected separately:`);
+    console.error(`    1. put an adapter in the Vendor column for '${task.id}' (e.g. 'codex' or 'opencode'), and`);
+    console.error(`    2. pass the model via the flag:  hopper-dispatch ${task.id} --model ${vendor}`);
+  } else {
+    console.error(`  '${vendor}' is not a known adapter — likely a typo.`);
+    console.error(`  Fix the Vendor column for '${task.id}' in queue.md, or the task-vendor-preference`);
+    console.error(`  table in AGENTS.md, to one of: ${known.join(', ')}.`);
   }
 }
 
@@ -376,7 +435,19 @@ async function runResolve(hopperDir, taskId) {
 function warnIfModelUnknown(vendor, model) {
   if (!model) return;
   const cached = getVendorCache(vendor);
-  if (!cached || !Array.isArray(cached.models) || cached.models.length === 0) return;
+  // HOPPER-2: a never-probed machine (no cache file, or a cache entry whose
+  // model list is empty) used to get ZERO feedback for a typo'd --model. Give a
+  // clear, actionable hint instead. We deliberately do NOT auto-probe here:
+  // probing spawns a vendor subprocess and the dispatch path must stay
+  // single-spawn and must never write the cache (spec §3 #4 + §14.6). The user
+  // opts in to populating the cache via --probe.
+  if (!cached || !Array.isArray(cached.models) || cached.models.length === 0) {
+    console.error(`  note: no probed model cache for ${vendor}; cannot validate --model '${model}'.`);
+    console.error(`  proceeding anyway. To check model names ahead of time:`);
+    console.error(`  (a) RECOMMENDED — omit --model entirely; ${vendor} has an implicit default model.`);
+    console.error(`  (b) Populate the cache once: \`hopper-dispatch --probe ${vendor}\`, then re-dispatch.`);
+    return;
+  }
   if (!cached.models.includes(model)) {
     console.error(`  warn: model '${model}' not in cached list for ${vendor}`);
     console.error(`  cached models (${staleness(cached.probed_at)}): ${cached.models.slice(0, 8).join(', ')}${cached.models.length > 8 ? '...' : ''}`);
@@ -620,6 +691,61 @@ function runReap(hopperDir) {
   }
   console.log(`Reaped ${reaped.length} job(s) to status=orphaned:`);
   for (const id of reaped) console.log(`  - ${id}`);
+}
+
+// HOPPER-4: scaffold a fresh .hopper/ workspace in targetDir.
+function runInitTasks(targetDir, { force = false } = {}) {
+  let result;
+  try {
+    result = scaffoldHopper(targetDir, { force });
+  } catch (err) {
+    if (err.code === 'EHOPPEREXISTS') {
+      console.error(`Error: ${err.message}`);
+      console.error('Re-run with --init-tasks --force to overwrite, or remove the existing files first.');
+      process.exit(3);
+    }
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
+  console.log(`hopper-dispatch v${VERSION} — scaffolded .hopper/ workspace`);
+  console.log(`  Location: ${result.hopperDir}${result.overwritten ? ' (overwritten)' : ''}`);
+  console.log(`  Files written: ${result.written.length}`);
+  console.log('');
+  console.log('Next steps:');
+  console.log('  1. Edit .hopper/AGENTS.md to match the vendor CLIs you have installed.');
+  console.log('  2. Add tasks to .hopper/queue.md and their specs to .hopper/handoffs/leader-tasklist.md.');
+  console.log('  3. Run `hopper-dispatch --status` to confirm the queue parses.');
+}
+
+// HOPPER-6: actively stop a running background job (kill tree + mark cancelled).
+function runStop(hopperDir, taskId) {
+  try { validateTaskId(taskId); }
+  catch (err) { console.error(`Error: ${err.message}`); process.exit(2); }
+
+  let result;
+  try {
+    result = stopBackgroundJob(hopperDir, taskId);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
+
+  if (!result.ok) {
+    if (result.already) {
+      console.log(`Task ${taskId} is already terminal (status=${result.status}); nothing to stop.`);
+      process.exit(0);
+    }
+    console.error(`Error: ${result.reason}`);
+    process.exit(1);
+  }
+
+  console.log(`=== STOPPED ${taskId} ===`);
+  console.log(`Status:  cancelled`);
+  console.log(`PID:     ${result.pid ?? 'n/a'}`);
+  const killNote = result.killed
+    ? 'yes'
+    : (result.killSkipped ? 'no (PID reused by another process — left alone)' : 'no (process already exited)');
+  console.log(`Killed:  ${killNote}`);
 }
 
 function pathFromFrontmatter(handoffDir, value, fallbackName) {

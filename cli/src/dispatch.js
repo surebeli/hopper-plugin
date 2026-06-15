@@ -216,6 +216,8 @@ export async function executeWithAdapter({ resolved, adapter, adapterOpts = {}, 
     : args;
 
   const stdinInput = adapter.stdinMode === 'pipe' ? composedPrompt : null;
+  // HOPPER-3: optional adapter env (e.g. codex CODEX_HOME auto-isolation).
+  const adapterEnv = typeof adapter.env === 'function' ? adapter.env(effectiveOpts) : undefined;
   const raw = await runSubprocessOnce({
     command: spawnCommand,
     args: spawnArgs,
@@ -224,6 +226,7 @@ export async function executeWithAdapter({ resolved, adapter, adapterOpts = {}, 
     logFilePath: logPath,
     vendorName: adapter.name,
     cwd: cwd || undefined,
+    env: adapterEnv,
   });
 
   // Parse result (adapter-specific failure classification)

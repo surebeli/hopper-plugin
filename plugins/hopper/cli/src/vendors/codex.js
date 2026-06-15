@@ -5,10 +5,140 @@
 // Per spec §3 #4: thin wrapper, ZERO retry/fallback/circuit-breaker.
 // Per T-PLUGIN-00 Prong 2 resolved: codex exec is the noninteractive form.
 
-import { existsSync } from 'node:fs';
+import {
+  existsSync, mkdirSync, copyFileSync, symlinkSync, lstatSync, readlinkSync, statSync, unlinkSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { applyTaskTypeFloor } from '../subprocess.js';
+
+/**
+ * HOPPER-3: build the `-c key=value` overrides that isolate a dispatched codex
+ * from the dispatching machine's global config. Without this, `codex exec`
+ * loads ~/.codex/config.toml + AGENTS.md (global and project) + marketplace
+ * skills + the notify hook from the HOST, which contaminates the vendor run and
+ * breaks deterministic dispatch (spec §3 #4, Host != Vendor). On a hopper dev
+ * box this is acute: codex would load hopper's OWN marketplace skills while
+ * being dispatched BY hopper — a feedback loop.
+ *
+ * `-c key=value` is the highest-precedence config layer and overrides every
+ * config file (verified: developers.openai.com codex config-reference; the
+ * precedence table at codex.danielvaughan.com). We override the two keys that
+ * `-c` reliably controls:
+ *   - project_doc_max_bytes=0 → stop reading AGENTS.md / project + global docs
+ *   - notify=[]               → disable the notify hook (a program-argv array)
+ *
+ * What `-c` CANNOT do: disable globally-installed marketplace skills for a
+ * single invocation (openai/codex#20210 — project-scoped skill filtering is
+ * unimplemented upstream). Skills are isolated instead by pointing codex at an
+ * auto-built, login-preserving CODEX_HOME — see resolveIsolatedCodexHome().
+ *
+ * Escape hatches (no code change needed):
+ *   - HOPPER_CODEX_ISOLATE=0          → disable ALL isolation (these overrides
+ *                                        AND the CODEX_HOME swap), e.g. if a
+ *                                        future codex changes a key's type and
+ *                                        the override would error.
+ *   - HOPPER_CODEX_EXTRA_CONFIG="a=b,c=d" → append extra `-c` overrides.
+ *
+ * @returns {string[]} flat argv fragments, e.g. ['-c', 'project_doc_max_bytes=0', ...]
+ */
+export function codexIsolationConfig() {
+  if (process.env.HOPPER_CODEX_ISOLATE === '0') return [];
+  const pairs = ['project_doc_max_bytes=0', 'notify=[]'];
+  const extra = process.env.HOPPER_CODEX_EXTRA_CONFIG;
+  if (extra) {
+    for (const kv of extra.split(',')) {
+      const trimmed = kv.trim();
+      if (trimmed) pairs.push(trimmed);
+    }
+  }
+  return pairs.flatMap((p) => ['-c', p]);
+}
+
+/**
+ * HOPPER-3 (auto-isolation): build a cached, login-preserving CODEX_HOME that
+ * has the user's auth but NOT their globally-installed marketplace skills, so a
+ * dispatched codex runs deterministically with ZERO user setup.
+ *
+ * codex resolves its home as `$CODEX_HOME || ~/.codex` — a deterministic 1–2
+ * candidate lookup (we mirror codex's own rule, not a guess). We discover that
+ * real home, then materialize an isolated home (default ~/.hopper/codex-isolated,
+ * override via HOPPER_CODEX_HOME) containing:
+ *   - auth.json   → symlinked to the real one so token refresh stays live;
+ *                   copied as a fallback where symlinks need privilege (Windows).
+ *   - config.toml → copied if present (model/provider/MCP config preserved; the
+ *                   notify hook is still neutralized by the -c override).
+ *   - NO skills/ directory → the host's global marketplace skills do not load.
+ *
+ * Returns the isolated home path, or null meaning "leave CODEX_HOME as-is"
+ * (isolation disabled, no discoverable auth to preserve, or a build failure) —
+ * codex then runs against its default home with only the -c overrides applied.
+ * Never spawns a subprocess (single-spawn invariant intact).
+ *
+ * @returns {string|null}
+ */
+export function resolveIsolatedCodexHome() {
+  if (process.env.HOPPER_CODEX_ISOLATE === '0') return null;
+
+  const realHome = process.env.CODEX_HOME || join(homedir(), '.codex');
+  const realAuth = join(realHome, 'auth.json');
+  const haveAuthFile = existsSync(realAuth);
+  const haveAuthEnv = Boolean(process.env.CODEX_API_KEY || process.env.OPENAI_API_KEY);
+  // Building an isolated home with no auth would strip the user's login. Only
+  // isolate when auth can be preserved (a discoverable auth.json, or an env key
+  // codex reads directly). Otherwise fall back to the default home + -c.
+  if (!haveAuthFile && !haveAuthEnv) return null;
+
+  const isoHome = process.env.HOPPER_CODEX_HOME || join(homedir(), '.hopper', 'codex-isolated');
+  // Never let the isolated home BE — or live INSIDE — the real home: that would
+  // defeat isolation and risk hopper writing/symlinking into the real ~/.codex
+  // tree (e.g. a stray HOPPER_CODEX_HOME=~/.codex/sub). Default location is
+  // safely outside the real home.
+  const isoResolved = resolve(isoHome);
+  const realResolved = resolve(realHome);
+  if (isoResolved === realResolved || isoResolved.startsWith(realResolved + sep)) return null;
+
+  try {
+    mkdirSync(isoHome, { recursive: true });
+    if (haveAuthFile) linkOrCopy(realAuth, join(isoHome, 'auth.json'));
+    const realCfg = join(realHome, 'config.toml');
+    if (existsSync(realCfg)) refreshCopy(realCfg, join(isoHome, 'config.toml'));
+    // Intentionally never create isoHome/skills — that omission IS the isolation.
+    return isoHome;
+  } catch (_) {
+    return null;  // any build error → safe fallback to default home + -c overrides
+  }
+}
+
+/** Symlink src→dest (preferred — keeps token refresh live); copy as fallback. */
+function linkOrCopy(src, dest) {
+  try {
+    if (lstatExists(dest)) {
+      try {
+        const st = lstatSync(dest);
+        if (st.isSymbolicLink() && resolve(readlinkSync(dest)) === resolve(src)) return;
+      } catch (_) {}
+      try { unlinkSync(dest); } catch (_) {}
+    }
+    try { symlinkSync(src, dest); return; } catch (_) { /* privilege/unsupported → copy */ }
+    copyFileSync(src, dest);
+  } catch (_) { /* leave whatever exists; resolveIsolatedCodexHome() will catch */ }
+}
+
+/** lstat-based existence check that also sees broken symlinks. */
+function lstatExists(p) {
+  try { lstatSync(p); return true; } catch (_) { return false; }
+}
+
+/** Copy src→dest only when src is newer than dest (or dest is absent). */
+function refreshCopy(src, dest) {
+  try {
+    if (existsSync(dest)) {
+      try { if (statSync(dest).mtimeMs >= statSync(src).mtimeMs) return; } catch (_) {}
+    }
+    copyFileSync(src, dest);
+  } catch (_) { /* best-effort */ }
+}
 
 /** @type {import('../types.js').VendorAdapter} */
 export const codexAdapter = {
@@ -58,8 +188,21 @@ export const codexAdapter = {
       ...(opts.cwd ? ['--cd', opts.cwd] : []),
       '-s', sandbox,
       '-c', `model_reasoning_effort="${opts.reasoning ?? 'medium'}"`,
+      // HOPPER-3: isolate the dispatched codex from the HOST's global config so
+      // dispatch stays deterministic (Host != Vendor, spec §3 #4).
+      ...codexIsolationConfig(),
       ...(opts.webSearch ? ['--enable', 'web_search_cached'] : []),
     ];
+  },
+
+  // HOPPER-3 (auto-isolation): extra env merged into the codex spawn. Points
+  // codex at an auto-built, login-preserving CODEX_HOME with the host's global
+  // marketplace skills excluded — zero user setup. Returns {} (no override) when
+  // isolation is off or no auth is discoverable, so codex falls back to its
+  // default home. Threaded into the spawn by dispatch.js + hopper-runner.
+  env() {
+    const iso = resolveIsolatedCodexHome();
+    return iso ? { CODEX_HOME: iso } : {};
   },
 
   envPreflight() {

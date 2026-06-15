@@ -225,6 +225,49 @@ export function killProcessTree(pid, isWindows) {
 }
 
 /**
+ * HOPPER-6: best-effort check that a PID currently maps to an expected process
+ * image. Background jobs record the hopper-runner PID (a node process); on
+ * Windows especially, PIDs are recycled aggressively, so before `--stop` kills
+ * a tree we confirm the PID is still a node process and not some unrelated
+ * program that inherited the number. Returns 'match' | 'mismatch' | 'unknown'.
+ *
+ * Subprocess-based (tasklist/ps), so callers MUST NOT use it on the single-spawn
+ * dispatch path (spec §3 #4) — only in management commands like --stop, which
+ * already run outside the dispatch invariant. On any ambiguity it returns
+ * 'unknown' and leaves the kill/no-kill decision to the caller.
+ *
+ * @param {number} pid
+ * @param {object} [opts]
+ * @param {string} [opts.expectImageIncludes]  case-insensitive substring (default 'node')
+ * @param {boolean} [opts.isWindows]
+ * @returns {'match'|'mismatch'|'unknown'}
+ */
+export function verifyPidImage(pid, { expectImageIncludes = 'node', isWindows = platform() === 'win32' } = {}) {
+  if (!pid || pid <= 0) return 'unknown';
+  const needle = String(expectImageIncludes).toLowerCase();
+  try {
+    if (isWindows) {
+      const out = execSync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, {
+        encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      if (!out || /no tasks/i.test(out)) return 'unknown';
+      // CSV row: "ImageName","PID","SessionName","Session#","MemUsage"
+      const image = (out.split(',')[0] || '').replace(/^"|"$/g, '').trim().toLowerCase();
+      if (!image) return 'unknown';
+      return image.includes(needle) ? 'match' : 'mismatch';
+    }
+    const out = execSync(`ps -p ${pid} -o comm=`, {
+      encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim().toLowerCase();
+    if (!out) return 'unknown';
+    return out.includes(needle) ? 'match' : 'mismatch';
+  } catch (_) {
+    // ps/tasklist failed, or PID not found → cannot determine
+    return 'unknown';
+  }
+}
+
+/**
  * Generate a unique log file path for a dispatch.
  * Per codex v2.0.3 F2: unique per-dispatch to avoid stale-log false positives.
  *
