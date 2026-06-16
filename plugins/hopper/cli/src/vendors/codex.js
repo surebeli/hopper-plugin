@@ -7,6 +7,7 @@
 
 import {
   existsSync, mkdirSync, copyFileSync, symlinkSync, lstatSync, readlinkSync, statSync, unlinkSync,
+  readFileSync, writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
@@ -102,7 +103,13 @@ export function resolveIsolatedCodexHome() {
     mkdirSync(isoHome, { recursive: true });
     if (haveAuthFile) linkOrCopy(realAuth, join(isoHome, 'auth.json'));
     const realCfg = join(realHome, 'config.toml');
-    if (existsSync(realCfg)) refreshCopy(realCfg, join(isoHome, 'config.toml'));
+    // ISSUE-codex-review-hijack: copy config.toml but STRIP skill registrations.
+    // The skill-free isoHome/skills already excludes DIRECTORY skills, but
+    // config-registered skills ([[skills.config]] absolute paths / a [skills]
+    // table) would otherwise be re-introduced by copying the host config — which
+    // is exactly how gstack/superpowers/cli-audit skills hijacked dispatched
+    // reviews. Sanitizing keeps model/provider/MCP config intact.
+    if (existsSync(realCfg)) writeSanitizedCodexConfig(realCfg, join(isoHome, 'config.toml'));
     // Intentionally never create isoHome/skills — that omission IS the isolation.
     return isoHome;
   } catch (_) {
@@ -138,6 +145,45 @@ function refreshCopy(src, dest) {
     }
     copyFileSync(src, dest);
   } catch (_) { /* best-effort */ }
+}
+
+/**
+ * Strip skill registrations from a codex config.toml (ISSUE-codex-review-hijack).
+ * Removes any `[skills...]` table and any `[[skills.config]]` array-of-tables
+ * block (plus their body lines, up to the next table header), so a dispatched,
+ * isolated codex does NOT auto-load the host's globally-registered skills
+ * (gstack-review / using-superpowers / cli-audit) that otherwise hijack the task
+ * and ignore the brief. Upstream has no global skills off-switch
+ * (openai/codex#20210). Leaves model/provider/MCP/sandbox config untouched.
+ * Pure — exported for unit testing.
+ * @param {string} toml
+ * @returns {string}
+ */
+export function stripCodexSkillsConfig(toml) {
+  const lines = String(toml ?? '').split(/\r?\n/);
+  const isTableHeader = (l) => /^\s*\[\[?[^\]]+\]\]?\s*(#.*)?$/.test(l);
+  const isSkillsHeader = (l) => /^\s*\[\[?\s*skills(\.|\s|\]|\b)/i.test(l);
+  const out = [];
+  let skipping = false;
+  for (const line of lines) {
+    if (isTableHeader(line)) {
+      skipping = isSkillsHeader(line);
+      if (skipping) continue;          // drop the skills table header itself
+    }
+    if (!skipping) out.push(line);     // keep preamble + non-skills tables + their bodies
+  }
+  return out.join('\n');
+}
+
+/** Read src config, strip skill registrations, write to dest (idempotent). */
+function writeSanitizedCodexConfig(src, dest) {
+  try {
+    const cleaned = stripCodexSkillsConfig(readFileSync(src, 'utf-8'));
+    if (existsSync(dest)) {
+      try { if (readFileSync(dest, 'utf-8') === cleaned) return; } catch (_) {}
+    }
+    writeFileSync(dest, cleaned, 'utf-8');
+  } catch (_) { /* best-effort; leave whatever exists */ }
 }
 
 /** @type {import('../types.js').VendorAdapter} */

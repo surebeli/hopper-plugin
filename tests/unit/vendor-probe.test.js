@@ -112,7 +112,7 @@ test('kimi probe uses provider list JSON when Kimi Code 0.14+ is available', asy
   }
 });
 
-test('all 7 adapters have a probe-module that exports probe()', async () => {
+test('all 8 adapters have a probe-module that exports probe()', async () => {
   for (const name of listAdapters()) {
     const mod = await import(`../../cli/src/vendor-probe/${name}.js`);
     assert.equal(typeof mod.probe, 'function', `${name} must export probe()`);
@@ -164,6 +164,7 @@ test('zero-spawn discovery surface unchanged: --check / --capabilities still spa
     join(REPO_ROOT, 'cli', 'src', 'vendors', 'agy.js'),
     join(REPO_ROOT, 'cli', 'src', 'vendors', 'grok.js'),
     join(REPO_ROOT, 'cli', 'src', 'vendors', 'mimo.js'),
+    join(REPO_ROOT, 'cli', 'src', 'vendors', 'claude.js'),
   ];
   for (const f of discoveryHotPath) {
     const src = readFileSync(f, 'utf-8');

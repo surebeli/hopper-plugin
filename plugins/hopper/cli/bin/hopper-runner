@@ -11,12 +11,12 @@
 // Counter-tested in tests/integration/runner-single-spawn.test.js.
 
 import { spawn } from 'node:child_process';
-import { openSync, closeSync, readFileSync, existsSync } from 'node:fs';
+import { openSync, closeSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import { readFrontmatter, writeFrontmatter } from '../src/background.js';
 import { appendProgressEvent } from '../src/progress.js';
 import { getAdapter } from '../src/vendors/index.js';
-import { acquireVendorLock, killProcessTree } from '../src/subprocess.js';
+import { acquireVendorLock, killProcessTree, resolveDispatchTimeouts } from '../src/subprocess.js';
 import { resolveCommandOnPath, resolveCommandWithKnownPaths } from '../src/path-resolve.js';
 import { renderVendorOutputSection } from '../src/output.js';
 
@@ -241,27 +241,47 @@ async function main() {
   closeSync(fdErr);
 
   let timedOut = false;
-  // Per codex Phase 5 audit F2: pass adapter opts to timeoutMs so --reasoning xhigh
-  // actually gets 900s instead of the default 300s.
-  let timeoutMs = adapter.timeoutMs({ ...adapterOpts, background: true });
+  let timeoutReason = null;
+  // 乙: idle + ceiling instead of one total cap. Per codex Phase 5 audit F2,
+  // adapter.timeoutMs honors --reasoning xhigh; it now SEEDS the ceiling (floored
+  // to ≥30min by resolveDispatchTimeouts). The real "stuck" detector is idle:
+  // the runner pipes vendor stdio straight to logPath (no in-process 'data'
+  // events), so idle is measured by polling the log file for growth — silence =
+  // no growth for idleMs. --timeout / HOPPER_DISPATCH_TIMEOUT_MS override the
+  // ceiling; HOPPER_IDLE_TIMEOUT_MS overrides idle.
+  const baselineMs = adapter.timeoutMs({ ...adapterOpts, background: true });
+  let { idleMs, ceilingMs } = resolveDispatchTimeouts(baselineMs, adapterOpts);
   if (process.env.HOPPER_TEST_ONLY_TIMEOUT_MS) {
-    const testTimeoutMs = Number.parseInt(process.env.HOPPER_TEST_ONLY_TIMEOUT_MS, 10);
-    if (Number.isFinite(testTimeoutMs) && testTimeoutMs > 0) timeoutMs = testTimeoutMs;
+    const t = Number.parseInt(process.env.HOPPER_TEST_ONLY_TIMEOUT_MS, 10);
+    if (Number.isFinite(t) && t > 0) { ceilingMs = t; idleMs = Math.min(idleMs, t); }
   }
-  const killTimer = setTimeout(() => {
+  // Process-tree kill (not just top-level): children of .cmd wrappers + agentic
+  // CLIs don't leak. taskkill /T /F on Windows; kill(-pid) on POSIX (vendor was
+  // spawned detached → owns its own group).
+  const killVendor = (reason) => {
     timedOut = true;
-    // Per codex Phase 5 audit F1 + recheck: process-tree kill (not just
-    // top-level vendor) so children of .cmd wrappers + agentic CLIs don't
-    // leak. Reuses shared killProcessTree from subprocess.js: taskkill /T /F
-    // on Windows; process.kill(-pid, SIGKILL) on POSIX (works because vendor
-    // was spawned with detached: true → owns its own process group).
+    timeoutReason = reason;
     try { killProcessTree(vendor.pid, isWindows); } catch (_) {}
-  }, timeoutMs);
+  };
+  const killTimer = setTimeout(() => killVendor('ceiling'), ceilingMs);
   killTimer.unref();
+  // idle poll: reset the silence clock whenever the log grows; kill after idleMs
+  // of no growth. Poll cadence is a fraction of idleMs (clamped 1–5s).
+  let lastSize = -1;
+  let lastGrowAt = Date.now();
+  const pollMs = Math.max(1000, Math.min(idleMs || 0, 5000));
+  const idlePoll = idleMs > 0 ? setInterval(() => {
+    let sz = 0;
+    try { sz = existsSync(logPath) ? statSync(logPath).size : 0; } catch (_) {}
+    if (sz !== lastSize) { lastSize = sz; lastGrowAt = Date.now(); return; }
+    if (Date.now() - lastGrowAt >= idleMs) { clearInterval(idlePoll); killVendor('idle'); }
+  }, pollMs) : null;
+  if (idlePoll && idlePoll.unref) idlePoll.unref();
 
   vendor.on('exit', (code, signal) => {
     releaseVendorLockOnce();
     clearTimeout(killTimer);
+    if (idlePoll) clearInterval(idlePoll);
     const duration_ms = Date.now() - t0;
 
     // Per codex Phase 5 audit P1 #2: read log + invoke adapter.parseResult

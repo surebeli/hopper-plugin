@@ -22,7 +22,7 @@ This is **Tier B** of the cross-host architecture:
 | `/hopper:dispatch <task-id> [--write] [--force] [--model <name>] [--reasoning <level>] [--sandbox <mode>]` | Dispatch a task; with `--write` also creates `.hopper/handoffs/<task-id>-output.md` |
 | `/hopper:status`        | Show queue summary (pending / in-progress / done / failed)                       |
 | `/hopper:smoke`         | Plugin host-lifecycle smoke test (Prong 1 verifier)                              |
-| `/hopper:vendors`       | List registered vendor adapters (codex, kimi, opencode, copilot, agy, grok, mimo) |
+| `/hopper:vendors`       | List registered vendor adapters (codex, kimi, opencode, copilot, agy, grok, mimo, claude) |
 
 Slash command source files: `commands/*.md` at the **repo root** (one prompt template per command).
 The completion monitor lives at `monitors/monitors.json` at the **repo root**.
@@ -137,8 +137,9 @@ The plugin spawns vendor subprocesses; each needs its own auth set up **outside*
 | agy       | Interactive OAuth via `agy` (one-time), then `agy -p` headless                |
 | grok      | `XAI_API_KEY` OR `~/.grok/` credentials from `grok login --device-auth` / browser OAuth |
 | mimo      | `~/.local/share/mimocode/auth.json` or first-launch MiMo Auto setup via `mimo` |
+| claude    | `ANTHROPIC_API_KEY` OR `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`) OR `~/.claude` OAuth (`claude` then `/login`) |
 
-Run `/hopper:vendors` after install to confirm all 7 are registered.
+Run `/hopper:vendors` after install to confirm all 8 are registered.
 
 ## Dispatch permissions
 
@@ -153,9 +154,11 @@ Per spec §3 #4 (no harness reaction core):
 - No consensus / multi-vendor voting
 - No streaming vendor stdout back to Claude Code session. v1.0 only sends terminal-event JSONL through the monitor.
 - No automatic queue.md / COST-LOG.md mutation (user must approve every edit)
-- No Anthropic Agent SDK / `claude -p` / direct Anthropic SDK usage (sidesteps 2026-06-15 SDK credit policy)
+- The Claude Code **host** integration itself never routes its own work through `claude -p` / the Anthropic Agent SDK — it only emits terminal-event JSONL through the monitor. This sidesteps the 2026-06-15 Agent SDK credit policy for the host path.
 
 These are intentional. The plugin is a router, not a runtime.
+
+> **`claude` as a VENDOR (v0.9.0+).** Distinct from the above: there is now a `claude` *vendor* adapter, so a hopper running under a DIFFERENT host (codex / opencode / grok / standalone CLI) can dispatch a task TO `claude -p`. The host≠vendor guard (`validateHostVendorSeparation`) blocks the only nonsensical case — a Claude Code host dispatching back to the `claude` vendor (self-dispatch). Billing for `claude -p` against a Claude plan churned through 2026 (the 2026-06-15 separate-Agent-SDK-credit split was later rolled back), so the adapter is billing-agnostic — verify the live policy at anthropic.com if cost matters. See `cli/src/vendors/claude.js` for the isolation/permission knobs (`HOPPER_CLAUDE_BARE=1` for deterministic CI isolation, `HOPPER_CLAUDE_PERMISSION_MODE` to override the permission mode).
 
 ## Troubleshooting
 

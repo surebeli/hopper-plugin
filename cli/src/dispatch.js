@@ -14,9 +14,9 @@ import { loadTaskFrame, composePrompt } from './tasks.js';
 import { parseAgentsFile, resolveVendor } from './agents.js';
 import { getAdapter } from './vendors/index.js';
 import { resolveCommandWithKnownPaths } from './path-resolve.js';
-import { runSubprocessOnce } from './subprocess.js';
+import { runSubprocessOnce, resolveDispatchTimeouts } from './subprocess.js';
 import { resolveVendorCwd } from './background.js';
-import { DEFAULT_DISPATCH_SANDBOX } from './validation.js';
+import { DEFAULT_DISPATCH_SANDBOX, resolveDefaultReasoning } from './validation.js';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -129,11 +129,23 @@ export function taskTextRequestsReadOnly(resolved) {
  * @returns {import('./types.js').AdapterOpts}
  */
 export function resolveAdapterOptsForTask(resolved, adapterOpts = {}) {
-  if (adapterOpts.sandbox) return { ...adapterOpts };
-  return {
-    ...adapterOpts,
-    sandbox: taskTextRequestsReadOnly(resolved) ? 'read-only' : DEFAULT_DISPATCH_SANDBOX,
-  };
+  const out = { ...adapterOpts };
+  // Permission default: explicit --sandbox wins; else read-only text downgrades;
+  // else product default (danger-full-access).
+  if (!out.sandbox) {
+    out.sandbox = taskTextRequestsReadOnly(resolved) ? 'read-only' : DEFAULT_DISPATCH_SANDBOX;
+  }
+  // Reasoning/effort default: max out unless the caller passed --reasoning. Only
+  // codex/grok/mimo consume it (kimi/opencode/copilot/agy/claude ignore it
+  // harmlessly). This is safe BY DESIGN together with the idle-timeout primitive:
+  // a slower max-effort run is not killed for being slow, only for going silent.
+  // Env-tunable via HOPPER_DEFAULT_REASONING. Injected at the DISPATCH layer (not
+  // in each adapter), so adapters' own opt-in defaults — and their unit tests —
+  // are unaffected.
+  if (out.reasoning == null) {
+    out.reasoning = resolveDefaultReasoning();
+  }
+  return out;
 }
 
 /**
@@ -218,11 +230,17 @@ export async function executeWithAdapter({ resolved, adapter, adapterOpts = {}, 
   const stdinInput = adapter.stdinMode === 'pipe' ? composedPrompt : null;
   // HOPPER-3: optional adapter env (e.g. codex CODEX_HOME auto-isolation).
   const adapterEnv = typeof adapter.env === 'function' ? adapter.env(effectiveOpts) : undefined;
+  // 乙: idle + ceiling instead of a single total cap. The per-vendor
+  // adapter.timeoutMs() now seeds the ceiling (floored to ≥30 min); idle (silence)
+  // is the real "stuck" detector. --timeout / HOPPER_DISPATCH_TIMEOUT_MS override
+  // the ceiling; HOPPER_IDLE_TIMEOUT_MS overrides idle.
+  const { idleMs, ceilingMs } = resolveDispatchTimeouts(adapter.timeoutMs(effectiveOpts), effectiveOpts);
   const raw = await runSubprocessOnce({
     command: spawnCommand,
     args: spawnArgs,
     stdinInput,
-    timeoutMs: adapter.timeoutMs(effectiveOpts),
+    timeoutMs: ceilingMs,
+    idleMs,
     logFilePath: logPath,
     vendorName: adapter.name,
     cwd: cwd || undefined,

@@ -48,6 +48,50 @@ export function applyTaskTypeFloor(nativeMs, opts) {
 
 export { REVIEW_TASK_TYPES, REVIEW_TASK_FLOOR_MS };
 
+// ── idle + ceiling timeout primitive (replaces the single total-wall-clock cap) ──
+// The old design hard-killed at one per-vendor TOTAL timeout, which could not
+// tell "hung" from "legitimately working on a long task" — see
+// ISSUE-mimo-codeimpl-timeout (a 41-edit code-impl killed at the flat 180s).
+// New design (two timers):
+//   - idle timeout: kill ONLY after idleMs of ZERO output (stdout+stderr) — the
+//     real "is it stuck" detector. An actively-streaming long task keeps
+//     resetting it and is NOT killed (most agentic vendors stream json / log /
+//     tool-call events under hopper's --format json / --print-logs flags).
+//   - absolute ceiling: a generous safety net so a runaway can't live forever.
+// Both env-overridable; an explicit per-task --timeout sets the ceiling.
+const DEFAULT_IDLE_TIMEOUT_MS = 180_000;   // 3 min of silence ⇒ treat as stuck
+const CEILING_FLOOR_MS = 1_800_000;        // ≥30 min absolute ceiling (safety net)
+
+function envPositiveInt(name) {
+  const v = Number.parseInt(process.env[name] ?? '', 10);
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
+
+/**
+ * Resolve {idleMs, ceilingMs} for a dispatch from the adapter baseline + env +
+ * an optional explicit per-task override (--timeout → opts.timeoutOverrideMs).
+ *
+ * Ceiling precedence: explicit --timeout > HOPPER_DISPATCH_TIMEOUT_MS >
+ *   max(adapter baseline, CEILING_FLOOR_MS).
+ * Idle: HOPPER_IDLE_TIMEOUT_MS > DEFAULT_IDLE_TIMEOUT_MS, never above ceiling.
+ *
+ * @param {number} adapterBaselineMs  adapter.timeoutMs(opts) (per-vendor tuned)
+ * @param {object} [opts]             may carry timeoutOverrideMs (ms)
+ * @returns {{ idleMs: number, ceilingMs: number }}
+ */
+export function resolveDispatchTimeouts(adapterBaselineMs, opts = {}) {
+  const idleMs = envPositiveInt('HOPPER_IDLE_TIMEOUT_MS') ?? DEFAULT_IDLE_TIMEOUT_MS;
+  const override = Number.isFinite(opts?.timeoutOverrideMs) && opts.timeoutOverrideMs > 0
+    ? opts.timeoutOverrideMs
+    : null;
+  const ceilingMs = override
+    ?? envPositiveInt('HOPPER_DISPATCH_TIMEOUT_MS')
+    ?? Math.max(Number(adapterBaselineMs) || 0, CEILING_FLOOR_MS);
+  return { idleMs: Math.min(idleMs, ceilingMs), ceilingMs };
+}
+
+export { DEFAULT_IDLE_TIMEOUT_MS, CEILING_FLOOR_MS };
+
 import { platform, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -122,6 +166,7 @@ export async function runSubprocessOnce({
   args,
   stdinInput,
   timeoutMs,
+  idleMs = 0,
   env,
   cwd,
   logFilePath = null,
@@ -143,10 +188,27 @@ export async function runSubprocessOnce({
     let stdout = '';
     let stderr = '';
     let timedOut = false;
+    let timeoutReason = null;     // 'idle' | 'ceiling' (diagnostic)
     let killTimer = null;
+    let idleTimer = null;
 
-    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
-    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    // idle timer — resets on every chunk of vendor output; fires only after
+    // idleMs of total silence (hung / reverse-pressured). ADDITIVE: when idleMs
+    // is falsy this is a no-op, so callers/tests passing only timeoutMs keep the
+    // legacy single-ceiling behavior unchanged.
+    const armIdle = () => {
+      if (!(idleMs > 0)) return;
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        timedOut = true;
+        timeoutReason = 'idle';
+        killProcessTree(child.pid, isWindows);
+      }, idleMs);
+      if (idleTimer.unref) idleTimer.unref();
+    };
+
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); armIdle(); });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); armIdle(); });
 
     if (stdinInput != null && child.stdin) {
       try {
@@ -157,22 +219,26 @@ export async function runSubprocessOnce({
       }
     }
 
-    // Set up hard timeout. NO retry on timeout — timeout = failure, surface it.
+    // Absolute ceiling. NO retry on timeout — timeout = failure, surface it.
     if (timeoutMs > 0) {
       killTimer = setTimeout(() => {
         timedOut = true;
+        timeoutReason = 'ceiling';
         killProcessTree(child.pid, isWindows);
       }, timeoutMs);
     }
+    armIdle();  // start the idle clock at spawn (silence before first byte counts)
 
     const exitCode = await new Promise((resolve) => {
       child.on('close', (code, signal) => {
         if (killTimer) clearTimeout(killTimer);
+        if (idleTimer) clearTimeout(idleTimer);
         // Map signal to exit-code-equivalent (POSIX convention: 128 + signal)
         resolve(code != null ? code : 128 + (signal === 'SIGKILL' ? 9 : signal === 'SIGTERM' ? 15 : 0));
       });
       child.on('error', (_err) => {
         if (killTimer) clearTimeout(killTimer);
+        if (idleTimer) clearTimeout(idleTimer);
         resolve(127); // command-not-found convention
       });
     });
@@ -190,7 +256,7 @@ export async function runSubprocessOnce({
       }
     }
 
-    return { exitCode, stdout, stderr, timedOut, durationMs, logFileContent };
+    return { exitCode, stdout, stderr, timedOut, timeoutReason, durationMs, logFileContent };
   } finally {
     releaseVendorLock();
   }

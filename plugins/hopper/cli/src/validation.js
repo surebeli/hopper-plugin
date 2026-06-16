@@ -21,7 +21,7 @@ export const TASK_ID_PATTERN = /^[A-Za-z][A-Za-z0-9._-]{0,99}$/;
 export const ALLOWED_DISPATCH_FLAGS = Object.freeze(['--write', '--force', '--background']);
 
 /** Value-taking flag whitelist (each consumes the next argv as its value). */
-export const ALLOWED_DISPATCH_VALUE_FLAGS = Object.freeze(['--model', '--reasoning', '--sandbox']);
+export const ALLOWED_DISPATCH_VALUE_FLAGS = Object.freeze(['--model', '--reasoning', '--sandbox', '--timeout']);
 
 /**
  * Model-name pattern: alphanumeric + . - _ / : (for namespaced model strings
@@ -41,6 +41,26 @@ export const MODEL_PATTERN = /^[A-Za-z][A-Za-z0-9._/:-]{0,99}$/;
  * Our prior whitelist missed `minimal`. Source: official codex config-reference.
  */
 export const ALLOWED_REASONING = Object.freeze(['minimal', 'low', 'medium', 'high', 'xhigh']);
+
+/**
+ * Default reasoning/effort when a dispatch does not pass --reasoning. Product
+ * decision (owner 2026-06-16): max out by default; explicit --reasoning or
+ * HOPPER_DEFAULT_REASONING overrides. Only codex/grok/mimo consume it. Safe
+ * together with the idle-timeout primitive (a slow max-effort run is killed only
+ * for going SILENT, not for being slow).
+ */
+export const DEFAULT_DISPATCH_REASONING = 'xhigh';
+
+/**
+ * Resolve the effective default reasoning: HOPPER_DEFAULT_REASONING (if a legal
+ * level) > DEFAULT_DISPATCH_REASONING. Never throws (invalid env is ignored).
+ * @returns {string}
+ */
+export function resolveDefaultReasoning() {
+  const env = process.env.HOPPER_DEFAULT_REASONING;
+  if (env && ALLOWED_REASONING.includes(env)) return env;
+  return DEFAULT_DISPATCH_REASONING;
+}
 
 /**
  * Canonical sandbox / permission vocabulary for dispatch.
@@ -130,6 +150,32 @@ export function validateReasoning(reasoning) {
   if (!ALLOWED_REASONING.includes(reasoning)) {
     throw new Error(`--reasoning "${reasoning}" invalid. Allowed: ${ALLOWED_REASONING.join(', ')}.`);
   }
+}
+
+/**
+ * Validate a per-dispatch --timeout value (the absolute ceiling, in ms). Throws
+ * on rejection. Range-guarded so a typo can neither be 0/negative nor absurdly
+ * large. Returns the parsed integer.
+ * @param {string|number} value
+ * @returns {number}
+ */
+export const MIN_DISPATCH_TIMEOUT_MS = 1_000;
+export const MAX_DISPATCH_TIMEOUT_MS = 21_600_000;  // 6h hard sanity ceiling
+export function validateTimeout(value) {
+  // codex review P2: reject partial/float inputs ("600000abc", "1000.5") rather
+  // than letting Number.parseInt truncate them. Require a whole, all-digits value.
+  let ms;
+  if (typeof value === 'number') {
+    if (!Number.isInteger(value)) throw new Error(`--timeout ${value} is not an integer (milliseconds).`);
+    ms = value;
+  } else {
+    const s = String(value).trim();
+    if (!/^\d+$/.test(s)) throw new Error(`--timeout "${value}" is not an integer (milliseconds).`);
+    ms = Number.parseInt(s, 10);
+  }
+  if (ms < MIN_DISPATCH_TIMEOUT_MS) throw new Error(`--timeout ${ms} too small (min ${MIN_DISPATCH_TIMEOUT_MS}ms).`);
+  if (ms > MAX_DISPATCH_TIMEOUT_MS) throw new Error(`--timeout ${ms} too large (max ${MAX_DISPATCH_TIMEOUT_MS}ms = 6h).`);
+  return ms;
 }
 
 /**

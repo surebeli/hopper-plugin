@@ -93,9 +93,19 @@ export const grokAdapter = {
       ...(opts.cwd ? ['--cwd', opts.cwd] : []),
       ...(headless && permMode ? ['--permission-mode', permMode] : []),
       ...(headless && sandbox === 'danger-full-access' ? ['--always-approve'] : []),
-      // Reasoning effort (opt-in): forward only when the caller set --reasoning,
-      // so default dispatches stay safe on grok builds that predate --effort.
-      ...(opts.reasoning ? ['--effort', opts.reasoning] : []),
+      // Reasoning effort. grok --effort vocabulary is low|medium|high, but the
+      // dispatch layer now defaults opts.reasoning to the canonical max 'xhigh'
+      // (5-level scale), so clamp it down (xhigh→high, minimal→low). Escape hatch:
+      // HOPPER_GROK_EFFORT overrides the level (empty string omits --effort
+      // entirely, for grok builds that predate the flag). A direct adapter call
+      // with no reasoning + no env still emits NO --effort (opt-in preserved).
+      ...(() => {
+        const raw = process.env.HOPPER_GROK_EFFORT !== undefined
+          ? process.env.HOPPER_GROK_EFFORT
+          : opts.reasoning;
+        const eff = clampGrokEffort(raw);
+        return eff ? ['--effort', eff] : [];
+      })(),
       ...(opts.conversationId ? ['-r', opts.conversationId] : []),
     ];
   },
@@ -180,6 +190,24 @@ export const grokAdapter = {
     };
   },
 };
+
+/**
+ * Clamp the canonical 5-level reasoning scale to grok's known-good --effort
+ * vocabulary (low|medium|high). xhigh→high, minimal→low; unknown/empty → null
+ * (omit the flag). Exported-by-position next to args() for locality.
+ * @param {string|undefined|null} level
+ * @returns {string|null}
+ */
+function clampGrokEffort(level) {
+  switch (level) {
+    case 'xhigh':
+    case 'high': return 'high';
+    case 'medium': return 'medium';
+    case 'low':
+    case 'minimal': return 'low';
+    default: return null;
+  }
+}
 
 /**
  * Defensive extraction of answer text from grok --output-format json stdout.

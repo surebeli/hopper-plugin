@@ -11,9 +11,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { listAdapters, getAdapter } from '../../cli/src/vendors/index.js';
 
-const VENDORS = ['codex', 'kimi', 'opencode', 'copilot', 'agy', 'grok', 'mimo'];
+const VENDORS = ['codex', 'kimi', 'opencode', 'copilot', 'agy', 'grok', 'mimo', 'claude'];
 
-test('registry lists exactly the 7 functional vendors', () => {
+test('registry lists exactly the 8 functional vendors', () => {
   const names = listAdapters().sort();
   assert.deepEqual(names, [...VENDORS].sort(),
     `expected ${VENDORS.join(',')}; got ${names.join(',')}`);
@@ -338,6 +338,106 @@ test('grok adapter envPreflight() never checks GROK_API_KEY (third-party collisi
     if (savedHomePath !== undefined) process.env.HOMEPATH = savedHomePath; else delete process.env.HOMEPATH;
     rmSync(fakeHome, { recursive: true, force: true });
   }
+});
+
+test('claude adapter args() builds headless json invocation, default skips permissions', () => {
+  const a = getAdapter('claude');
+  const argv = a.args('test prompt', {});
+  assert.ok(argv.includes('-p'));
+  assert.ok(argv.includes('test prompt'));
+  assert.ok(argv.includes('--output-format'));
+  assert.ok(argv.includes('json'));
+  // Default sandbox is danger-full-access → headless full-access path.
+  assert.ok(argv.includes('--dangerously-skip-permissions'));
+  assert.ok(!argv.includes('--permission-mode'), 'danger-full-access uses the skip flag, not --permission-mode');
+  // No --model unless asked (account default, like codex).
+  assert.ok(!argv.includes('--model'), 'no --model without opts.model');
+  const withModel = a.args('test', { model: 'opus' });
+  assert.ok(withModel.includes('--model') && withModel.includes('opus'));
+  // cwd → --add-dir; conversationId → --resume
+  const withCwd = a.args('test', { cwd: '/tmp/project' });
+  assert.ok(withCwd.includes('--add-dir') && withCwd.includes('/tmp/project'));
+  const withSession = a.args('test', { conversationId: 'sess-1' });
+  assert.ok(withSession.includes('--resume') && withSession.includes('sess-1'));
+});
+
+test('claude adapter args() maps non-danger sandboxes to native permission modes', () => {
+  const a = getAdapter('claude');
+  const ro = a.args('test', { sandbox: 'read-only' });
+  assert.ok(!ro.includes('--dangerously-skip-permissions'), 'read-only must not skip permissions');
+  assert.equal(ro[ro.indexOf('--permission-mode') + 1], 'dontAsk', 'read-only → dontAsk (locked-down, no prompt-hang)');
+  const ww = a.args('test', { sandbox: 'workspace-write' });
+  assert.equal(ww[ww.indexOf('--permission-mode') + 1], 'acceptEdits', 'workspace-write → acceptEdits');
+});
+
+test('claude adapter HOPPER_CLAUDE_PERMISSION_MODE overrides the mode for non-danger sandboxes', () => {
+  const saved = process.env.HOPPER_CLAUDE_PERMISSION_MODE;
+  process.env.HOPPER_CLAUDE_PERMISSION_MODE = 'plan';
+  try {
+    const a = getAdapter('claude');
+    const argv = a.args('test', { sandbox: 'read-only' });
+    assert.equal(argv[argv.indexOf('--permission-mode') + 1], 'plan');
+  } finally {
+    if (saved === undefined) delete process.env.HOPPER_CLAUDE_PERMISSION_MODE;
+    else process.env.HOPPER_CLAUDE_PERMISSION_MODE = saved;
+  }
+});
+
+test('claude adapter HOPPER_CLAUDE_BARE=1 prepends --bare for CI isolation', () => {
+  const saved = process.env.HOPPER_CLAUDE_BARE;
+  process.env.HOPPER_CLAUDE_BARE = '1';
+  try {
+    const a = getAdapter('claude');
+    const argv = a.args('test', {});
+    assert.equal(argv[0], '--bare', '--bare must lead so it applies as a global flag');
+  } finally {
+    if (saved === undefined) delete process.env.HOPPER_CLAUDE_BARE;
+    else process.env.HOPPER_CLAUDE_BARE = saved;
+  }
+});
+
+test('claude adapter parseResult() extracts .result from --output-format json object', () => {
+  const a = getAdapter('claude');
+  const result = a.parseResult({
+    exitCode: 0,
+    stdout: JSON.stringify({
+      type: 'result', subtype: 'success', is_error: false,
+      result: 'CLAUDE_ANSWER', session_id: 's-1', total_cost_usd: 0.012,
+    }),
+    stderr: '',
+    timedOut: false,
+    durationMs: 200,
+  });
+  assert.equal(result.status, 'success');
+  assert.equal(result.text, 'CLAUDE_ANSWER');
+  assert.equal(result.usage.totalCostUsd, 0.012);
+});
+
+test('claude adapter parseResult() fails fast on is_error / empty result (no silent success)', () => {
+  const a = getAdapter('claude');
+  const errResult = a.parseResult({
+    exitCode: 0,
+    stdout: JSON.stringify({ type: 'result', subtype: 'error_max_turns', is_error: true, result: '' }),
+    stderr: '',
+    timedOut: false,
+    durationMs: 100,
+  });
+  assert.equal(errResult.status, 'unknown-fail');
+  assert.match(errResult.error, /no usable result/i);
+  assert.match(errResult.error, /error_max_turns/);
+});
+
+test('claude adapter parseResult() detects auth-fail and billing/credit block', () => {
+  const a = getAdapter('claude');
+  const auth = a.parseResult({
+    exitCode: 1, stdout: '', stderr: 'authentication_failed: please run /login', timedOut: false, durationMs: 90,
+  });
+  assert.equal(auth.status, 'auth-fail');
+  const billing = a.parseResult({
+    exitCode: 1, stdout: '', stderr: 'billing_error: usage limit reached', timedOut: false, durationMs: 90,
+  });
+  assert.equal(billing.status, 'auth-fail');
+  assert.match(billing.error, /billing \/ credit \/ usage limit/i);
 });
 
 test('getAdapter throws clear error for unknown vendor', () => {
