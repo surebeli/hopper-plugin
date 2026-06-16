@@ -164,6 +164,27 @@ test('opencode adapter parseResult() reconstructs assistant text from json event
   assert.equal(result.text, 'HELLO_WORLD');
 });
 
+test('opencode adapter parseResult() reconstructs text from opencode 1.17+ {type:"text", part:{text}} events', () => {
+  // Regression: opencode 1.17.7 changed its --format json schema to emit
+  // `{type:"text", part:{text:"..."}}` (the mimo-fork shape), which the old
+  // kind allow-list rejected → the parser dumped raw JSON as the "result" and a
+  // dispatch looked failed. Captured from a real `opencode run --format json`.
+  const a = getAdapter('opencode');
+  const result = a.parseResult({
+    exitCode: 0,
+    stdout: [
+      JSON.stringify({ type: 'step_start', part: { type: 'step-start' } }),
+      JSON.stringify({ type: 'text', part: { type: 'text', text: 'OK_' } }),
+      JSON.stringify({ type: 'text', part: { type: 'text', text: 'DONE' } }),
+      JSON.stringify({ type: 'step_finish', part: { tokens: { total: 19834 } } }),
+    ].join('\n'),
+    stderr: '', timedOut: false, durationMs: 200,
+  });
+  assert.equal(result.status, 'success');
+  assert.equal(result.text, 'OK_DONE', 'must extract clean assistant text');
+  assert.ok(!result.text.includes('step_start'), 'must NOT fall back to dumping raw JSON');
+});
+
 test('mimo adapter args() maps sandbox and reasoning to MiMoCode run flags', () => {
   const a = getAdapter('mimo');
   const argv = a.args('test', { cwd: '/tmp/project', model: 'xiaomi/mimo-v2.5-pro', reasoning: 'xhigh' });

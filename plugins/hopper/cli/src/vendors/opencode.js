@@ -154,6 +154,18 @@ function extractOpencodeEventText(event) {
       ? event.kind
       : '';
 
+  // opencode >= 1.17 emits assistant output as `{type:"text", part:{text:"..."}}`
+  // (the same event schema as the MiMoCode fork), NOT the older
+  // `message.part.delta`. The kind allow-list below rejects bare "text", so
+  // without this branch the parser collected NOTHING and fell back to dumping the
+  // raw JSON event stream as the result — a dispatch that "succeeds" with
+  // unusable JSON noise. Handle the new text-part shape first.
+  if (kind === 'text') {
+    if (typeof event.text === 'string') return event.text;
+    if (typeof event.part?.text === 'string') return event.part.text;
+    return '';
+  }
+
   if (kind && !/message|assistant|output|response|result/i.test(kind)) {
     return '';
   }
