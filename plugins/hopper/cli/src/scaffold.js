@@ -15,6 +15,7 @@
 
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import { renderRulesMarkdown } from './rules.js';
 
 /** Task-type frames the scaffold ships (one .hopper/tasks/<type>.md each). */
 export const SCAFFOLD_TASK_TYPES = Object.freeze([
@@ -37,6 +38,11 @@ export function buildScaffoldFiles() {
     { rel: 'queue.md', content: QUEUE_MD },
     { rel: 'AGENTS.md', content: AGENTS_MD },
     { rel: 'COST-LOG.md', content: COST_LOG_MD },
+    // GENERATED dispatch-rules matrix — the single source of truth for the
+    // per-vendor parameter contract, rendered from the live adapters so a project
+    // never hand-maintains (and rots) invocation strings. Regenerate after a
+    // hopper upgrade: `hopper-dispatch --rules > .hopper/DISPATCH.md`.
+    { rel: 'DISPATCH.md', content: renderRulesMarkdown() },
     { rel: join('handoffs', 'leader-tasklist.md'), content: LEADER_TASKLIST_MD },
   ];
   for (const type of SCAFFOLD_TASK_TYPES) {
@@ -151,6 +157,17 @@ never route a task to the same CLI that is dispatching it.
 Change a default by editing the table above, or override per task with the
 optional \`Vendor\` column in queue.md. Routing is a static lookup — no
 round-robin, no retry-aware rotation.
+
+---
+
+## Dispatch rules (capability contract)
+
+Which \`--model\` / \`--reasoning\` / \`--sandbox\` / \`--timeout\` each vendor honors —
+plus its permission + working-dir mapping and timeout model — lives in
+\`.hopper/DISPATCH.md\`. That file is **GENERATED from the hopper adapters; do NOT
+hand-edit it, and do NOT hand-copy vendor invocation strings elsewhere** (they rot).
+Regenerate after upgrading hopper: \`hopper-dispatch --rules > .hopper/DISPATCH.md\`.
+Live single-vendor check: \`hopper-dispatch --capabilities <vendor>\`.
 `;
 
 const COST_LOG_MD = `# Hopper Cost Log

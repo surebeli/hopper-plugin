@@ -11,6 +11,7 @@ import { listAdapters, getAdapter, installCheckForAdapter, capabilitiesForAdapte
 import { readCache, readCacheWithDiagnostics, getVendorCache, setVendorCache, isStale, staleness } from '../src/cache.js';
 import { writeOutput } from '../src/output.js';
 import { scaffoldHopper } from '../src/scaffold.js';
+import { renderRulesMarkdown } from '../src/rules.js';
 import { compatCheckForAdapter } from '../src/vendor-compat.js';
 import {
   validateTaskId,
@@ -40,7 +41,7 @@ import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
-const VERSION = '0.10.0';
+const VERSION = '0.11.0';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -69,6 +70,7 @@ function printUsage() {
   console.log('  hopper-dispatch --smoke                         Standalone CLI smoke test');
   console.log('  hopper-dispatch --task-types                    List available task-type frames');
   console.log('  hopper-dispatch --vendors                       List registered vendor adapters');
+  console.log('  hopper-dispatch --rules                          Print the GENERATED dispatch-rules matrix (> .hopper/DISPATCH.md)');
   console.log('  hopper-dispatch --check [<vendor>]              Show install + auth status (all, or single vendor)');
   console.log('  hopper-dispatch --capabilities <vendor>         Show static model/reasoning/feature support + cached data if probed');
   console.log('  hopper-dispatch --probe [<vendor>]              Run vendor introspection, write cache to ~/.hopper/cache/');
@@ -266,6 +268,13 @@ async function main() {
     return;
   }
 
+  if (args.includes('--rules')) {
+    // GENERATED dispatch-rules matrix (single source of truth = the adapters).
+    // Persist into a project: `hopper-dispatch --rules > .hopper/DISPATCH.md`.
+    process.stdout.write(renderRulesMarkdown({ version: VERSION }) + '\n');
+    return;
+  }
+
   // --resolve <id>: Phase 1 behavior (no spawn)
   const resolveIdx = args.indexOf('--resolve');
   if (resolveIdx !== -1) {
@@ -334,7 +343,7 @@ async function main() {
  */
 function parseDispatchArgs(args) {
   const META_FLAGS = new Set(['--help', '-h', '--version', '-v', '--smoke', '--status',
-    '--task-types', '--vendors', '--resolve', '--watch', '--progress', '--watch-events', '--jobs', '--reap', '--stop',
+    '--task-types', '--vendors', '--rules', '--resolve', '--watch', '--progress', '--watch-events', '--jobs', '--reap', '--stop',
     '--check', '--capabilities', '--probe', '--models', '--init-tasks']);
   const VALUE_FLAGS = new Set(ALLOWED_DISPATCH_VALUE_FLAGS);
   const BARE_FLAGS = new Set(ALLOWED_DISPATCH_FLAGS);
@@ -725,6 +734,11 @@ function runInitTasks(targetDir, { force = false } = {}) {
   console.log('  1. Edit .hopper/AGENTS.md to match the vendor CLIs you have installed.');
   console.log('  2. Add tasks to .hopper/queue.md and their specs to .hopper/handoffs/leader-tasklist.md.');
   console.log('  3. Run `hopper-dispatch --status` to confirm the queue parses.');
+  console.log('');
+  console.log('Dispatch rules: .hopper/DISPATCH.md (GENERATED — regenerate with `hopper-dispatch --rules`).');
+  console.log('Constitution pointer — paste into your project CLAUDE.md / AGENTS.md so agents read one stable place:');
+  console.log('  > Dispatch contract (per-vendor --model/--reasoning/--sandbox/--timeout, perms, cwd): see');
+  console.log('  > `.hopper/DISPATCH.md` (hopper-generated, do not hand-edit). Never hand-copy vendor invocation strings.');
 }
 
 // HOPPER-6: actively stop a running background job (kill tree + mark cancelled).
