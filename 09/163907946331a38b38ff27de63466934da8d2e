@@ -1,0 +1,38 @@
+tests/unit/tasks.test.js
+  s_0f03cb7314737d::t_a7051a5cba4b1d 129-158
+cli/src/tasks.js
+  s_0f03cb7314737d::t_a14fa60bb23bda 100-101,105-105,108-116
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "09163907946331a38b38ff27de63466934da8d2e",
+  "prompts": {
+    "s_0f03cb7314737d::t_a7051a5cba4b1d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ed45f-9db1-7240-a384-80c147010fa3",
+        "model": "gpt-5.5"
+      },
+      "human_author": "litianyi <litianyi@corp.netease.com>",
+      "messages": [],
+      "total_additions": 30,
+      "total_deletions": 0,
+      "accepted_lines": 30,
+      "overriden_lines": 0
+    },
+    "s_0f03cb7314737d::t_a14fa60bb23bda": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ed45f-9db1-7240-a384-80c147010fa3",
+        "model": "gpt-5.5"
+      },
+      "human_author": "litianyi <litianyi@corp.netease.com>",
+      "messages": [],
+      "total_additions": 12,
+      "total_deletions": 0,
+      "accepted_lines": 12,
+      "overriden_lines": 0
+    }
+  }
+}
