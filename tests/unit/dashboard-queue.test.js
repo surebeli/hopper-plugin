@@ -81,6 +81,7 @@ test('dashboard queue route returns parsed queue rows', async () => {
         priority: 'high',
         brief: 'Build table',
         vendor: 'codex',
+        govern: null,
       },
       {
         id: 'T-WEB-B',
@@ -90,6 +91,7 @@ test('dashboard queue route returns parsed queue rows', async () => {
         priority: 'normal',
         brief: 'Review table',
         vendor: 'claude',
+        govern: null,
       },
     ]);
   } finally {
