@@ -84,3 +84,26 @@ export async function resolveConstitutionText(hopperDir, pointer) {
     );
   }
 }
+
+/**
+ * Resolve the governance preamble for a dispatch. Returns null (no overlay) when
+ * GOVERNANCE.md is absent or the task opts out with `Govern: off`. Otherwise
+ * returns { constitution, overlay } keyed on the resolved vendor.
+ *
+ * Pure file I/O — never spawns. Called on the dispatch resolve path AFTER the
+ * vendor is known and BEFORE composePrompt.
+ *
+ * @param {object} args
+ * @param {string} args.hopperDir
+ * @param {string} args.vendor
+ * @param {{ govern?: string|null }} args.task
+ * @returns {Promise<{ constitution: string, overlay: string }|null>}
+ */
+export async function resolveGovernance({ hopperDir, vendor, task }) {
+  if (task && typeof task.govern === 'string' && task.govern.toLowerCase() === 'off') return null;
+  const gov = await loadGovernance(hopperDir);
+  if (!gov || !gov.constitutionPointer) return null;
+  const constitution = await resolveConstitutionText(hopperDir, gov.constitutionPointer);
+  const overlay = gov.overlays[vendor] || '';
+  return { constitution, overlay };
+}

@@ -66,3 +66,63 @@ test('resolveConstitutionText throws a clear error on an unresolvable pointer', 
     );
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
+
+import { resolveGovernance } from '../../cli/src/governance.js';
+
+function writeGov(hopperDir, body) {
+  writeFileSync(join(hopperDir, 'GOVERNANCE.md'), body);
+}
+
+test('resolveGovernance returns null when GOVERNANCE.md absent', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-gov-'));
+  try {
+    const hopperDir = join(tmp, '.hopper'); mkdirSync(hopperDir);
+    const g = await resolveGovernance({ hopperDir, vendor: 'codex', task: { govern: null } });
+    assert.equal(g, null);
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('resolveGovernance returns constitution + vendor overlay', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-gov-'));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    mkdirSync(join(hopperDir, 'governance'), { recursive: true });
+    writeFileSync(join(hopperDir, 'governance', 'core.md'), 'CORE');
+    writeGov(hopperDir, `- **Constitution**: .hopper/governance/core.md
+
+## Vendor overlays
+
+| Vendor | Overlay |
+|--------|---------|
+| codex | CODEX OVERLAY |
+`);
+    const g = await resolveGovernance({ hopperDir, vendor: 'codex', task: { govern: null } });
+    assert.equal(g.constitution, 'CORE');
+    assert.equal(g.overlay, 'CODEX OVERLAY');
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('resolveGovernance honors Govern: off per task', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-gov-'));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    mkdirSync(join(hopperDir, 'governance'), { recursive: true });
+    writeFileSync(join(hopperDir, 'governance', 'core.md'), 'CORE');
+    writeGov(hopperDir, '- **Constitution**: .hopper/governance/core.md\n');
+    const g = await resolveGovernance({ hopperDir, vendor: 'codex', task: { govern: 'off' } });
+    assert.equal(g, null);
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('resolveGovernance gives constitution-only when vendor has no overlay row', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-gov-'));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    mkdirSync(join(hopperDir, 'governance'), { recursive: true });
+    writeFileSync(join(hopperDir, 'governance', 'core.md'), 'CORE');
+    writeGov(hopperDir, '- **Constitution**: .hopper/governance/core.md\n');
+    const g = await resolveGovernance({ hopperDir, vendor: 'kimi', task: { govern: null } });
+    assert.equal(g.constitution, 'CORE');
+    assert.equal(g.overlay, '');
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
