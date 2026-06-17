@@ -10,7 +10,7 @@ import { listTaskTypes } from '../src/tasks.js';
 import { listAdapters, getAdapter, installCheckForAdapter, capabilitiesForAdapter, probeVendor } from '../src/vendors/index.js';
 import { readCache, readCacheWithDiagnostics, getVendorCache, setVendorCache, isStale, staleness } from '../src/cache.js';
 import { writeOutput } from '../src/output.js';
-import { scaffoldHopper } from '../src/scaffold.js';
+import { scaffoldHopper, scaffoldGovernance } from '../src/scaffold.js';
 import { renderRulesMarkdown } from '../src/rules.js';
 import { compatCheckForAdapter } from '../src/vendor-compat.js';
 import {
@@ -66,6 +66,7 @@ function printUsage() {
   console.log('  hopper-dispatch --stop <task-id>                Stop a running background job (kill tree; status=cancelled)');
   console.log('  hopper-dispatch --resolve <id>                  Resolve dispatch without spawning');
   console.log('  hopper-dispatch --init-tasks [--force]          Scaffold a .hopper/ workspace in the current directory');
+  console.log('  hopper-dispatch --init-governance [--from <core>] [--force]  Seed .hopper/GOVERNANCE.md (opt-in prompt overlay)');
   console.log('  hopper-dispatch --status                        Show queue summary');
   console.log('  hopper-dispatch --smoke                         Standalone CLI smoke test');
   console.log('  hopper-dispatch --task-types                    List available task-type frames');
@@ -175,6 +176,33 @@ async function main() {
   // point is that no .hopper/ exists yet).
   if (args.includes('--init-tasks')) {
     runInitTasks(process.cwd(), { force: args.includes('--force') });
+    return;
+  }
+
+  if (args.includes('--init-governance')) {
+    const fromIdx = args.indexOf('--from');
+    const from = fromIdx !== -1 && args[fromIdx + 1] && !args[fromIdx + 1].startsWith('-') ? args[fromIdx + 1] : null;
+    const govHopperDir = findHopperDir();
+    if (!govHopperDir) {
+      console.error('Error: no .hopper/ directory found. Run --init-tasks first.');
+      process.exit(1);
+    }
+    try {
+      const res = scaffoldGovernance(govHopperDir, { from, force: args.includes('--force') });
+      console.log(`hopper-dispatch v${VERSION} — governance seeded`);
+      for (const p of res.written) console.log(`  (written) ${p}`);
+      if (!from) {
+        console.log('\nNote: no --from given. Set the Constitution pointer in .hopper/GOVERNANCE.md,');
+        console.log('or re-run with --from <fable>/prompts/portable-agent-core.md to vendor a copy.');
+      }
+    } catch (err) {
+      if (err.code === 'EHOPPEREXISTS') {
+        console.error(`Error: ${err.message}`);
+        process.exit(3);
+      }
+      console.error(`Error: ${err.message}`);
+      process.exit(1);
+    }
     return;
   }
 
@@ -344,7 +372,7 @@ async function main() {
 function parseDispatchArgs(args) {
   const META_FLAGS = new Set(['--help', '-h', '--version', '-v', '--smoke', '--status',
     '--task-types', '--vendors', '--rules', '--resolve', '--watch', '--progress', '--watch-events', '--jobs', '--reap', '--stop',
-    '--check', '--capabilities', '--probe', '--models', '--init-tasks']);
+    '--check', '--capabilities', '--probe', '--models', '--init-tasks', '--init-governance']);
   const VALUE_FLAGS = new Set(ALLOWED_DISPATCH_VALUE_FLAGS);
   const BARE_FLAGS = new Set(ALLOWED_DISPATCH_FLAGS);
 

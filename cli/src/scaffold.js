@@ -13,9 +13,10 @@
 // "task-vendor-preference" tables; every tasks/<type>.md frame is
 // anti-persona-clean per tasks.js verifyFrameAntiPersona.
 
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { renderRulesMarkdown } from './rules.js';
+import { listAdapters } from './vendors/index.js';
 
 /** Task-type frames the scaffold ships (one .hopper/tasks/<type>.md each). */
 export const SCAFFOLD_TASK_TYPES = Object.freeze([
@@ -86,6 +87,64 @@ export function scaffoldHopper(targetDir, { force = false } = {}) {
     written.push(p);
   }
   return { hopperDir, written, overwritten: existing.length > 0 };
+}
+
+const DEFAULT_OVERLAY = 'This governance is authoritative; the vendor adapter adds execution mechanics only and never widens permissions or overrides the constitution.';
+const DEFAULT_CONSTITUTION_POINTER = '.hopper/governance/portable-agent-core.md';
+
+/** Build the GOVERNANCE.md body — one overlay row per registered adapter. */
+export function buildGovernanceMarkdown() {
+  const rows = listAdapters()
+    .map((v) => `| ${v} | ${DEFAULT_OVERLAY} |`)
+    .join('\n');
+  return `# Hopper Governance — opt-in prompt overlay
+
+> When this file exists, \`hopper-dispatch\` prepends the constitution (and any
+> per-vendor overlay below) onto the prompt it sends the vendor. Delete this file
+> to disable. Disable per task with a \`Govern\` column set to \`off\` in queue.md.
+>
+> Seed/refresh (vendors a stamped copy of fable's upstream core):
+> \`hopper-dispatch --init-governance --from <fable>/prompts/portable-agent-core.md\`
+
+- **Constitution**: ${DEFAULT_CONSTITUTION_POINTER}
+
+## Vendor overlays
+
+| Vendor | Overlay |
+|--------|---------|
+${rows}
+`;
+}
+
+/**
+ * Scaffold governance into an existing .hopper/. Writes GOVERNANCE.md and, when
+ * --from is given, vendors a provenance-stamped copy of the constitution.
+ * @param {string} hopperDir
+ * @param {object} [opts]
+ * @param {string} [opts.from]   Path to fable's prompts/portable-agent-core.md to vendor
+ * @param {boolean} [opts.force] Overwrite an existing GOVERNANCE.md
+ * @returns {{ written: string[] }}
+ */
+export function scaffoldGovernance(hopperDir, { from = null, force = false } = {}) {
+  const govPath = join(hopperDir, 'GOVERNANCE.md');
+  if (existsSync(govPath) && !force) {
+    const err = new Error(`refusing to overwrite existing ${govPath}; pass --force to overwrite.`);
+    err.code = 'EHOPPEREXISTS';
+    throw err;
+  }
+  const written = [];
+  if (from) {
+    const govDir = join(hopperDir, 'governance');
+    mkdirSync(govDir, { recursive: true });
+    const dest = join(govDir, 'portable-agent-core.md');
+    const body = readFileSync(from, 'utf-8');
+    const stamp = `<!-- vendored by hopper --init-governance; provenance: ${from}; do not hand-edit — re-run --init-governance --from to refresh -->\n\n`;
+    writeFileSync(dest, stamp + body, 'utf-8');
+    written.push(dest);
+  }
+  writeFileSync(govPath, buildGovernanceMarkdown(), 'utf-8');
+  written.push(govPath);
+  return { written };
 }
 
 // ─── Templates ────────────────────────────────────────────────────────────
