@@ -12,6 +12,7 @@
 import { parseQueue, findEligibleTask, summarizeQueue } from './queue.js';
 import { loadTaskFrame, composePrompt } from './tasks.js';
 import { parseAgentsFile, resolveVendor } from './agents.js';
+import { resolveGovernance } from './governance.js';
 import { getAdapter } from './vendors/index.js';
 import { resolveCommandWithKnownPaths } from './path-resolve.js';
 import { runSubprocessOnce, resolveDispatchTimeouts } from './subprocess.js';
@@ -57,8 +58,10 @@ export async function resolveDispatch({ hopperDir, taskId }) {
   // 4. Read task spec (from leader-tasklist.md if present)
   const taskSpec = await loadTaskSpec(hopperDir, taskId);
 
-  // 5. Compose prompt (frame + spec)
-  const composedPrompt = composePrompt(frame, taskSpec);
+  // 5. Resolve optional governance overlay (keyed on the resolved vendor) and
+  // compose. resolveGovernance is pure file I/O — no subprocess (spec §3 #4).
+  const governance = await resolveGovernance({ hopperDir, vendor, task });
+  const composedPrompt = composePrompt(frame, taskSpec, { governance });
 
   return { task, frame, vendor, composedPrompt, taskSpec };
 }
