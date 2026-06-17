@@ -105,13 +105,20 @@ function printSmoke() {
 function findHopperDir() {
   if (process.env.HOPPER_DIR) {
     const p = resolve(process.env.HOPPER_DIR);
+    // An explicit HOPPER_DIR is authoritative: if it does not exist, report
+    // "not found" rather than silently falling back to an ancestor walk
+    // (which could bind to an unrelated `.hopper` such as a global cache dir).
     if (existsSync(p)) return p;
+    return null;
   }
-  // Walk up from cwd looking for .hopper/
+  // Walk up from cwd looking for .hopper/. A bare `.hopper` is not enough:
+  // the global per-machine cache lives at ~/.hopper (see cli/src/cache.js) and
+  // must not be mistaken for a workspace. Require a `handoffs/` subdir, which
+  // scaffoldHopper() always creates for a real workspace.
   let cur = process.cwd();
   for (let i = 0; i < 5; i++) {
     const candidate = join(cur, '.hopper');
-    if (existsSync(candidate)) return candidate;
+    if (existsSync(candidate) && existsSync(join(candidate, 'handoffs'))) return candidate;
     const parent = resolve(cur, '..');
     if (parent === cur) break;
     cur = parent;
@@ -884,6 +891,10 @@ function runProgress(hopperDir, taskId) {
 
 const TERMINAL_TASK_STATUSES = new Set(['done', 'failed', 'timeout', 'cancelled', 'orphaned']);
 const WATCH_EVENTS_INTERVAL_MS = 500;
+// `--watch-events --once` must never hang indefinitely (issue: progress-watch-hang).
+// If no terminal event arrives within this bound, exit cleanly. Overridable via env
+// for long-running tasks; default is generous but finite.
+const WATCH_ONCE_MAX_WAIT_MS = Number.parseInt(process.env.HOPPER_WATCH_ONCE_TIMEOUT_MS || '1800000', 10);
 
 function taskIdFromOutputPath(outputMdPath, fm) {
   return fm.task_id || basename(outputMdPath).replace(/-output\.md$/, '');
@@ -929,12 +940,14 @@ export function runWatchEvents(
   const watched = new Set();
   const lastSeenSeq = new Map();
   let scanTimer = null;
+  let onceMaxTimer = null;
   let stopped = false;
 
   function cleanup(code = null) {
     if (stopped) return;
     stopped = true;
     if (scanTimer) clearInterval(scanTimer);
+    if (onceMaxTimer) clearTimeout(onceMaxTimer);
     for (const outputMdPath of watched) unwatchFile(outputMdPath);
     if (code !== null) exitFn(code);
   }
@@ -985,6 +998,21 @@ export function runWatchEvents(
 
   scanOutputs();
   scanTimer = setInterval(scanOutputs, WATCH_EVENTS_INTERVAL_MS);
+  if (once) {
+    // `--once` must be able to exit: don't let the scan interval keep the loop
+    // alive on its own, and bound the wait so it can never hang indefinitely
+    // waiting for a terminal event (issue: progress-watch-hang). A PERSISTENT
+    // monitor (no --once) intentionally keeps scanTimer reffed (below) so it
+    // stays alive to observe tasks dispatched AFTER it starts — e.g. when it
+    // launches against an empty handoffs/.
+    scanTimer.unref();
+    // Nothing terminal to observe → done immediately; otherwise cap the wait.
+    if (watched.size === 0) {
+      cleanup(0);
+      return () => cleanup();
+    }
+    onceMaxTimer = setTimeout(() => cleanup(0), WATCH_ONCE_MAX_WAIT_MS);
+  }
   process.once('SIGINT', () => cleanup(0));
   process.once('SIGTERM', () => cleanup(0));
   return () => cleanup();
