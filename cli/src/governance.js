@@ -46,3 +46,41 @@ export function parseGovernanceContent(content) {
 function stripBackticks(s) {
   return (s || '').replace(/^`/, '').replace(/`$/, '').trim();
 }
+
+/**
+ * Load and parse .hopper/GOVERNANCE.md. Returns null if the file does not exist.
+ * @param {string} hopperDir
+ * @returns {Promise<{ constitutionPointer: string|null, overlays: Record<string,string> }|null>}
+ */
+export async function loadGovernance(hopperDir) {
+  const path = join(hopperDir, 'GOVERNANCE.md');
+  try {
+    return parseGovernanceContent(await readFile(path, 'utf-8'));
+  } catch (err) {
+    if (err.code === 'ENOENT') return null;
+    throw err;
+  }
+}
+
+/**
+ * Resolve the constitution text from a pointer. Relative pointers resolve
+ * against the project root that owns .hopper/ (dirname of hopperDir). Throws a
+ * clear, actionable error when the pointer cannot be read — never silently
+ * dispatches ungoverned.
+ * @param {string} hopperDir
+ * @param {string} pointer
+ * @returns {Promise<string>}
+ */
+export async function resolveConstitutionText(hopperDir, pointer) {
+  const projectRoot = resolve(hopperDir, '..');
+  const target = isAbsolute(pointer) ? pointer : resolve(projectRoot, pointer);
+  try {
+    return await readFile(target, 'utf-8');
+  } catch (err) {
+    throw new Error(
+      `governance enabled but constitution pointer '${pointer}' is unresolvable (${target}). ` +
+      `Run \`hopper-dispatch --init-governance --from <fable>/prompts/portable-agent-core.md\` ` +
+      `to vendor a copy, or fix the Constitution line in .hopper/GOVERNANCE.md.`
+    );
+  }
+}
