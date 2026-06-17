@@ -5,8 +5,8 @@
 > Vendor-neutral background dispatch for AI agents
 
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
-![Version](https://img.shields.io/badge/version-0.6.1--phase--6c-3DDC97)
-![Tests](https://img.shields.io/badge/tests-434%20total%20%2F%200%20fail-3DDC97)
+![Version](https://img.shields.io/badge/version-0.12.0-3DDC97)
+![Tests](https://img.shields.io/badge/tests-626%20total%20%2F%200%20fail-3DDC97)
 ![Hosts](https://img.shields.io/badge/hosts-Claude%20Code%20%7C%20Codex%20CLI%20%7C%20OpenCode%20%7C%20Standalone-111827)
 
 ## What
