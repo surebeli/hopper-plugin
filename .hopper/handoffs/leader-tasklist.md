@@ -491,3 +491,44 @@ Write `.hopper/handoffs/T-PROG-R15-REVIEW-opencode-output.md` with:
 - Findings ordered by P0/P1/P2
 - Evidence from commit diff, focused tests, and bundle output
 - One-line recommendation for N2.wave.dashboard-2 reviewer
+
+---
+
+## T-FIX-PWHANG — Fix the progress-watch test hang
+
+- Role: builder
+- Task-type: code-impl
+- Priority: high
+- Depends: none
+
+### 1. Context (read first)
+
+- `ISSUE-progress-watch-hang.md` (repo root) — full symptoms, reproduction, partial analysis, and suggested fix direction. This is the authority for the bug.
+- Code under test: the `runWatchEvents` function and the `--watch-events` path in `cli/bin/hopper-dispatch`.
+- Test: `tests/unit/progress-watch.test.js`.
+
+### 2. Iron rule — bound every test run (the suite hangs)
+
+NEVER run `node --test tests/unit/*.test.js` or `node --test tests/unit/progress-watch.test.js` unbounded — it hangs and will stall you until the dispatch idle-timeout kills you. While investigating, ALWAYS bound: run the rest of the suite with `node --test $(ls tests/unit/*.test.js | grep -v progress-watch)`, and probe the hanging file with a handle dump (import the test file, then on an `unref`'d timer dump `process.getActiveResourcesInfo()` / `process._getActiveHandles()` to identify the leaked handle). Only after the fix should an unbounded full run complete.
+
+### 3. Scope
+
+1. Do systematic debugging: reproduce, identify the EXACT leaked handle keeping the test-file process alive after the tests finish (and/or why `--watch-events --once` never exits without a terminal event). No fix before root cause.
+2. Fix at the source. Likely: `unref()` the `setInterval` scan timer and the `fs.watchFile` StatWatcher(s) in `runWatchEvents` so they cannot keep the event loop alive on their own; ensure spawned `--watch-events` children in the tests are terminated and their stdio released; give `--watch-events --once` a bounded/idle exit so it cannot hang indefinitely.
+3. Keep the existing behavior and the file-protocol invariants intact (single-spawn, no-harness-core). Do not weaken assertions to make tests pass.
+
+### 4. Files allowed to touch
+
+- `cli/bin/hopper-dispatch` (the `runWatchEvents` impl), and if needed `tests/unit/progress-watch.test.js`.
+- If you change any vendored runtime file under `cli/`, run `npm run sync:plugin` and commit the vendored `plugins/hopper/` copy too (drift guard).
+
+### 5. Acceptance criteria (machine-checkable)
+
+1. `node --test tests/unit/progress-watch.test.js` EXITS ON ITS OWN (no external cancel) and reports `# fail 0`.
+2. `node --test tests/unit/*.test.js` (NO exclusion) completes and reports `# fail 0`.
+3. `node scripts/sync-vendored-plugin.mjs --check` exits 0 (vendored copy in sync).
+4. No other test regresses.
+
+### 6. Return
+
+Commit the fix (Conventional Commit, scope `watch-events` or `progress-watch`), append the `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>` footer, and write the standard output.md verdict with the four acceptance checks verified.

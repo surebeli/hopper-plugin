@@ -53,6 +53,7 @@ Anchor: `.hopper/queue.md::root`
 | T-PROG-R14-RESEARCH | code-impl | pending | | high | Research chokidar truncate/rotate idioms for v1.1 R14 dashboard tail. Dogfood task for v1.0 monitor. | codex |
 | T-PROG-R14-REVIEW-kimi | code-review-adversarial | pending | | high | Adversarial review of v1.1 R14 dashboard progress bridge commits. | kimi |
 | T-PROG-R15-REVIEW-opencode | code-review-adversarial | pending | | high | Adversarial UI review of v1.1 R15 dashboard progress tab, status strip, a11y, perf, and token consistency. | opencode |
+| T-FIX-PWHANG | code-impl | pending | | high | Fix the progress-watch.test.js hang (see ISSUE-progress-watch-hang.md). The test file never exits and `--watch-events --once` can hang forever. Root-cause the leaked handle, make runWatchEvents release its timers/watchers and give --once a bounded exit, then verify `node --test tests/unit/*.test.js` completes green with NO file exclusion. ALWAYS bound test runs while investigating (the suite hangs). | codex |
 
 ---
 
