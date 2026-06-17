@@ -15,7 +15,7 @@
 //   node scripts/sync-vendored-plugin.mjs           # copy drifted main-source files into plugins/hopper/
 //   node scripts/sync-vendored-plugin.mjs --check   # report drift + exit 1 (no writes) — used by the test
 
-import { readdirSync, statSync, readFileSync, copyFileSync, existsSync } from 'node:fs';
+import { readdirSync, statSync, readFileSync, copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, resolve, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -55,10 +55,31 @@ for (const vf of walk(VENDOR)) {
   }
 }
 
+// The drift loop above only UPDATES files already present in the vendored copy;
+// it never ADDS a new main-source file. A missing runtime file breaks the
+// vendored plugin at import time (e.g. cli/src/dispatch.js importing a brand-new
+// ./governance.js that was never vendored). So require the EXECUTABLE cli/ subtree
+// to be COMPLETE. (docs/assets is deliberately a curated subset — we do NOT mirror
+// it wholesale, or we'd pull in cookbook.md and every diagram.)
+const added = [];
+const CLI_TREE = join(REPO, 'cli');
+if (existsSync(CLI_TREE)) {
+  for (const sf of walk(CLI_TREE)) {
+    const rel = relative(REPO, sf).split('\\').join('/');
+    const vfile = join(VENDOR, rel);
+    if (!existsSync(vfile)) {
+      added.push(rel);
+      if (!check) { mkdirSync(dirname(vfile), { recursive: true }); copyFileSync(sf, vfile); }
+    }
+  }
+}
+
 if (check) {
-  if (drifted.length) {
-    console.error(`plugins/hopper/ is OUT OF SYNC with the main source (${drifted.length} file(s)):`);
-    for (const d of drifted) console.error(`  ${d}`);
+  const problems = drifted.length + added.length;
+  if (problems) {
+    console.error(`plugins/hopper/ is OUT OF SYNC with the main source (${problems} file(s)):`);
+    for (const d of drifted) console.error(`  drift:   ${d}`);
+    for (const a of added) console.error(`  missing: ${a}  (cli/ runtime file absent from vendored copy)`);
     console.error('\nFix: node scripts/sync-vendored-plugin.mjs   (then commit plugins/hopper/)');
     process.exit(1);
   }
@@ -67,8 +88,9 @@ if (check) {
   process.exit(0);
 }
 
-console.log(`Synced ${drifted.length} drifted file(s) into plugins/hopper/:`);
-for (const d of drifted) console.log(`  ${d}`);
+console.log(`Synced ${drifted.length} drifted + ${added.length} new file(s) into plugins/hopper/:`);
+for (const d of drifted) console.log(`  drift: ${d}`);
+for (const a of added) console.log(`  added: ${a}`);
 if (vendorOnly.length) {
   console.log(`\n${vendorOnly.length} vendored-only file(s) left untouched (no main-source counterpart):`);
   for (const v of vendorOnly) console.log(`  ${v}`);
