@@ -147,3 +147,24 @@ test('summarizeQueue counts by status', () => {
   assert.equal(s.pending, 1);
   assert.equal(s['in-progress'], 1);
 });
+
+test('parseQueueContent reads an optional Govern column', () => {
+  const md = `
+| ID | Task-type | Status | Govern |
+|----|-----------|--------|--------|
+| T-1 | code-impl | pending | off |
+| T-2 | code-impl | pending |  |
+`;
+  const rows = parseQueueContent(md);
+  assert.equal(rows[0].govern, 'off');
+  assert.equal(rows[1].govern, null);
+});
+
+test('parseQueueContent leaves govern null when the column is absent', () => {
+  const md = `
+| ID | Task-type | Status |
+|----|-----------|--------|
+| T-1 | code-impl | pending |
+`;
+  assert.equal(parseQueueContent(md)[0].govern, null);
+});

@@ -95,6 +95,7 @@ function mapColumns(headerCells) {
     priorityIdx: indexOfAny(lower, ['priority']),
     briefIdx: indexOfAny(lower, ['brief', 'summary', 'description']),
     vendorIdx: indexOfAny(lower, ['vendor']),
+    governIdx: indexOfAny(lower, ['govern', 'governance']),
   };
 }
 
@@ -138,8 +139,9 @@ function extractRow(cells, map) {
 
   const brief = map.briefIdx != null ? cells[map.briefIdx] : '';
   const vendor = map.vendorIdx != null && cells[map.vendorIdx] ? stripBackticks(cells[map.vendorIdx]) : null;
+  const govern = map.governIdx != null && cells[map.governIdx] ? stripBackticks(cells[map.governIdx]) : null;
 
-  return { id, taskType: effectiveType, status: finalStatus, depends, priority, brief, vendor };
+  return { id, taskType: effectiveType, status: finalStatus, depends, priority, brief, vendor, govern };
 }
 
 function stripBackticks(s) {

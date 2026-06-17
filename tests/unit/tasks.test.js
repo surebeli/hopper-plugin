@@ -126,3 +126,33 @@ test('listTaskTypes returns empty array if tasks dir missing', async () => {
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('composePrompt without governance is byte-identical to legacy 2-arg form', () => {
+  const frame = '# Frame\nDo X.';
+  const spec = 'Task: build Y.';
+  const out = composePrompt(frame, spec);
+  // Locked legacy shape: frame, ---, ## Task spec, spec, trailing newline.
+  assert.equal(out, '# Frame\nDo X.\n\n---\n\n## Task spec\n\nTask: build Y.\n');
+});
+
+test('composePrompt with governance prepends constitution then overlay', () => {
+  const frame = '# Frame\nDo X.';
+  const spec = 'Task: build Y.';
+  const out = composePrompt(frame, spec, {
+    governance: { constitution: 'CONSTITUTION TEXT', overlay: 'OVERLAY TEXT' },
+  });
+  assert.equal(
+    out,
+    'CONSTITUTION TEXT\n\n---\n\nOVERLAY TEXT\n\n---\n\n# Frame\nDo X.\n\n---\n\n## Task spec\n\nTask: build Y.\n'
+  );
+});
+
+test('composePrompt with constitution but empty overlay omits the overlay block', () => {
+  const out = composePrompt('F', 'S', { governance: { constitution: 'C', overlay: '' } });
+  assert.equal(out, 'C\n\n---\n\nF\n\n---\n\n## Task spec\n\nS\n');
+});
+
+test('composePrompt with governance null behaves as legacy', () => {
+  const out = composePrompt('F', 'S', { governance: null });
+  assert.equal(out, 'F\n\n---\n\n## Task spec\n\nS\n');
+});

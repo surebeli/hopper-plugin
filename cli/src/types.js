@@ -18,6 +18,7 @@
  * @property {'high'|'normal'|'low'} priority  Default 'normal' if absent
  * @property {string} brief           Free-text task summary
  * @property {string|null} vendor     Optional per-row vendor override (null = use default lookup)
+ * @property {string|null} [govern]   Optional per-row governance override: 'off' disables the governance preamble for this task (null = use .hopper/GOVERNANCE.md default)
  */
 
 /**

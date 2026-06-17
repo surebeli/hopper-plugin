@@ -85,6 +85,28 @@ hopper-opencode T-PROG-REVIEW --background
 | `/hopper:smoke` | Run the installation smoke test. |
 | `hopper-watch-events` | Claude monitor that delivers terminal events. |
 
+## Governance overlay (opt-in)
+
+By default hopper dispatches a task-shape frame + spec and isolates the vendor
+from host config. If you also want every dispatched vendor to follow a shared
+behavioral constitution (e.g. fable's portable core), opt in:
+
+```bash
+hopper-dispatch --init-governance --from /path/to/fable/prompts/portable-agent-core.md
+```
+
+This writes `.hopper/GOVERNANCE.md` (a constitution pointer + a per-vendor overlay
+table) and vendors a stamped copy of the constitution under `.hopper/governance/`.
+From then on, `hopper-dispatch` prepends `constitution + per-vendor overlay` onto
+the composed prompt — keyed on the same vendor the router already resolves.
+
+- Disable globally: delete `.hopper/GOVERNANCE.md`.
+- Disable per task: add a `Govern` column to `queue.md` and set it to `off`.
+- The constitution stays owned upstream (fable); hopper carries a stamped copy.
+
+This is a prompt-level behavioral contract; it does not change sandbox,
+timeout, routing, or the one-spawn-no-retry guarantee.
+
 See [docs/cookbook.md](docs/cookbook.md) for complete workflows.
 
 ## Install

@@ -97,12 +97,21 @@ export function verifyFrameAntiPersona(frameContent) {
 }
 
 /**
- * Compose final dispatch prompt from frame + task spec.
+ * Compose final dispatch prompt from frame + task spec, with an OPTIONAL
+ * governance preamble prepended (constitution + optional per-vendor overlay).
  *
  * @param {string} frameContent       Output of loadTaskFrame
  * @param {string} taskSpec           Task spec section (from leader-tasklist.md or similar)
+ * @param {{ governance?: { constitution: string, overlay?: string } | null }} [opts]
  * @returns {string}                  Composed prompt to send to vendor adapter
  */
-export function composePrompt(frameContent, taskSpec) {
-  return `${frameContent.trim()}\n\n---\n\n## Task spec\n\n${taskSpec.trim()}\n`;
+export function composePrompt(frameContent, taskSpec, { governance = null } = {}) {
+  const parts = [];
+  if (governance && governance.constitution && governance.constitution.trim()) {
+    parts.push(governance.constitution.trim());
+    if (governance.overlay && governance.overlay.trim()) parts.push(governance.overlay.trim());
+  }
+  parts.push(frameContent.trim());
+  parts.push(`## Task spec\n\n${taskSpec.trim()}`);
+  return parts.join('\n\n---\n\n') + '\n';
 }
