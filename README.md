@@ -27,24 +27,64 @@ A background dispatch writes `output.md`, `output.log`, and `progress.log`. The 
 
 ## Quick Start
 
-### Scenario 1: Dispatch to specific vendor + model
+### Scenario 1: Pick the vendor's model & reasoning effort
 
-Use a task that resolves to codex, then request high reasoning from the codex adapter:
+`--model` and `--reasoning` are **two separate knobs** — never mash them into one
+string. `gpt-5.5-xhigh` is wrong: that glues a model (`gpt-5.5`) to an effort
+(`xhigh`), and the vendor rejects it as an unknown model. Set them independently:
 
 ```bash
+# effort only — model stays the vendor's account default
 hopper-dispatch T-PROG-AUDIT --background --reasoning xhigh
+
+# model AND effort, set independently
+hopper-dispatch T-PROG-AUDIT --background --model gpt-5.4-mini --reasoning high
+
 hopper-dispatch --progress T-PROG-AUDIT
-hopper-dispatch --result T-PROG-AUDIT
+hopper-dispatch --result   T-PROG-AUDIT
+
+# identical flags in Claude Code:
+# /hopper:dispatch T-PROG-AUDIT --model gpt-5.4-mini --reasoning high
 ```
 
-For vendor adapters that honor `--model`:
+- `--model <name>` — the vendor's own model id. **Omit to use the account default.**
+- `--reasoning <minimal|low|medium|high|xhigh>` — thinking effort. **Defaults to `xhigh`**;
+  change the global default with `HOPPER_DEFAULT_REASONING`.
+
+Not every CLI exposes both knobs. What each vendor honors:
+
+| vendor | `--model` | effort (`--reasoning`) | notes |
+|---|---|---|---|
+| codex | `-m` | ✓ | **bare names only**: `gpt-5.5`, `gpt-5.4-mini`, `gpt-5.3-codex-spark`. Provider-prefixed ids (`openai-codex/…`) are rejected on ChatGPT accounts. |
+| grok | `-m` | ✓ | enum low/med/high; `xhigh` clamps to `high`. |
+| mimo | `--model` | ✓ | `xhigh` → `--variant max`. |
+| copilot | `--model` | ✓ | enum low/med/high; `xhigh` clamps to `high`. Raw override: `HOPPER_COPILOT_EFFORT`. |
+| opencode | `--model <provider/model>` | opt-in | effort via `--variant`; enable with `HOPPER_OPENCODE_VARIANT=<v>` (per-model, off by default). |
+| kimi | `-m` | — | `kimi -p` has no per-call effort flag. |
+| claude | `--model` | — | `claude -p` has no effort flag. |
+| agy | — | — | no `--model`; effort handled by internal subagents. |
+
+That table is a snapshot. The **authoritative, never-drifts** version is generated from
+the adapters themselves — use these to check the live truth for your machine/account:
 
 ```bash
-hopper-dispatch T-PROG-REVIEW --background --model kimi-code/kimi-for-coding
-hopper-dispatch T-PROG-UI --background --model deepseek/v4-flash
+hopper-dispatch --rules                 # full matrix (also written to .hopper/DISPATCH.md)
+hopper-dispatch --capabilities codex    # one vendor's model/effort/perms contract
+hopper-dispatch --probe codex           # your account's live model catalog
 ```
 
-Dispatch permissions default to `danger-full-access` so implementation tasks can edit files. If a task brief/spec explicitly says `read-only` / `只读`, hopper automatically downgrades the vendor sandbox to `read-only`; pass `--sandbox <read-only|workspace-write|danger-full-access>` to override.
+Tuning via environment variables:
+
+| var | effect |
+|---|---|
+| `HOPPER_DEFAULT_REASONING` | global effort default (else `xhigh`). |
+| `HOPPER_COPILOT_EFFORT` | raw copilot `--effort` value (e.g. `max`); `""` omits it. |
+| `HOPPER_OPENCODE_VARIANT` | enable + set opencode `--variant`. |
+| `HOPPER_GROK_EFFORT` | raw grok `--effort` value; `""` omits it. |
+
+Dispatch permissions default to `danger-full-access` so implementation tasks can edit
+files. If a task brief/spec says `read-only` / `只读`, hopper auto-downgrades the vendor
+sandbox to `read-only`; override with `--sandbox <read-only|workspace-write|danger-full-access>`.
 
 ### Scenario 2: Background dispatch + watch via dashboard
 

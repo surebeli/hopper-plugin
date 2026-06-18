@@ -29,11 +29,12 @@ This command runs inside a Claude Code session and invokes the host-agnostic `ho
    - Reject anything else.
 4. If validation fails: STOP. Print the offending input verbatim and ask the user to correct it. Do **not** invoke Bash with rejected input.
 
-**What `--model`, `--reasoning`, and `--sandbox` do**: they forward to the vendor adapter via `executeDispatch`'s `adapterOpts`. Adapters honor them differently:
-- `--model` honored by: kimi, opencode, copilot, grok, mimo (becomes `-m / --model <name>` to the vendor CLI)
-- `--reasoning` honored by: codex (becomes `model_reasoning_effort=<level>`) and mimo (becomes `--variant <level>`, with `xhigh` mapped to `max`); other adapters ignore it harmlessly
+**What `--model`, `--reasoning`, and `--sandbox` do**: they forward to the vendor adapter via `executeDispatch`'s `adapterOpts`. `--model` and `--reasoning` are **SEPARATE knobs — never combine them into one string** (e.g. `--model gpt-5.5-xhigh` is WRONG: that mashes a model + an effort and the vendor rejects it as an unknown model). Adapters honor them differently:
+- `--model` honored by: codex, grok, mimo, copilot, kimi, opencode, claude (becomes `-m` / `--model <name>` to the vendor CLI). NOT agy. **codex on a ChatGPT account accepts BARE names only** — `gpt-5.5`, `gpt-5.4-mini`, `gpt-5.3-codex-spark`; provider-prefixed ids (`openai-codex/…`) are rejected. Omit `--model` to use the account default.
+- `--reasoning <minimal|low|medium|high|xhigh>` (default `xhigh`) honored by: codex (→ `model_reasoning_effort=<level>`), mimo (→ `--variant <level>`, `xhigh`→`max`), grok and copilot (→ `--effort`, enum clamped to low/medium/high so `xhigh`→`high`). opencode forwards `--variant` only when `HOPPER_OPENCODE_VARIANT` is set. kimi/claude/agy have no per-call effort flag and ignore it harmlessly.
+- Authoritative generated per-vendor matrix (never drifts): `hopper-dispatch --rules` (also written to `.hopper/DISPATCH.md`), single-vendor contract `--capabilities <vendor>`, live model catalog `--probe <vendor>`.
 - `--sandbox` default: `danger-full-access` unless the task brief/spec explicitly says `read-only` / `只读`; explicit `--sandbox` overrides the auto default
-- `--sandbox` mappings: codex uses `-s <mode>`; opencode/agy map `danger-full-access` to `--dangerously-skip-permissions`; copilot maps it to `--allow-all-tools --allow-all-paths`; grok maps it to `--always-approve`; mimo maps default full access to `--agent build --dangerously-skip-permissions` and read-only to `--agent plan`; kimi `-p` uses Kimi's native auto permission policy and rejects `--prompt` combined with `--yolo` / `--auto` / `--plan`, so hopper does not forward sandbox argv
+- `--sandbox` mappings: codex uses `-s <mode>` (and `--dangerously-bypass-approvals-and-sandbox` for `danger-full-access` on Windows — see ISSUE-codex-callchain-windows); opencode/agy map `danger-full-access` to `--dangerously-skip-permissions`; copilot maps it to `--allow-all-tools --allow-all-paths`; grok maps it to `--always-approve`; mimo maps default full access to `--agent build --dangerously-skip-permissions` and read-only to `--agent plan`; kimi `-p` uses Kimi's native auto permission policy and rejects `--prompt` combined with `--yolo` / `--auto` / `--plan`, so hopper does not forward sandbox argv
 
 ## Invocation modes — pick ONE based on arguments
 
