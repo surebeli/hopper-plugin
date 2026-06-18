@@ -98,14 +98,19 @@ test('codex adapter args() builds expected invocation', () => {
   const a = getAdapter('codex');
   const argv = a.args('test prompt', { reasoning: 'high' });
   assert.ok(argv.includes('exec'));
-  assert.ok(argv.includes('-s'));
-  assert.equal(argv[argv.indexOf('-s') + 1], 'danger-full-access');
+  // danger-full-access default bypasses the sandbox (Windows 1326 fix) instead of
+  // `-s danger-full-access`, and disables codex's global orchestration.
+  assert.ok(argv.includes('--dangerously-bypass-approvals-and-sandbox'), 'danger-full-access bypasses the sandbox');
+  assert.ok(!argv.includes('-s'), 'no -s when the sandbox is bypassed');
+  assert.ok(argv.includes('--disable') && argv.includes('multi_agent'), 'disables multi-agent sub-spawns');
   assert.ok(argv.includes('-c'));
-  assert.ok(argv.some((a) => a.includes('model_reasoning_effort="high"')));
+  assert.ok(argv.some((x) => x.includes('model_reasoning_effort="high"')));
   assert.ok(argv.includes('test prompt'));
 
+  // read-only / workspace-write keep a real sandbox via -s (no bypass).
   const ro = a.args('test prompt', { sandbox: 'read-only' });
   assert.equal(ro[ro.indexOf('-s') + 1], 'read-only');
+  assert.ok(!ro.includes('--dangerously-bypass-approvals-and-sandbox'), 'read-only must not bypass the sandbox');
 });
 
 test('kimi adapter args() uses Kimi Code 0.x headless form (no removed legacy flags)', () => {

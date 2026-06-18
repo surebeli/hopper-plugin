@@ -7,7 +7,7 @@ import { strict as assert } from 'node:assert';
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { codexAdapter, codexIsolationConfig, resolveIsolatedCodexHome } from '../../cli/src/vendors/codex.js';
+import { codexAdapter, codexIsolationConfig, resolveIsolatedCodexHome, stripCodexSkillsConfig, codexOrchestrationDisableFlags } from '../../cli/src/vendors/codex.js';
 
 function withEnv(key, value, fn) {
   return withEnvs({ [key]: value }, fn);
@@ -168,4 +168,72 @@ test('HOPPER-3: no discoverable auth → no isolation (codex keeps its default h
     rmSync(empty, { recursive: true, force: true });
     rmSync(iso, { recursive: true, force: true });
   }
+});
+
+// ─── ISSUE-codex-callchain-windows: plugin/skill hijack + 1326 false-success ───
+
+test('callchain: stripCodexSkillsConfig drops skills/plugins/marketplaces/hooks, keeps model+MCP', () => {
+  const toml = [
+    'model = "gpt-5.5"', '',
+    '[features]', 'multi_agent = true', '',
+    '[[hooks.PostToolUse]]', 'matcher = "*"',
+    '[[hooks.PostToolUse.hooks]]', 'command = "x"', '',
+    '[marketplaces.agent-hopper]', 'source = "F:\\\\repo"', '',
+    '[plugins."superpowers@openai-curated"]', 'enabled = true', '',
+    '[skills.gstack]', 'path = "/x"', '',
+    '[mcp_servers.fable]', 'command = "node"',
+  ].join('\n');
+  const out = stripCodexSkillsConfig(toml);
+  assert.match(out, /model = "gpt-5.5"/, 'keeps model config');
+  assert.match(out, /\[mcp_servers\.fable\]/, 'keeps MCP servers');
+  assert.match(out, /\[features\]/, 'keeps [features] (orchestration disabled at invocation via --disable)');
+  assert.doesNotMatch(out, /superpowers@openai-curated/, 'drops marketplace plugins');
+  assert.doesNotMatch(out, /\[marketplaces\./, 'drops marketplace registrations');
+  assert.doesNotMatch(out, /\[\[hooks\./, 'drops hooks');
+  assert.doesNotMatch(out, /\[skills\./, 'drops skills');
+});
+
+test('callchain: codexOrchestrationDisableFlags disables multi_agent/hooks/plugin_hooks by default', () => {
+  assert.deepEqual(codexOrchestrationDisableFlags(),
+    ['--disable', 'multi_agent', '--disable', 'hooks', '--disable', 'plugin_hooks']);
+});
+
+test('callchain: HOPPER_CODEX_KEEP_ORCHESTRATION=1 keeps codex orchestration', () => {
+  withEnv('HOPPER_CODEX_KEEP_ORCHESTRATION', '1', () => {
+    assert.deepEqual(codexOrchestrationDisableFlags(), []);
+    assert.ok(!codexAdapter.args('hi', {}).includes('multi_agent'));
+  });
+});
+
+test('callchain: danger-full-access bypasses sandbox; HOPPER_CODEX_SANDBOX_BYPASS=0 reverts to -s', () => {
+  const argv = codexAdapter.args('hi', { sandbox: 'danger-full-access' });
+  assert.ok(argv.includes('--dangerously-bypass-approvals-and-sandbox'));
+  assert.ok(!argv.includes('-s'));
+  withEnv('HOPPER_CODEX_SANDBOX_BYPASS', '0', () => {
+    const argv2 = codexAdapter.args('hi', { sandbox: 'danger-full-access' });
+    assert.ok(!argv2.includes('--dangerously-bypass-approvals-and-sandbox'));
+    assert.equal(argv2[argv2.indexOf('-s') + 1], 'danger-full-access');
+  });
+});
+
+test('callchain: read-only keeps a real -s sandbox (no bypass)', () => {
+  const argv = codexAdapter.args('hi', { sandbox: 'read-only' });
+  assert.equal(argv[argv.indexOf('-s') + 1], 'read-only');
+  assert.ok(!argv.includes('--dangerously-bypass-approvals-and-sandbox'));
+});
+
+test('callchain: parseResult flags CreateProcessWithLogonW 1326 as permission-fail (not false success)', () => {
+  const res = codexAdapter.parseResult({
+    exitCode: 0,
+    stdout: 'I reviewed the repo and everything looks good.',
+    stderr: 'ERROR codex_core::exec: exec error: windows sandbox: CreateProcessWithLogonW failed: 1326',
+    timedOut: false, durationMs: 1000,
+  });
+  assert.equal(res.status, 'permission-fail');
+  assert.match(res.error, /1326/);
+});
+
+test('callchain: parseResult clean success still works (no 1326 in output)', () => {
+  const res = codexAdapter.parseResult({ exitCode: 0, stdout: 'PONG', stderr: 'tokens used\n123', timedOut: false, durationMs: 10 });
+  assert.equal(res.status, 'success');
 });
