@@ -31,7 +31,7 @@ export const opencodeAdapter = {
     reasoningArg: {
       accepted: 'ignored',
       knownGood: [],
-      sourceNote: 'opencode does not expose reasoning-effort knob via CLI flags.',
+      sourceNote: 'CORRECTION (ISSUE-codex-vendor-model-effort, 2026-06): `opencode run --variant <name>` DOES exist (the earlier "no CLI flag" note was stale). But variant values are provider/model-specific and validated by the provider API, and opencode runs arbitrary models, so the adapter does NOT forward the canonical xhigh default automatically (would break non-reasoning models). Default path: ignored. Opt-in: set HOPPER_OPENCODE_VARIANT=<variant> to pass --variant.',
     },
     features: {
       sessionResume: { supported: true, mechanism: '`opencode run --session <id>` / `--continue` / `--fork`. Session IDs per-machine (sst/opencode#10349 — not portable Win<->macOS).' },
@@ -54,6 +54,14 @@ export const opencodeAdapter = {
       // opencode's own permission model.
       ...(opts.cwd ? ['--dir', opts.cwd] : []),
       ...(opts.model ? ['--model', opts.model] : []),
+      // `opencode run --variant <provider-specific>` sets reasoning effort, but the
+      // valid set is PER-MODEL (validated by the provider API) and opencode runs
+      // arbitrary provider models — so unlike mimo (a fork with a known variant set)
+      // we do NOT forward the xhigh default automatically (it would break non-
+      // reasoning models). Opt-in: HOPPER_OPENCODE_VARIANT (ISSUE-codex-vendor-model-effort).
+      ...(process.env.HOPPER_OPENCODE_VARIANT
+        ? ['--variant', process.env.HOPPER_OPENCODE_VARIANT]
+        : []),
       ...(opts.conversationId ? ['-s', opts.conversationId] : []),
       '--print-logs',
       '--format', 'json',

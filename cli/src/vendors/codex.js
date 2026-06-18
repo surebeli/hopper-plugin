@@ -218,13 +218,13 @@ export const codexAdapter = {
   // break single-spawn proof). Source: docs/research/.
   capabilities: {
     modelArg: {
-      accepted: 'ignored',
-      knownGood: [],  // codex available models depend on user ChatGPT subscription
-      // Phase 6a dogfood 2026-05-21: codex CLI supports `-m, --model <MODEL>`.
-      // Our adapter currently uses `model_reasoning_effort` config flag only,
-      // NOT --model. Mark as adapter-ignored. Available models also depend
-      // on user's ChatGPT login + entitlements — not hardcoded here either.
-      sourceNote: 'codex CLI supports `-m <MODEL>` (verified 2026-05-21). Our adapter uses opts.reasoning via config flag only — does NOT forward opts.model. Adapter-ignored, not CLI-unsupported. Machine-readable model catalog available via `codex debug models --bundled` (JSON) per official cli reference; user can run it to see what their ChatGPT login can access.',
+      accepted: 'freeform',
+      // ISSUE-codex-vendor-model-effort (2026-06): adapter now forwards opts.model
+      // as `-m <MODEL>`. ChatGPT-account auth accepts BARE names only — provider-
+      // prefixed ids (openai-codex/gpt-5.1-codex) are rejected (openai/codex#12295).
+      // Catalog is subscription-dependent; list via `codex debug models --bundled`.
+      knownGood: ['gpt-5.5', 'gpt-5.4-mini', 'gpt-5.3-codex-spark'],
+      sourceNote: 'codex exec -m <MODEL>; adapter forwards opts.model verbatim (ISSUE-codex-vendor-model-effort, 2026-06). ChatGPT-account auth accepts BARE model names only (gpt-5.5 / gpt-5.4-mini / gpt-5.3-codex-spark); provider-prefixed names rejected (openai/codex#12295). Effort is SEPARATE from the model name: --reasoning -> -c model_reasoning_effort. Catalog: `codex debug models --bundled`.',
     },
     reasoningArg: {
       accepted: 'enumerated',
@@ -260,6 +260,12 @@ export const codexAdapter = {
     return [
       'exec',
       input,
+      // Forward an explicit model when the dispatch sets one. `codex exec -m <MODEL>`
+      // (ISSUE-codex-vendor-model-effort). ChatGPT-account auth accepts BARE names
+      // only (gpt-5.5 / gpt-5.4-mini / gpt-5.3-codex-spark); provider-prefixed ids
+      // are rejected (openai/codex#12295). Omitted -> codex account default. Effort
+      // is a SEPARATE knob (--reasoning -> model_reasoning_effort), NOT the model name.
+      ...(opts.model ? ['-m', opts.model] : []),
       // Set the workspace root explicitly (CONFIRMED `--cd/-C <path>` works with
       // `codex exec`, developers.openai.com/codex/cli/reference). hopper injects
       // opts.cwd = resolved vendor CWD (repo root by default, or $HOPPER_VENDOR_CWD).

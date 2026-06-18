@@ -6,6 +6,9 @@ import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { grokAdapter } from '../../cli/src/vendors/grok.js';
 import { kimiAdapter } from '../../cli/src/vendors/kimi.js';
+import { codexAdapter } from '../../cli/src/vendors/codex.js';
+import { copilotAdapter, clampCopilotEffort } from '../../cli/src/vendors/copilot.js';
+import { opencodeAdapter } from '../../cli/src/vendors/opencode.js';
 import { listAdapters } from '../../cli/src/vendors/index.js';
 import { compatCheckForAdapter } from '../../cli/src/vendor-compat.js';
 import { renderOutputMarkdown } from '../../cli/src/output.js';
@@ -148,4 +151,53 @@ test('renderOutputMarkdown labels an omitted model as the vendor default', () =>
   const { task, vendor, output, raw } = fakeDispatch();
   const md = renderOutputMarkdown({ task, vendor, output, raw });
   assert.match(md, /Resolved model: `\(vendor default\)`/);
+});
+
+// ─── ISSUE-codex-vendor-model-effort: cross-vendor model + effort forwarding ───
+
+test('codex args: forwards -m only when opts.model is set (opt-in)', () => {
+  const without = codexAdapter.args('p', {});
+  assert.ok(!without.includes('-m'), 'no -m without opts.model');
+  const withM = codexAdapter.args('p', { model: 'gpt-5.4-mini' });
+  const i = withM.indexOf('-m');
+  assert.ok(i >= 0 && withM[i + 1] === 'gpt-5.4-mini', '-m <model> forwarded verbatim');
+});
+
+test('copilot clampCopilotEffort maps the 5-level scale to copilot {low,medium,high}', () => {
+  assert.equal(clampCopilotEffort('minimal'), 'low');
+  assert.equal(clampCopilotEffort('low'), 'low');
+  assert.equal(clampCopilotEffort('medium'), 'medium');
+  assert.equal(clampCopilotEffort('high'), 'high');
+  assert.equal(clampCopilotEffort('xhigh'), 'high');   // canonical default clamps down
+  assert.equal(clampCopilotEffort('max'), 'max');      // unknown passes through (server validates)
+  assert.equal(clampCopilotEffort(''), null);          // explicit empty omits
+  assert.equal(clampCopilotEffort(undefined), null);
+});
+
+test('copilot args: --effort defaults to high (xhigh clamped); medium stays medium', () => {
+  const def = copilotAdapter.args('p', { reasoning: 'xhigh' });
+  const i = def.indexOf('--effort');
+  assert.ok(i >= 0 && def[i + 1] === 'high', 'xhigh default clamps to --effort high');
+  const med = copilotAdapter.args('p', { reasoning: 'medium' });
+  assert.equal(med[med.indexOf('--effort') + 1], 'medium');
+});
+
+test('copilot args: HOPPER_COPILOT_EFFORT overrides (raw passthrough; "" omits)', () => {
+  withEnv('HOPPER_COPILOT_EFFORT', 'max', () => {
+    const argv = copilotAdapter.args('p', { reasoning: 'xhigh' });
+    assert.equal(argv[argv.indexOf('--effort') + 1], 'max', 'raw env value passes through');
+  });
+  withEnv('HOPPER_COPILOT_EFFORT', '', () => {
+    const argv = copilotAdapter.args('p', { reasoning: 'xhigh' });
+    assert.ok(!argv.includes('--effort'), 'empty env omits --effort');
+  });
+});
+
+test('opencode args: --variant is opt-in via HOPPER_OPENCODE_VARIANT only', () => {
+  const without = opencodeAdapter.args('p', { reasoning: 'xhigh' });
+  assert.ok(!without.includes('--variant'), 'no --variant by default (arbitrary provider models)');
+  withEnv('HOPPER_OPENCODE_VARIANT', 'high', () => {
+    const argv = opencodeAdapter.args('p', { reasoning: 'xhigh' });
+    assert.equal(argv[argv.indexOf('--variant') + 1], 'high');
+  });
 });

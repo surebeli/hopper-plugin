@@ -256,8 +256,8 @@ test('capabilities: codex declares reasoning enumerated with all 5 levels (Phase
   // Phase 6b vendor-introspection 2026-05-21: codex has 5 levels per
   // official cli config-reference, not 4. `minimal` is lowest tier.
   assert.deepEqual(caps.reasoningArg.knownGood, ['minimal', 'low', 'medium', 'high', 'xhigh']);
-  assert.equal(caps.modelArg.accepted, 'ignored',
-    'codex adapter uses reasoning not model — accurate per code (args() uses opts.reasoning only)');
+  assert.equal(caps.modelArg.accepted, 'freeform',
+    'codex adapter now forwards opts.model as -m (ISSUE-codex-vendor-model-effort)');
 });
 
 test('capabilities: kimi/opencode/copilot/mimo accept --model freeform', () => {
@@ -268,15 +268,24 @@ test('capabilities: kimi/opencode/copilot/mimo accept --model freeform', () => {
   }
 });
 
-test('capabilities: opencode/copilot/agy/kimi ignore --reasoning (kimi 0.x dropped --thinking argv)', () => {
+test('capabilities: opencode/agy/kimi ignore --reasoning by default (kimi 0.x dropped --thinking argv)', () => {
   // T-KIMI-MIGRATE: Kimi Code 0.x removed the --thinking/--no-thinking argv toggle;
   // reasoning is now config/provider-driven rather than a prompt-mode argv flag, so the
   // adapter no longer forwards opts.reasoning → reasoningArg.accepted is 'ignored'.
-  for (const name of ['opencode', 'copilot', 'agy', 'kimi']) {
+  // opencode's --variant exists but is opt-in (HOPPER_OPENCODE_VARIANT); default path ignores.
+  // (copilot moved to 'enumerated' — see the --effort test below.)
+  for (const name of ['opencode', 'agy', 'kimi']) {
     const caps = capabilitiesForAdapter(name);
     assert.equal(caps.reasoningArg.accepted, 'ignored',
-      `${name} adapter does not forward opts.reasoning as an argv flag`);
+      `${name} adapter does not forward opts.reasoning as an argv flag by default`);
   }
+});
+
+test('capabilities: copilot maps reasoning to --effort (clamped to low/medium/high)', () => {
+  const caps = capabilitiesForAdapter('copilot');
+  assert.equal(caps.reasoningArg.accepted, 'enumerated');
+  assert.deepEqual(caps.reasoningArg.knownGood, ['low', 'medium', 'high']);
+  assert.match(caps.reasoningArg.sourceNote, /--effort/);
 });
 
 test('capabilities: mimo maps reasoning to provider variant', () => {

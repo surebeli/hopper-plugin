@@ -20,8 +20,8 @@ test('renderRulesMarkdown lists every registered vendor with a matrix row', () =
 
 test('renderRulesMarkdown derives cells from the live adapters (no drift)', () => {
   const md = renderRulesMarkdown();
-  // codex: model ignored, cwd --cd, reasoning enumerated
-  assert.match(md, /codex.*ignored \(account default\).*`--cd`/);
+  // codex: model now forwarded via -m, cwd --cd, reasoning enumerated
+  assert.match(md, /codex.*`-m <model>`.*`--cd`/);
   // grok: reasoning clamped vocabulary low/medium/high, perms --always-approve
   assert.match(md, /grok.*low\/medium\/high.*--always-approve/);
   // kimi: no cwd flag, perms not argv-enforced
