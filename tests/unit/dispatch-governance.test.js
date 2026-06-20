@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { resolveDispatch, resolveAdhocDispatch } from '../../cli/src/dispatch.js';
+import { renderOutputMarkdown, writeOutput } from '../../cli/src/output.js';
+import { validateHostVendorSeparation } from '../../cli/src/validation.js';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -80,5 +82,36 @@ test('resolveDispatch: vendorOverride (--vendor) wins over the AGENTS.md routing
     assert.equal(overridden.vendor, 'grok', '--vendor overrides the routed vendor');
     // governance + composition still key on the (overridden) vendor, not the default
     assert.ok(overridden.composedPrompt.startsWith('# Frame'));
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('host != vendor is still enforced for an OVERRIDDEN vendor (review coverage gap)', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-disp-'));
+  try {
+    const hopperDir = scaffoldMinimal(tmp);
+    const r = await resolveDispatch({ hopperDir, taskId: 'T-1', vendorOverride: 'grok' });
+    assert.equal(r.vendor, 'grok');
+    assert.throws(() => validateHostVendorSeparation('grok', r.vendor), /cannot dispatch to the same vendor/i);
+    assert.doesNotThrow(() => validateHostVendorSeparation('codex', r.vendor));
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('resolveAdhocDispatch: synthetic task renders through writeOutput/renderOutputMarkdown without throwing (downstream-field guard)', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-disp-'));
+  try {
+    const hopperDir = scaffoldMinimal(tmp);
+    const resolved = await resolveAdhocDispatch({ hopperDir, taskType: 'code-impl', brief: 'adhoc brief', id: 'adhoc-render' });
+    const dispatchResult = {
+      task: resolved.task, vendor: resolved.vendor,
+      output: { status: 'success', text: 'OK' },
+      raw: { exitCode: 0, timedOut: false, durationMs: 5, stdout: 'OK', stderr: '' },
+    };
+    const md = renderOutputMarkdown(dispatchResult);
+    assert.match(md, /adhoc-render/);
+    assert.match(md, /code-impl/);
+    const written = await writeOutput({ hopperDir, dispatchResult });
+    assert.ok(written.path.endsWith('adhoc-render-output.md'));
+    assert.equal(typeof written.queueEdit, 'string');
+    assert.equal(typeof written.costEdit, 'string');
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });

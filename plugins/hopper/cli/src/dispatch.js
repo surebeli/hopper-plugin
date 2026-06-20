@@ -99,7 +99,7 @@ export async function resolveAdhocDispatch({ hopperDir, taskType, brief, id, ven
   }
   // Frame must exist for the task-type (same loader as the queued path).
   const frame = await loadTaskFrame(hopperDir, taskType);
-  const task = { id, taskType, brief, status: 'pending', deps: [] };
+  const task = { id, taskType, brief, status: 'pending', depends: [] };  // shape parity with queue TaskRow
   const agentsData = await parseAgentsFile(join(hopperDir, 'AGENTS.md'));
   const vendor = vendorOverride || resolveVendor(task, agentsData);
   if (!vendor) {
