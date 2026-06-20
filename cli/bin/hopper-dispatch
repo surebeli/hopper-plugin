@@ -5,7 +5,7 @@
 // Per spec §3 #4 (no harness reaction core): ONE invocation = ONE action = ONE exit.
 // No retry, no fallback, no state across invocations.
 
-import { resolveDispatch, getStatus, executeWithAdapter, resolveAdapterOptsForTask } from '../src/dispatch.js';
+import { resolveDispatch, resolveAdhocDispatch, getStatus, executeWithAdapter, resolveAdapterOptsForTask } from '../src/dispatch.js';
 import { listTaskTypes } from '../src/tasks.js';
 import { listAdapters, getAdapter, installCheckForAdapter, capabilitiesForAdapter, probeVendor } from '../src/vendors/index.js';
 import { readCache, readCacheWithDiagnostics, getVendorCache, setVendorCache, isStale, staleness } from '../src/cache.js';
@@ -69,6 +69,7 @@ function printUsage() {
   console.log('  hopper-dispatch --reap                          Re-classify stale (>24h or dead-PID) jobs as orphaned');
   console.log('  hopper-dispatch --stop <task-id>                Stop a running background job (kill tree; status=cancelled)');
   console.log('  hopper-dispatch --resolve <id>                  Resolve dispatch without spawning');
+  console.log('  hopper-dispatch --adhoc --task-type <t> --brief "<text>" [--vendor <v>] [--id <id>] [--background]   One-off dispatch (no queue.md row); brief IS the spec');
   console.log('  hopper-dispatch --init-tasks [--force]          Scaffold a .hopper/ workspace in the current directory');
   console.log('  hopper-dispatch --init-governance [--from <core>] [--force]  Seed .hopper/GOVERNANCE.md (opt-in prompt overlay)');
   console.log('  hopper-dispatch --status                        Show queue summary');
@@ -240,6 +241,49 @@ async function main() {
     console.error('Error: no .hopper/ directory found in cwd or ancestors.');
     console.error('Set HOPPER_DIR env var OR run from a directory containing .hopper/.');
     process.exit(1);
+  }
+
+  // Ad-hoc dispatch: a one-off task with NO queue.md row (the --brief IS the spec).
+  // Powers the directed commands (/hopper:review|research|market) + the swarm so they
+  // never have to author queue.md. Single-spawn / host!=vendor guarantees unchanged.
+  if (args.includes('--adhoc')) {
+    const valueAfter = (flag) => {
+      const i = args.indexOf(flag);
+      return i !== -1 && args[i + 1] !== undefined && !args[i + 1].startsWith('-') ? args[i + 1] : null;
+    };
+    const taskType = valueAfter('--task-type');
+    const brief = valueAfter('--brief');
+    if (!taskType || !brief) {
+      console.error('Error: --adhoc requires --task-type <type> and --brief "<text>".');
+      console.error('Example: hopper-dispatch --adhoc --task-type prd-research --brief "research X" --vendor codex --background');
+      process.exit(2);
+    }
+    const vendor = valueAfter('--vendor');
+    const adapterOpts = {};
+    try {
+      if (vendor !== null) {
+        validateVendor(vendor);
+        if (!listAdapters().includes(vendor)) throw new Error(`unknown vendor '${vendor}'. Registered: ${listAdapters().join(', ')}`);
+      }
+      if (args.includes('--web-search')) adapterOpts.webSearch = true;
+      const model = valueAfter('--model'); if (model) { validateModelName(model); adapterOpts.model = model; }
+      const reasoning = valueAfter('--reasoning'); if (reasoning) { validateReasoning(reasoning); adapterOpts.reasoning = reasoning; }
+      const sandbox = valueAfter('--sandbox'); if (sandbox) { validateSandbox(sandbox); adapterOpts.sandbox = sandbox; }
+      const timeout = valueAfter('--timeout'); if (timeout) { adapterOpts.timeoutOverrideMs = validateTimeout(timeout); }
+    } catch (err) {
+      console.error(`Error: ${err.message}`);
+      process.exit(2);
+    }
+    // Synthetic id for output files (caller may pin one via --id). Date.now is fine in the CLI runtime.
+    const id = valueAfter('--id') || `adhoc-${taskType}-${Date.now().toString(36)}`;
+    const adhocSpec = { taskType, brief };
+    console.error(`hopper-dispatch v${VERSION} — ad-hoc ${taskType} -> ${vendor || '(routed)'} [id: ${id}]`);
+    if (args.includes('--background')) {
+      await runBackgroundDispatch(hopperDir, id, { adapterOpts, vendorOverride: vendor, adhocSpec });
+    } else {
+      await runDispatch(hopperDir, id, { write: true, adapterOpts, vendorOverride: vendor, adhocSpec });
+    }
+    return;
   }
 
   if (args.includes('--status')) {
@@ -563,14 +607,16 @@ function warnIfModelUnknown(vendor, model) {
   }
 }
 
-async function runDispatch(hopperDir, taskId, { write = false, force = false, adapterOpts = {}, vendorOverride = null } = {}) {
+async function runDispatch(hopperDir, taskId, { write = false, force = false, adapterOpts = {}, vendorOverride = null, adhocSpec = null } = {}) {
   try {
     const optsSummary = Object.keys(adapterOpts).length > 0
       ? ` [opts: ${Object.entries(adapterOpts).map(([k, v]) => `${k}=${v}`).join(', ')}]`
       : '';
     console.error(`hopper-dispatch v${VERSION} — dispatching ${taskId}${optsSummary}...`);
 
-    const resolved = await resolveDispatch({ hopperDir, taskId, vendorOverride });
+    const resolved = adhocSpec
+      ? await resolveAdhocDispatch({ hopperDir, taskType: adhocSpec.taskType, brief: adhocSpec.brief, id: taskId, vendorOverride })
+      : await resolveDispatch({ hopperDir, taskId, vendorOverride });
     const effectiveAdapterOpts = resolveAdapterOptsForTask(resolved, adapterOpts);
     if (effectiveAdapterOpts.sandbox) {
       const source = adapterOpts.sandbox ? 'explicit' : 'auto';
@@ -661,12 +707,14 @@ async function runDispatch(hopperDir, taskId, { write = false, force = false, ad
 
 // ─── Background mode (spec §14) ───────────────────────────────────────
 
-async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {}, vendorOverride = null } = {}) {
+async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {}, vendorOverride = null, adhocSpec = null } = {}) {
   // We need a resolved adapter + argv WITHOUT executing. resolveDispatch
   // returns the composed prompt; we then ask the adapter for argv.
   let resolved;
   try {
-    resolved = await resolveDispatch({ hopperDir, taskId, vendorOverride });
+    resolved = adhocSpec
+      ? await resolveAdhocDispatch({ hopperDir, taskType: adhocSpec.taskType, brief: adhocSpec.brief, id: taskId, vendorOverride })
+      : await resolveDispatch({ hopperDir, taskId, vendorOverride });
   } catch (err) {
     console.error(`Error: ${err.message}`);
     process.exit(1);

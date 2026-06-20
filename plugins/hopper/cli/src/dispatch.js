@@ -21,6 +21,7 @@ import { resolvePromptDelivery } from './prompt-delivery.js';
 import {
   resolveDefaultReasoning, resolveDefaultSandbox,
   READ_ONLY_DEFAULT_TASK_TYPES, WEB_SEARCH_TASK_TYPES,
+  validateTaskId, TASK_TYPE_PATTERN,
 } from './validation.js';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -69,6 +70,44 @@ export async function resolveDispatch({ hopperDir, taskId, vendorOverride = null
   const governance = await resolveGovernance({ hopperDir, vendor, task });
   const composedPrompt = composePrompt(frame, taskSpec, { governance });
 
+  return { task, frame, vendor, composedPrompt, taskSpec };
+}
+
+/**
+ * Resolve an AD-HOC dispatch — a one-off task with NO queue.md row; the brief IS
+ * the spec. Used by the directed commands (/hopper:review|research|market) and the
+ * swarm so they need not author (and pollute) queue.md. Returns the same shape as
+ * resolveDispatch, so the caller's single-spawn / host!=vendor guarantees apply
+ * identically. Read-only/web-search task-type defaults still come from
+ * resolveAdapterOptsForTask downstream.
+ *
+ * @param {object} args
+ * @param {string} args.hopperDir
+ * @param {string} args.taskType        a scaffolded task-type (its frame must exist)
+ * @param {string} args.brief           the task brief (becomes the spec)
+ * @param {string} args.id              the synthetic task-id (for output files)
+ * @param {string|null} [args.vendorOverride]
+ * @returns {Promise<{task: object, frame: string, vendor: string, composedPrompt: string, taskSpec: string}>}
+ */
+export async function resolveAdhocDispatch({ hopperDir, taskType, brief, id, vendorOverride = null }) {
+  validateTaskId(id);
+  if (typeof taskType !== 'string' || !TASK_TYPE_PATTERN.test(taskType)) {
+    throw new Error(`Invalid --task-type "${taskType}" (expected lowercase like prd-research / code-review-acceptance).`);
+  }
+  if (typeof brief !== 'string' || brief.trim().length === 0) {
+    throw new Error('Ad-hoc dispatch requires a non-empty --brief.');
+  }
+  // Frame must exist for the task-type (same loader as the queued path).
+  const frame = await loadTaskFrame(hopperDir, taskType);
+  const task = { id, taskType, brief, status: 'pending', deps: [] };
+  const agentsData = await parseAgentsFile(join(hopperDir, 'AGENTS.md'));
+  const vendor = vendorOverride || resolveVendor(task, agentsData);
+  if (!vendor) {
+    throw new Error(`No vendor resolved for ad-hoc task-type "${taskType}". Pass --vendor <name> (no AGENTS.md preference found).`);
+  }
+  const taskSpec = brief;
+  const governance = await resolveGovernance({ hopperDir, vendor, task });
+  const composedPrompt = composePrompt(frame, taskSpec, { governance });
   return { task, frame, vendor, composedPrompt, taskSpec };
 }
 

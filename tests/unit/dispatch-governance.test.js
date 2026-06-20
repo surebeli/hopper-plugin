@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { resolveDispatch } from '../../cli/src/dispatch.js';
+import { resolveDispatch, resolveAdhocDispatch } from '../../cli/src/dispatch.js';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -47,6 +47,26 @@ test('resolveDispatch composes without governance when GOVERNANCE.md absent', as
     const r = await resolveDispatch({ hopperDir, taskId: 'T-1' });
     assert.ok(r.composedPrompt.startsWith('# Frame'),
       `expected frame prefix, got: ${r.composedPrompt.slice(0, 20)}`);
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('resolveAdhocDispatch: queue-less dispatch (brief = spec; --vendor wins; validates inputs)', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-disp-'));
+  try {
+    const hopperDir = scaffoldMinimal(tmp);
+    const r = await resolveAdhocDispatch({ hopperDir, taskType: 'code-impl', brief: 'do the ad-hoc thing', id: 'adhoc-1' });
+    assert.equal(r.task.id, 'adhoc-1');
+    assert.equal(r.task.taskType, 'code-impl');
+    assert.equal(r.vendor, 'codex', 'defaults to the AGENTS.md preference');
+    assert.equal(r.taskSpec, 'do the ad-hoc thing', 'brief becomes the spec');
+    assert.ok(r.composedPrompt.includes('do the ad-hoc thing'), 'spec composed into the prompt');
+
+    const overridden = await resolveAdhocDispatch({ hopperDir, taskType: 'code-impl', brief: 'x', id: 'adhoc-2', vendorOverride: 'grok' });
+    assert.equal(overridden.vendor, 'grok', '--vendor overrides the routed vendor');
+
+    await assert.rejects(() => resolveAdhocDispatch({ hopperDir, taskType: 'code-impl', brief: '', id: 'adhoc-3' }), /non-empty --brief/);
+    await assert.rejects(() => resolveAdhocDispatch({ hopperDir, taskType: 'BAD TYPE', brief: 'x', id: 'adhoc-4' }), /Invalid --task-type/);
+    await assert.rejects(() => resolveAdhocDispatch({ hopperDir, taskType: 'code-impl', brief: 'x', id: '../escape' }), /unsafe characters|task-id/);
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
 

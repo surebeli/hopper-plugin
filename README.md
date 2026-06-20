@@ -116,9 +116,13 @@ hopper-opencode T-PROG-REVIEW --background
 
 | Command | Purpose |
 |---|---|
-| `/hopper:dispatch` | Dispatch a task to its preferred vendor. |
+| `/hopper:dispatch` | Dispatch a task to its preferred vendor (`--vendor` overrides routing; `--result <id> --full` for long output). |
+| `/hopper:review` | One-shot read-only code review of a diff/path/PR (ad-hoc, no queue.md row). |
+| `/hopper:research` | One-shot web-search-backed product/feature research (ad-hoc, read-only). |
+| `/hopper:market` | One-shot web-search-backed market/competitor research (ad-hoc, read-only). |
+| `/hopper:setup` | Vendor readiness: installed/auth/models/sandbox/web-search. |
 | `/hopper:status` | Show queue summary. |
-| `/hopper:result` | Fetch a completed task verdict and log tail. |
+| `/hopper:result` | Fetch a completed task verdict and log tail (`--full` for the complete text). |
 | `/hopper:models` | List cached vendor models. |
 | `/hopper:probe` | Refresh vendor capability cache. |
 | `/hopper:vendors` | List registered vendor adapters. |
