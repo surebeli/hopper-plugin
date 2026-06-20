@@ -63,7 +63,7 @@ function printUsage() {
   console.log('  hopper-dispatch --watch <task-id>               Tail-follow a background job until exit');
   console.log('  hopper-dispatch --progress <task-id>            Show background task phase + recent progress events');
   console.log('  hopper-dispatch --watch-events [--once]         Emit terminal task events as stdout JSONL');
-  console.log('  hopper-dispatch --result <task-id>              Print completed task result (verdict body + log tail) to stdout');
+  console.log('  hopper-dispatch --result <task-id> [--full]     Print completed task result (verdict body + log tail); --full prints the complete sidecar text (for long review/research output)');
   console.log('  hopper-dispatch --jobs                          List all in-progress background jobs');
   console.log('  hopper-dispatch --reap                          Re-classify stale (>24h or dead-PID) jobs as orphaned');
   console.log('  hopper-dispatch --stop <task-id>                Stop a running background job (kill tree; status=cancelled)');
@@ -297,12 +297,17 @@ async function main() {
   }
   const resultIdx = args.indexOf('--result');
   if (resultIdx !== -1) {
-    const taskId = args[resultIdx + 1];
-    if (!taskId || taskId.startsWith('-')) {
+    // task-id = first non-flag token after --result, so `--result --full T-X` and
+    // `--result T-X --full` both work.
+    let taskId = null;
+    for (let i = resultIdx + 1; i < args.length; i++) {
+      if (!args[i].startsWith('-')) { taskId = args[i]; break; }
+    }
+    if (!taskId) {
       console.error('Error: --result requires a task-id.');
       process.exit(1);
     }
-    runResult(hopperDir, taskId);
+    runResult(hopperDir, taskId, { full: args.includes('--full') });
     return;
   }
 
@@ -1076,7 +1081,7 @@ export function runWatchEvents(
  * Exit codes: 0 if status=done, 1 otherwise, 2 if task is still in-progress
  * (caller should use --watch to tail instead).
  */
-function runResult(hopperDir, taskId) {
+function runResult(hopperDir, taskId, { full = false } = {}) {
   try { validateTaskId(taskId); }
   catch (err) { console.error(`Error: ${err.message}`); process.exit(2); }
 
@@ -1122,11 +1127,27 @@ function runResult(hopperDir, taskId) {
   if (statusIdx !== -1) body = body.slice(0, statusIdx);
   body = body.trim();
 
-  if (body.length > 0) {
+  // --full: print the complete vendor text from the sidecar raw file (research /
+  // review output is often longer than the output.md preview cap). When there is no
+  // sidecar, the output.md body already IS the complete text (it fit under the cap).
+  const rawSidecar = outputMdPath.replace(/-output\.md$/, '-output-raw.txt');
+  if (full && existsSync(rawSidecar)) {
+    let fullText = '';
+    try { fullText = readFileSync(rawSidecar, 'utf-8').trim(); } catch (_) { /* fall through */ }
+    console.log(`--- FULL OUTPUT (sidecar, ${fullText.length} chars) ---`);
+    console.log(fullText);
+    console.log('--- END FULL OUTPUT ---');
+    console.log('');
+  } else if (body.length > 0) {
+    if (full) console.log('(--full: no sidecar — the output.md body below IS the complete text)');
     console.log('--- OUTPUT.MD BODY ---');
     console.log(body);
     console.log('--- END BODY ---');
     console.log('');
+    if (!full && existsSync(rawSidecar)) {
+      console.log(`Note: shown as a preview (truncated). Full text: \`hopper-dispatch --result ${taskId} --full\`.`);
+      console.log('');
+    }
   } else {
     console.log('(output.md body is empty — vendor likely streamed to .log; printing log tail below.)');
     console.log('');

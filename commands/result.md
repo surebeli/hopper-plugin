@@ -1,7 +1,7 @@
 ---
 description: Print the completed result of a hopper-dispatched task in the host session (vendor verdict + log tail).
 allowed-tools: Bash, Read
-argument-hint: <task-id>
+argument-hint: <task-id> [--full]
 ---
 
 This command surfaces a background-dispatched task's result in the current Claude Code session. Phase 6b/6c dispatched tasks land their output in `.hopper/handoffs/<task-id>-output.md` (frontmatter + body) and matching `.log` (raw vendor stdout) — invisible to the host session without explicit retrieval. This command performs that retrieval.
@@ -39,6 +39,16 @@ for root in \
   fi
 done
 ```
+
+## Long output (review / research)
+
+The printed body is a **preview** (capped ~8000 chars background / ~4096 sync). When the vendor output is longer (common for review/research/market briefs), the CLI prints a `--full` hint and the COMPLETE text is preserved in the sidecar `<task-id>-output-raw.txt`. To surface the full text, add `--full`:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/cli/bin/hopper-dispatch" --result "<validated-task-id>" --full
+```
+
+For research / market results (usually long), prefer `--full` by default so the user sees the complete brief. The inline preview cap can also be raised globally with `HOPPER_OUTPUT_PREVIEW_MAX=<chars>`.
 
 ## Exit code handling
 

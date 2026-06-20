@@ -32,6 +32,20 @@ const PREVIEW_CHAR_LIMIT = 4096;
 export const VENDOR_OUTPUT_PREVIEW_LIMIT = 8000;
 
 /**
+ * Effective preview cap. HOPPER_OUTPUT_PREVIEW_MAX (a positive int) raises BOTH the
+ * inline preview length AND the sidecar threshold together, so a research/review
+ * consumer can opt into bigger self-contained output.md bodies without code changes.
+ * `--result --full` is the always-works complement (prints the full sidecar text
+ * regardless of this cap). Defaults to the passed base when the env is unset/invalid.
+ * @param {number} base
+ * @returns {number}
+ */
+export function effectivePreviewLimit(base) {
+  const v = Number.parseInt(process.env.HOPPER_OUTPUT_PREVIEW_MAX ?? '', 10);
+  return Number.isFinite(v) && v > 0 ? v : base;
+}
+
+/**
  * Write the .hopper/handoffs/<task-id>-output.md file based on a dispatch result.
  * Also writes a sidecar <task-id>-output-raw.txt when the vendor output exceeds
  * PREVIEW_CHAR_LIMIT (per codex F2: no information loss).
@@ -107,7 +121,7 @@ export async function writeOutput({ hopperDir, dispatchResult, force = false, mo
   // Per codex Phase 3 F3: same symlink check as the main output file.
   const fullText = output.text || '';
   let rawPath = null;
-  if (fullText.length > PREVIEW_CHAR_LIMIT) {
+  if (fullText.length > effectivePreviewLimit(PREVIEW_CHAR_LIMIT)) {
     rawPath = join(handoffDir, `${task.id}-output-raw.txt`);
     try {
       const st = await lstat(rawPath);
@@ -160,7 +174,7 @@ export function renderOutputMarkdown({ task, vendor, output, raw, rawPath = null
   const safeTaskId = sanitizeInline(task.id);
   const safeTaskType = sanitizeInline(task.taskType);
   const safeBrief = task.brief ? sanitizeInline(task.brief) : '(no brief in queue.md)';
-  const previewText = truncate(output.text || '', PREVIEW_CHAR_LIMIT);
+  const previewText = truncate(output.text || '', effectivePreviewLimit(PREVIEW_CHAR_LIMIT));
   const fullTextLen = (output.text || '').length;
 
   return `# ${safeTaskId} — ${safeTaskType} Output (vendor: ${safeVendor})
@@ -279,9 +293,10 @@ export function renderVendorOutputSection(text, { rawLogName } = {}) {
   if (!full.trim()) {
     return `\n## Vendor output (parsed)\n\n_(vendor produced no parsed text; see ${logRef} for the raw output stream.)_\n`;
   }
-  const preview = truncate(full, VENDOR_OUTPUT_PREVIEW_LIMIT);
-  const note = full.length > VENDOR_OUTPUT_PREVIEW_LIMIT
-    ? ` _(preview ${VENDOR_OUTPUT_PREVIEW_LIMIT}/${full.length} chars; full raw stream in ${logRef})_`
+  const limit = effectivePreviewLimit(VENDOR_OUTPUT_PREVIEW_LIMIT);
+  const preview = truncate(full, limit);
+  const note = full.length > limit
+    ? ` _(preview ${limit}/${full.length} chars; full raw stream in ${logRef})_`
     : '';
   return `\n## Vendor output (parsed)${note}\n\n${fence(preview)}\n`;
 }
