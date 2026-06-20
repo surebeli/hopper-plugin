@@ -47,3 +47,45 @@ test('T2 --adhoc: unknown --vendor errors before dispatch (exit 2, no spawn)', (
     assert.match(r.err, /unknown vendor/i);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// ─── T5 --swarm handler (validation + the two third-party-review fixes) ───
+
+test('T5 --swarm: missing --vendors errors (exit 2)', () => {
+  const { root, hopper } = setupHopper();
+  try {
+    const r = runCli(hopper, ['--swarm', '--task-type', 'code-review-acceptance', '--brief', 'x']);
+    assert.equal(r.code, 2);
+    assert.match(r.err, /requires --task-type .* --brief .* --vendors/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T5 --swarm: a write task-type is refused (qualitative-only, exit 2)', () => {
+  const { root, hopper } = setupHopper();
+  try {
+    const r = runCli(hopper, ['--swarm', '--task-type', 'code-impl', '--brief', 'x', '--vendors', 'codex,grok']);
+    assert.equal(r.code, 2);
+    assert.match(r.err, /read-only\/qualitative/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T5 --swarm: --sandbox is rejected so a panel cannot be upgraded to write access (review #1)', () => {
+  const { root, hopper } = setupHopper();
+  try {
+    const r = runCli(hopper, ['--swarm', '--task-type', 'code-review-acceptance', '--brief', 'x', '--vendors', 'codex,grok', '--sandbox', 'danger-full-access']);
+    assert.equal(r.code, 2);
+    assert.match(r.err, /--sandbox is not allowed/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T5 --swarm: a failing panelist does NOT abort the rest (failure isolation, review #2)', () => {
+  // No task-type frames exist in the fixture → every panelist fails resolve BEFORE spawning.
+  // The loop must continue through all of them and report, not exit on the first.
+  const { root, hopper } = setupHopper();
+  try {
+    const r = runCli(hopper, ['--swarm', '--task-type', 'spec-blindspot-hunt', '--brief', 'x', '--vendors', 'codex,grok']);
+    assert.match(r.err, /panelist codex did not launch/);
+    assert.match(r.err, /panelist grok did not launch/, 'the loop continued past the first failure');
+    assert.match(r.out, /Not launched \(2\/2\)/);
+    assert.equal(r.code, 1, 'exit 1 when nothing launched');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

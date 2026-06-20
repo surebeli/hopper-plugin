@@ -318,23 +318,46 @@ async function main() {
         process.exit(2);
       }
     }
+    // --swarm FORCES the read-only/qualitative default — never let --sandbox upgrade a
+    // panel to write access (that would defeat the read-only premise the task-type gate
+    // exists for). Reject it; use per-vendor --adhoc if a different sandbox is truly needed.
+    if (valueAfter('--sandbox')) {
+      console.error('Error: --swarm forces read-only (qualitative panel); --sandbox is not allowed.');
+      process.exit(2);
+    }
     const adapterOpts = {};
     try {
       if (args.includes('--web-search')) adapterOpts.webSearch = true;
-      const model = valueAfter('--model'); if (model) { validateModelName(model); adapterOpts.model = model; }
       const reasoning = valueAfter('--reasoning'); if (reasoning) { validateReasoning(reasoning); adapterOpts.reasoning = reasoning; }
-      const sandbox = valueAfter('--sandbox'); if (sandbox) { validateSandbox(sandbox); adapterOpts.sandbox = sandbox; }
+      // NOTE: no shared --model — a single model id is meaningless across diverse vendors;
+      // per-vendor model is a host concern (the swarm command uses N --adhoc for that).
     } catch (err) {
       console.error(`Error: ${err.message}`);
       process.exit(2);
     }
     console.error(`hopper-dispatch v${VERSION} — swarm ${taskType}: ${panels.length} panelists [${panels.map((p) => p.vendor).join(', ')}]`);
+    const launched = [];
+    const failed = [];
     for (const p of panels) {
-      await runBackgroundDispatch(hopperDir, p.id, { adapterOpts, vendorOverride: p.vendor, adhocSpec: { taskType: p.taskType, brief: p.brief } });
+      try {
+        await runBackgroundDispatch(hopperDir, p.id, { adapterOpts, vendorOverride: p.vendor, adhocSpec: { taskType: p.taskType, brief: p.brief }, exitOnError: false });
+        launched.push(p.id);
+      } catch (err) {
+        // Failure isolation: one panelist failing (auth / host==vendor / etc.) must not abort
+        // the rest of the panel. Collect + continue; already-launched panelists keep running.
+        failed.push({ vendor: p.vendor, error: err.message });
+        console.error(`  panelist ${p.vendor} did not launch: ${err.message}`);
+      }
     }
     console.log('');
-    console.log('SWARM_IDS: ' + panels.map((p) => p.id).join(' '));
-    console.log('Collect each panelist with: hopper-dispatch --result <id> --full');
+    if (launched.length) {
+      console.log('SWARM_IDS: ' + launched.join(' '));
+      console.log('Collect each panelist with: hopper-dispatch --result <id> --full');
+    }
+    if (failed.length) {
+      console.log(`Not launched (${failed.length}/${panels.length}): ${failed.map((f) => f.vendor).join(', ')}`);
+    }
+    if (!launched.length) process.exit(1);
     return;
   }
 
@@ -759,7 +782,13 @@ async function runDispatch(hopperDir, taskId, { write = false, force = false, ad
 
 // ─── Background mode (spec §14) ───────────────────────────────────────
 
-async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {}, vendorOverride = null, adhocSpec = null } = {}) {
+async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {}, vendorOverride = null, adhocSpec = null, exitOnError = true } = {}) {
+  // exitOnError=false (the --swarm path) throws instead of process.exit, so a failed
+  // panelist does NOT abort the rest of the panel.
+  const bail = (msg, code = 1) => {
+    if (exitOnError) { console.error(msg); process.exit(code); }
+    const e = new Error(msg.replace(/^Error:\s*/, '')); e.exitCode = code; throw e;
+  };
   // We need a resolved adapter + argv WITHOUT executing. resolveDispatch
   // returns the composed prompt; we then ask the adapter for argv.
   let resolved;
@@ -768,8 +797,7 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {}, vend
       ? await resolveAdhocDispatch({ hopperDir, taskType: adhocSpec.taskType, brief: adhocSpec.brief, id: taskId, vendorOverride })
       : await resolveDispatch({ hopperDir, taskId, vendorOverride });
   } catch (err) {
-    console.error(`Error: ${err.message}`);
-    process.exit(1);
+    bail(`Error: ${err.message}`, 1);
   }
   const effectiveAdapterOpts = resolveAdapterOptsForTask(resolved, adapterOpts);
 
@@ -781,8 +809,7 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {}, vend
 
   const adapter = getAdapter(resolved.vendor);
   if (!adapter) {
-    console.error(`Error: unknown vendor '${resolved.vendor}'`);
-    process.exit(1);
+    bail(`Error: unknown vendor '${resolved.vendor}'`, 1);
   }
 
   // Enforce host != vendor across all host adapters.
@@ -790,15 +817,13 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {}, vend
   try {
     validateHostVendorSeparation(hostVendor, resolved.vendor);
   } catch (err) {
-    console.error(`Error: ${err.message}`);
-    process.exit(1);
+    bail(`Error: ${err.message}`, 1);
   }
 
   // Adapter envPreflight gate
   const preflight = adapter.envPreflight();
   if (!preflight.ok) {
-    console.error(`Error: adapter ${resolved.vendor} preflight failed: ${preflight.missing.join(' | ')}`);
-    process.exit(1);
+    bail(`Error: adapter ${resolved.vendor} preflight failed: ${preflight.missing.join(' | ')}`, 1);
   }
   if (preflight.missing && preflight.missing.length > 0) {
     for (const msg of preflight.missing) console.error(`Note: ${msg}`);
@@ -806,9 +831,8 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {}, vend
 
   // Adapter stdin handling
   if (adapter.stdinMode === 'pipe') {
-    console.error(`Error: adapter ${resolved.vendor} requires stdinMode='pipe'; background mode does not support stdin piping (spec §14).`);
     console.error('Use sync mode (omit --background) for this vendor, or update the adapter to accept prompt as argv.');
-    process.exit(1);
+    bail(`Error: adapter ${resolved.vendor} requires stdinMode='pipe'; background mode does not support stdin piping (spec §14).`, 1);
   }
 
   // Build argv. logFile gets injected by spawnDetached path NOT here — adapter
@@ -867,8 +891,7 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {}, vend
     console.log(`Follow with: hopper-dispatch --watch ${taskId}`);
     console.log(`List jobs:   hopper-dispatch --jobs`);
   } catch (err) {
-    console.error(`Error: ${err.message}`);
-    process.exit(err.code === 'EALREADYRUNNING' ? 3 : 1);
+    bail(`Error: ${err.message}`, err.code === 'EALREADYRUNNING' ? 3 : 1);
   }
 }
 
