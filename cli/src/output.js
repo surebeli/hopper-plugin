@@ -19,6 +19,7 @@
 //        normalized; metadata fields quoted/sanitized.
 
 import { mkdir, writeFile, access, lstat, realpath } from 'node:fs/promises';
+import { existsSync, lstatSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { validateTaskId as canonicalValidateTaskId } from './validation.js';
 
@@ -43,6 +44,29 @@ export const VENDOR_OUTPUT_PREVIEW_LIMIT = 8000;
 export function effectivePreviewLimit(base) {
   const v = Number.parseInt(process.env.HOPPER_OUTPUT_PREVIEW_MAX ?? '', 10);
   return Number.isFinite(v) && v > 0 ? v : base;
+}
+
+/**
+ * Write the full-text sidecar `<base>-output-raw.txt` for a long vendor answer so
+ * `--result --full` can surface the COMPLETE text. Used by the BACKGROUND runner
+ * (hopper-runner); the sync `--write` path writes its own sidecar inside writeOutput.
+ * Only writes when the text exceeds the (env-tunable) preview cap; symlink-guarded;
+ * best-effort (returns null on skip/failure — the .log retains the full raw stream).
+ * @param {string} outputMdPath  the task's `-output.md` path
+ * @param {string} fullText      the parsed vendor answer (adapter.parseResult().text)
+ * @param {number} [base]        threshold base (defaults to the background preview cap)
+ * @returns {string|null} the sidecar path if written, else null
+ */
+export function writeRunnerSidecar(outputMdPath, fullText, base = VENDOR_OUTPUT_PREVIEW_LIMIT) {
+  if (!fullText || fullText.length <= effectivePreviewLimit(base)) return null;
+  const sidecarPath = outputMdPath.replace(/-output\.md$/, '-output-raw.txt');
+  try {
+    if (existsSync(sidecarPath) && lstatSync(sidecarPath).isSymbolicLink()) return null;
+    writeFileSync(sidecarPath, fullText, 'utf-8');
+    return sidecarPath;
+  } catch (_) {
+    return null;
+  }
 }
 
 /**
@@ -251,7 +275,7 @@ _(Recipient fills in after verdict; e.g. "proceed to T-XX" or "REWORK before T-X
 ## Vendor output text _(preview, ${previewText.length}/${fullTextLen} chars)_
 
 ${fence(previewText || '(empty)')}
-${rawPath ? `\n_Full vendor output exceeds ${PREVIEW_CHAR_LIMIT}-char preview limit; complete text written to \`${posixify(rawPath)}\`._\n` : ''}
+${rawPath ? `\n_Full vendor output exceeds ${effectivePreviewLimit(PREVIEW_CHAR_LIMIT)}-char preview limit; complete text written to \`${posixify(rawPath)}\`._\n` : ''}
 ${output.error ? `## Vendor error context\n\n${fence(truncate(output.error, 2000))}\n${raw.stderr ? `\n**Stderr excerpt** (${(raw.stderr || '').length} bytes total):\n\n${fence(truncate(raw.stderr, 1000))}\n` : ''}` : ''}
 
 ## Suggested protocol edits _(auto-generated)_

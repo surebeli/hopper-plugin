@@ -1131,15 +1131,21 @@ function runResult(hopperDir, taskId, { full = false } = {}) {
   // review output is often longer than the output.md preview cap). When there is no
   // sidecar, the output.md body already IS the complete text (it fit under the cap).
   const rawSidecar = outputMdPath.replace(/-output\.md$/, '-output-raw.txt');
+  let sidecarText = '';
   if (full && existsSync(rawSidecar)) {
-    let fullText = '';
-    try { fullText = readFileSync(rawSidecar, 'utf-8').trim(); } catch (_) { /* fall through */ }
-    console.log(`--- FULL OUTPUT (sidecar, ${fullText.length} chars) ---`);
-    console.log(fullText);
+    try { sidecarText = readFileSync(rawSidecar, 'utf-8').trim(); } catch (_) { sidecarText = ''; }
+  }
+  if (sidecarText) {
+    console.log(`--- FULL OUTPUT (sidecar, ${sidecarText.length} chars) ---`);
+    console.log(sidecarText);
     console.log('--- END FULL OUTPUT ---');
     console.log('');
   } else if (body.length > 0) {
-    if (full) console.log('(--full: no sidecar — the output.md body below IS the complete text)');
+    // --full with an empty/unreadable sidecar falls through to the body rather than
+    // printing an empty FULL OUTPUT block (review finding #3). When there is genuinely
+    // no sidecar, the body IS complete (the text fit under the preview cap).
+    if (full && existsSync(rawSidecar)) console.log('(--full: sidecar was empty/unreadable — showing the output.md body instead)');
+    else if (full) console.log('(--full: no sidecar — the output.md body below IS the complete text)');
     console.log('--- OUTPUT.MD BODY ---');
     console.log(body);
     console.log('--- END BODY ---');

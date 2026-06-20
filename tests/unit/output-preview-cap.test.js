@@ -4,7 +4,10 @@
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { effectivePreviewLimit, renderVendorOutputSection, VENDOR_OUTPUT_PREVIEW_LIMIT } from '../../cli/src/output.js';
+import { effectivePreviewLimit, renderVendorOutputSection, writeRunnerSidecar, VENDOR_OUTPUT_PREVIEW_LIMIT } from '../../cli/src/output.js';
+import { mkdtempSync, existsSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 function withEnv(key, value, fn) {
   const prev = process.env[key];
@@ -36,4 +39,30 @@ test('T1: renderVendorOutputSection truncates at the default cap, but fits the w
     assert.doesNotMatch(fullInline, /preview \d+\/\d+ chars/, 'no truncation note when the cap covers the text');
     assert.ok(fullInline.includes(long), 'full text present inline under a raised cap');
   });
+});
+
+test('T1: writeRunnerSidecar writes the COMPLETE text past the cap, else null (background --full source)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hopper-sidecar-'));
+  try {
+    const long = 'Z'.repeat(VENDOR_OUTPUT_PREVIEW_LIMIT + 100);
+    const p = writeRunnerSidecar(join(dir, 'T-X-output.md'), long);
+    assert.ok(p && p.endsWith('T-X-output-raw.txt'), 'returns the sidecar path');
+    assert.equal(readFileSync(p, 'utf-8'), long, 'sidecar holds the COMPLETE text (untruncated)');
+
+    // short / empty text → no sidecar
+    assert.equal(writeRunnerSidecar(join(dir, 'T-Y-output.md'), 'short'), null);
+    assert.equal(existsSync(join(dir, 'T-Y-output-raw.txt')), false);
+    assert.equal(writeRunnerSidecar(join(dir, 'T-Y-output.md'), ''), null);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('T1: writeRunnerSidecar respects HOPPER_OUTPUT_PREVIEW_MAX (raised cap → no sidecar mid-length)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hopper-sidecar2-'));
+  try {
+    const mid = 'Q'.repeat(VENDOR_OUTPUT_PREVIEW_LIMIT + 100); // > default cap
+    withEnv('HOPPER_OUTPUT_PREVIEW_MAX', String(VENDOR_OUTPUT_PREVIEW_LIMIT + 5000), () => {
+      assert.equal(writeRunnerSidecar(join(dir, 'T-Z-output.md'), mid), null, 'raised cap covers it → no sidecar');
+    });
+    assert.equal(existsSync(join(dir, 'T-Z-output-raw.txt')), false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

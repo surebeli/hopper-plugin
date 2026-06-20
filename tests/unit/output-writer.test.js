@@ -289,6 +289,25 @@ test('writeOutput: writes sidecar -output-raw.txt when output exceeds preview li
   }
 });
 
+test('writeOutput: HOPPER_OUTPUT_PREVIEW_MAX raises the cap → long-but-under-cap output writes NO sidecar (T1)', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-out-raisedcap-'));
+  const prev = process.env.HOPPER_OUTPUT_PREVIEW_MAX;
+  process.env.HOPPER_OUTPUT_PREVIEW_MAX = '50000';
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    mkdirSync(hopperDir, { recursive: true });
+    const text = 'Y'.repeat(8000);  // > default 4096 but < raised 50000
+    const result = makeDispatchResult({ output: { text, status: 'success' } });
+    const written = await writeOutput({ hopperDir, dispatchResult: result });
+    assert.equal(written.rawPath, null, 'no sidecar when the raised cap covers the text');
+    assert.ok(written.content.includes(text), 'full text inline in output.md under a raised cap');
+    assert.doesNotMatch(written.content, /complete text written to/, 'no sidecar reference under a raised cap');
+  } finally {
+    if (prev === undefined) delete process.env.HOPPER_OUTPUT_PREVIEW_MAX; else process.env.HOPPER_OUTPUT_PREVIEW_MAX = prev;
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('writeOutput: short outputs do NOT generate sidecar', async () => {
   const tmp = mkdtempSync(join(tmpdir(), 'hopper-out-nosidecar-'));
   try {

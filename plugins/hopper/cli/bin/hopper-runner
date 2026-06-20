@@ -18,7 +18,7 @@ import { appendProgressEvent } from '../src/progress.js';
 import { getAdapter } from '../src/vendors/index.js';
 import { acquireVendorLock, killProcessTree, resolveDispatchTimeouts } from '../src/subprocess.js';
 import { resolveCommandOnPath, resolveCommandWithKnownPaths } from '../src/path-resolve.js';
-import { renderVendorOutputSection } from '../src/output.js';
+import { renderVendorOutputSection, writeRunnerSidecar } from '../src/output.js';
 
 function parseRunnerArgs(argv) {
   // Format: --task-id X --hopper-dir Y --adapter Z --output-md A --log B -- <adapter argv...>
@@ -351,6 +351,12 @@ async function main() {
       adapterStatus = 'unknown-fail';
       adapterError = `parseResult threw: ${err.message}`;
     }
+
+    // T1 (review finding #1): the BACKGROUND path must ALSO write the full-text
+    // sidecar (previously only the sync --write path did), so `--result --full` can
+    // surface the COMPLETE vendor answer for long review/research output. Logic +
+    // threshold live in output.writeRunnerSidecar (unit-tested); best-effort here.
+    writeRunnerSidecar(outputMdPath, adapterText);
 
     // Map adapter classification → queue-legal status (per spec §14.4)
     let status;
