@@ -132,8 +132,8 @@ test('validateSandbox accepts only canonical permission modes', () => {
   }
 });
 
-test('ALLOWED_DISPATCH_VALUE_FLAGS is exactly --model + --reasoning + --sandbox + --timeout', () => {
-  assert.deepEqual([...ALLOWED_DISPATCH_VALUE_FLAGS], ['--model', '--reasoning', '--sandbox', '--timeout']);
+test('ALLOWED_DISPATCH_VALUE_FLAGS is exactly --model + --reasoning + --sandbox + --timeout + --vendor', () => {
+  assert.deepEqual([...ALLOWED_DISPATCH_VALUE_FLAGS], ['--model', '--reasoning', '--sandbox', '--timeout', '--vendor']);
 });
 
 test('taskTextRequestsReadOnly detects explicit read-only task text only', () => {

@@ -22,6 +22,7 @@ import {
   validateSandbox,
   validateTimeout,
   validateHostVendorSeparation,
+  validateVendor,
   ALLOWED_DISPATCH_FLAGS,
   ALLOWED_DISPATCH_VALUE_FLAGS,
 } from '../src/validation.js';
@@ -91,6 +92,7 @@ function printUsage() {
   console.log('  --sandbox <mode>     read-only | workspace-write | danger-full-access');
   console.log('                       Default: danger-full-access; auto read-only for review/research task-types or read-only task text; global override HOPPER_DEFAULT_SANDBOX');
   console.log('  --web-search         Enable vendor web search (codex: --search live). Auto-on for prd-research / market-research task-types.');
+  console.log('  --vendor <name>      Override the routed vendor (must be a registered adapter; host != vendor still enforced)');
   console.log('');
   console.log('Env: HOPPER_DIR overrides .hopper/ location');
   console.log('     HOPPER_VENDOR_CWD overrides the vendor working dir (default: repo root that owns .hopper/);');
@@ -370,10 +372,19 @@ async function main() {
     if (valueFlags.reasoning !== undefined) validateReasoning(valueFlags.reasoning);
     if (valueFlags.sandbox !== undefined) validateSandbox(valueFlags.sandbox);
     if (valueFlags.timeout !== undefined) validateTimeout(valueFlags.timeout);
+    if (valueFlags.vendor !== undefined) validateVendor(valueFlags.vendor);
   } catch (err) {
     console.error(`Error: ${err.message}`);
     process.exit(2);
   }
+
+  // --vendor must name a REGISTERED adapter (overrides AGENTS.md routing; host !=
+  // vendor is still enforced downstream in runDispatch/runBackgroundDispatch).
+  if (valueFlags.vendor !== undefined && !listAdapters().includes(valueFlags.vendor)) {
+    console.error(`Error: unknown vendor '${valueFlags.vendor}'. Registered: ${listAdapters().join(', ')}`);
+    process.exit(2);
+  }
+  const vendorOverride = valueFlags.vendor;  // undefined when not passed
 
   const writeFlag = bareFlags.includes('--write');
   const forceFlag = bareFlags.includes('--force');
@@ -388,9 +399,9 @@ async function main() {
   if (valueFlags.timeout !== undefined) adapterOpts.timeoutOverrideMs = validateTimeout(valueFlags.timeout);
 
   if (backgroundFlag) {
-    await runBackgroundDispatch(hopperDir, taskId, { adapterOpts });
+    await runBackgroundDispatch(hopperDir, taskId, { adapterOpts, vendorOverride });
   } else {
-    await runDispatch(hopperDir, taskId, { write: writeFlag, force: forceFlag, adapterOpts });
+    await runDispatch(hopperDir, taskId, { write: writeFlag, force: forceFlag, adapterOpts, vendorOverride });
   }
 }
 
@@ -552,14 +563,14 @@ function warnIfModelUnknown(vendor, model) {
   }
 }
 
-async function runDispatch(hopperDir, taskId, { write = false, force = false, adapterOpts = {} } = {}) {
+async function runDispatch(hopperDir, taskId, { write = false, force = false, adapterOpts = {}, vendorOverride = null } = {}) {
   try {
     const optsSummary = Object.keys(adapterOpts).length > 0
       ? ` [opts: ${Object.entries(adapterOpts).map(([k, v]) => `${k}=${v}`).join(', ')}]`
       : '';
     console.error(`hopper-dispatch v${VERSION} — dispatching ${taskId}${optsSummary}...`);
 
-    const resolved = await resolveDispatch({ hopperDir, taskId });
+    const resolved = await resolveDispatch({ hopperDir, taskId, vendorOverride });
     const effectiveAdapterOpts = resolveAdapterOptsForTask(resolved, adapterOpts);
     if (effectiveAdapterOpts.sandbox) {
       const source = adapterOpts.sandbox ? 'explicit' : 'auto';
@@ -650,12 +661,12 @@ async function runDispatch(hopperDir, taskId, { write = false, force = false, ad
 
 // ─── Background mode (spec §14) ───────────────────────────────────────
 
-async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {} } = {}) {
+async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {}, vendorOverride = null } = {}) {
   // We need a resolved adapter + argv WITHOUT executing. resolveDispatch
   // returns the composed prompt; we then ask the adapter for argv.
   let resolved;
   try {
-    resolved = await resolveDispatch({ hopperDir, taskId });
+    resolved = await resolveDispatch({ hopperDir, taskId, vendorOverride });
   } catch (err) {
     console.error(`Error: ${err.message}`);
     process.exit(1);

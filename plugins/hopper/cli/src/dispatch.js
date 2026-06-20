@@ -42,7 +42,7 @@ const NEGATED_READ_ONLY_RE = /\b(?:not|non|is\s+not|isn't)\s+(?:read[-_\s]?only|
  *   taskSpec: string
  * }>}
  */
-export async function resolveDispatch({ hopperDir, taskId }) {
+export async function resolveDispatch({ hopperDir, taskId, vendorOverride = null }) {
   // 1. Read queue.md, find task by ID
   const queuePath = join(hopperDir, 'queue.md');
   const tasks = await parseQueue(queuePath);
@@ -57,7 +57,9 @@ export async function resolveDispatch({ hopperDir, taskId }) {
   // 3. Resolve vendor via AGENTS.md (deterministic, no retry state)
   const agentsPath = join(hopperDir, 'AGENTS.md');
   const agentsData = await parseAgentsFile(agentsPath);
-  const vendor = resolveVendor(task, agentsData);
+  // --vendor override wins over the AGENTS.md routing tables; host != vendor and
+  // unknown-vendor checks still apply downstream (the dispatcher validates both).
+  const vendor = vendorOverride || resolveVendor(task, agentsData);
 
   // 4. Read task spec (from leader-tasklist.md if present)
   const taskSpec = await loadTaskSpec(hopperDir, taskId);

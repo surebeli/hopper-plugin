@@ -6,9 +6,11 @@ import { strict as assert } from 'node:assert';
 import {
   TASK_ID_PATTERN,
   ALLOWED_DISPATCH_FLAGS,
+  ALLOWED_DISPATCH_VALUE_FLAGS,
   validateTaskId,
   validateDispatchFlags,
   validateHostVendorSeparation,
+  validateVendor,
 } from '../../cli/src/validation.js';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -50,6 +52,15 @@ test('ALLOWED_DISPATCH_FLAGS is frozen + canonical', () => {
   assert.ok(Object.isFrozen(ALLOWED_DISPATCH_FLAGS));
   // --background added in spec v2.1.0 §14 (Phase 5a); --web-search added for research task-types
   assert.deepEqual([...ALLOWED_DISPATCH_FLAGS], ['--write', '--force', '--background', '--web-search']);
+});
+
+test('--vendor: in ALLOWED_DISPATCH_VALUE_FLAGS; validateVendor accepts registered-style names, rejects junk', () => {
+  assert.ok(ALLOWED_DISPATCH_VALUE_FLAGS.includes('--vendor'));
+  assert.doesNotThrow(() => validateVendor('codex'));
+  assert.doesNotThrow(() => validateVendor('grok'));
+  assert.throws(() => validateVendor('Codex'), /not a valid vendor/);    // uppercase rejected
+  assert.throws(() => validateVendor('../escape'), /not a valid vendor/); // path junk rejected
+  assert.throws(() => validateVendor(''), /not a valid vendor/);
 });
 
 test('validateDispatchFlags accepts --write, --force', () => {

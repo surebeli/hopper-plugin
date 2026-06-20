@@ -21,7 +21,21 @@ export const TASK_ID_PATTERN = /^[A-Za-z][A-Za-z0-9._-]{0,99}$/;
 export const ALLOWED_DISPATCH_FLAGS = Object.freeze(['--write', '--force', '--background', '--web-search']);
 
 /** Value-taking flag whitelist (each consumes the next argv as its value). */
-export const ALLOWED_DISPATCH_VALUE_FLAGS = Object.freeze(['--model', '--reasoning', '--sandbox', '--timeout']);
+export const ALLOWED_DISPATCH_VALUE_FLAGS = Object.freeze(['--model', '--reasoning', '--sandbox', '--timeout', '--vendor']);
+
+/** Vendor-name pattern (mirrors registered adapter naming: lowercase alnum/dash). */
+export const VENDOR_PATTERN = /^[a-z][a-z0-9-]{0,29}$/;
+
+/**
+ * Validate a `--vendor` override name (pattern only; the dispatcher additionally
+ * checks it is a REGISTERED adapter and still enforces host != vendor). Throws on reject.
+ */
+export function validateVendor(name) {
+  if (typeof name !== 'string' || !VENDOR_PATTERN.test(name)) {
+    throw new Error(`--vendor "${name}" is not a valid vendor name (expected lowercase like codex / grok / kimi).`);
+  }
+  return name;
+}
 
 /**
  * Model-name pattern: alphanumeric + . - _ / : (for namespaced model strings

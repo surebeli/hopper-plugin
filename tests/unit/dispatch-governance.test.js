@@ -49,3 +49,16 @@ test('resolveDispatch composes without governance when GOVERNANCE.md absent', as
       `expected frame prefix, got: ${r.composedPrompt.slice(0, 20)}`);
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
+
+test('resolveDispatch: vendorOverride (--vendor) wins over the AGENTS.md routing', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-disp-'));
+  try {
+    const hopperDir = scaffoldMinimal(tmp);
+    const def = await resolveDispatch({ hopperDir, taskId: 'T-1' });
+    assert.equal(def.vendor, 'codex', 'default routes to codex per AGENTS.md');
+    const overridden = await resolveDispatch({ hopperDir, taskId: 'T-1', vendorOverride: 'grok' });
+    assert.equal(overridden.vendor, 'grok', '--vendor overrides the routed vendor');
+    // governance + composition still key on the (overridden) vendor, not the default
+    assert.ok(overridden.composedPrompt.startsWith('# Frame'));
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});

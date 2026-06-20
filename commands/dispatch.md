@@ -1,7 +1,7 @@
 ---
 description: Dispatch a task from .hopper/queue.md to its preferred vendor CLI via hopper-dispatch. Supports --background for long-running tasks (spec §14).
 allowed-tools: Bash, Read
-argument-hint: <task-id> [--background] [--write] [--force] [--model <name>] [--reasoning <minimal|low|medium|high|xhigh>] [--sandbox <read-only|workspace-write|danger-full-access>]
+argument-hint: <task-id> [--background] [--write] [--force] [--web-search] [--model <name>] [--reasoning <minimal|low|medium|high|xhigh>] [--sandbox <read-only|workspace-write|danger-full-access>] [--vendor <name>]
 ---
 
 This command runs inside a Claude Code session and invokes the host-agnostic `hopper-dispatch` CLI to dispatch one task.
@@ -22,10 +22,11 @@ This command runs inside a Claude Code session and invokes the host-agnostic `ho
 1. Split `$ARGUMENTS` on whitespace into tokens.
 2. The **first** token MUST be a task ID matching this exact regex: `^[A-Za-z][A-Za-z0-9._-]{0,99}$`. Reject anything containing `/`, `\`, `..`, shell metacharacters (`;`, `|`, `&`, `` ` ``, `$`, `(`, `)`, `<`, `>`, quotes), or newlines.
 3. The **remaining** tokens are one of these forms:
-   - Bare flag: `--write`, `--force`, or `--background` (no value follows)
+   - Bare flag: `--write`, `--force`, `--background`, or `--web-search` (no value follows)
    - Value flag: `--model <name>` (consumes next token) — `<name>` must match `^[A-Za-z][A-Za-z0-9._/:-]{0,99}$`
    - Value flag: `--reasoning <level>` (consumes next token) — `<level>` must be exactly one of `minimal`, `low`, `medium`, `high`, `xhigh`
    - Value flag: `--sandbox <mode>` (consumes next token) — `<mode>` must be exactly one of `read-only`, `workspace-write`, `danger-full-access`
+   - Value flag: `--vendor <name>` (consumes next token) — `<name>` must be a lowercase registered vendor: `codex`, `kimi`, `opencode`, `copilot`, `agy`, `grok`, `mimo`, `claude` (overrides the routed vendor; host≠vendor still enforced)
    - Reject anything else.
 4. If validation fails: STOP. Print the offending input verbatim and ask the user to correct it. Do **not** invoke Bash with rejected input.
 
@@ -33,7 +34,8 @@ This command runs inside a Claude Code session and invokes the host-agnostic `ho
 - `--model` honored by: codex, grok, mimo, copilot, kimi, opencode, claude (becomes `-m` / `--model <name>` to the vendor CLI). NOT agy. **codex on a ChatGPT account accepts BARE names only** — `gpt-5.5`, `gpt-5.4-mini`, `gpt-5.3-codex-spark`; provider-prefixed ids (`openai-codex/…`) are rejected. Omit `--model` to use the account default.
 - `--reasoning <minimal|low|medium|high|xhigh>` (default `xhigh`) honored by: codex (→ `model_reasoning_effort=<level>`), mimo (→ `--variant <level>`, `xhigh`→`max`), grok and copilot (→ `--effort`, enum clamped to low/medium/high so `xhigh`→`high`). opencode forwards `--variant` only when `HOPPER_OPENCODE_VARIANT` is set. kimi/claude/agy have no per-call effort flag and ignore it harmlessly.
 - Authoritative generated per-vendor matrix (never drifts): `hopper-dispatch --rules` (also written to `.hopper/DISPATCH.md`), single-vendor contract `--capabilities <vendor>`, live model catalog `--probe <vendor>`.
-- `--sandbox` default: `danger-full-access` unless the task brief/spec explicitly says `read-only` / `只读`; explicit `--sandbox` overrides the auto default
+- `--vendor <name>` overrides the routed vendor (any registered adapter; host≠vendor still enforced). `--web-search` enables vendor web search (codex `--search`; auto-on for `prd-research`/`market-research` — see `/hopper:research`).
+- `--sandbox` default: `danger-full-access`, but **auto-downgraded to `read-only` for review/research task-types** (`code-review-*`, `prd-research`, `market-research`) or when the task brief/spec says `read-only` / `只读`; explicit `--sandbox` wins; global baseline override `HOPPER_DEFAULT_SANDBOX`.
 - `--sandbox` mappings: codex uses `-s <mode>` (and `--dangerously-bypass-approvals-and-sandbox` for `danger-full-access` on Windows — see ISSUE-codex-callchain-windows); opencode/agy map `danger-full-access` to `--dangerously-skip-permissions`; copilot maps it to `--allow-all-tools --allow-all-paths`; grok maps it to `--always-approve`; mimo maps default full access to `--agent build --dangerously-skip-permissions` and read-only to `--agent plan`; kimi `-p` uses Kimi's native auto permission policy and rejects `--prompt` combined with `--yolo` / `--auto` / `--plan`, so hopper does not forward sandbox argv
 
 ## Invocation modes — pick ONE based on arguments
