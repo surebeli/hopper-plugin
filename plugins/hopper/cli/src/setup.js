@@ -34,8 +34,8 @@ export function sandboxControl(adapter) {
 
 /**
  * Does the adapter plumb a web-search toggle (needed for PRD / market research)?
- * Derived by diffing the argv with vs without opts.webSearch.
- * @returns {'yes'|'no'|'?'}
+ * Reads the declared capabilities.webSearch (argv-diff fallback when undeclared).
+ * @returns {'yes'|'manual'|'no'|'?'}
  */
 export function webSearchSupport(adapter) {
   const ws = adapter && adapter.capabilities && adapter.capabilities.webSearch;

@@ -25,9 +25,10 @@ test('setup: sandboxControl is argv for codex, native for kimi (not argv-downgra
 });
 
 test('setup: web-search readiness reflects per-adapter capability (T3)', () => {
-  for (const v of ['codex', 'claude', 'grok', 'copilot', 'kimi']) {
+  for (const v of ['codex', 'claude', 'grok', 'kimi']) {
     assert.equal(webSearchSupport(getAdapter(v)), 'yes', `${v} headless web search (hopper-enabled)`);
   }
+  assert.equal(webSearchSupport(getAdapter('copilot')), 'manual', 'copilot: full-access only; read-only token unverified');
   assert.equal(webSearchSupport(getAdapter('mimo')), 'manual', 'mimo: possible via env, not auto-forwarded');
   assert.equal(webSearchSupport(getAdapter('opencode')), 'no', 'opencode: config-gated, not headless out of the box');
   assert.equal(webSearchSupport(getAdapter('agy')), 'no');

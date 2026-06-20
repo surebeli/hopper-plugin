@@ -1366,7 +1366,7 @@ async function runSetup({ only = null, deep = false } = {}) {
   console.log('');
   console.log('Legend: Sandbox=argv → hopper can force read-only/full-access via flags; native → vendor');
   console.log('  enforces its own policy (not argv-downgradable). WebSrch=yes → adapter plumbs a web-search');
-  console.log('  toggle (needed for research tasks): yes=hopper enables it on --web-search; manual=vendor can');
+  console.log('  toggle (needed for research tasks): yes=available headlessly; manual=vendor can');
   console.log('  search but needs env/config; no=unsupported. Models: run `--probe <vendor>` to populate; `--rules`');
   console.log('  for the full model/effort/sandbox matrix.');
 
