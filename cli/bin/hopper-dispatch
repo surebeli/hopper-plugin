@@ -5,7 +5,7 @@
 // Per spec §3 #4 (no harness reaction core): ONE invocation = ONE action = ONE exit.
 // No retry, no fallback, no state across invocations.
 
-import { resolveDispatch, resolveAdhocDispatch, getStatus, executeWithAdapter, resolveAdapterOptsForTask } from '../src/dispatch.js';
+import { resolveDispatch, resolveAdhocDispatch, planSwarm, getStatus, executeWithAdapter, resolveAdapterOptsForTask } from '../src/dispatch.js';
 import { listTaskTypes } from '../src/tasks.js';
 import { listAdapters, getAdapter, installCheckForAdapter, capabilitiesForAdapter, probeVendor } from '../src/vendors/index.js';
 import { readCache, readCacheWithDiagnostics, getVendorCache, setVendorCache, isStale, staleness } from '../src/cache.js';
@@ -70,6 +70,7 @@ function printUsage() {
   console.log('  hopper-dispatch --stop <task-id>                Stop a running background job (kill tree; status=cancelled)');
   console.log('  hopper-dispatch --resolve <id>                  Resolve dispatch without spawning');
   console.log('  hopper-dispatch --adhoc --task-type <t> --brief "<text>" [--vendor <v>] [--id <id>] [--background]   One-off dispatch (no queue.md row); brief IS the spec');
+  console.log('  hopper-dispatch --swarm --task-type <t> --brief "<text>" --vendors <v1,v2,v3>   Fan a qualitative (read-only) task out to N vendors (panel)');
   console.log('  hopper-dispatch --init-tasks [--force]          Scaffold a .hopper/ workspace in the current directory');
   console.log('  hopper-dispatch --init-governance [--from <core>] [--force]  Seed .hopper/GOVERNANCE.md (opt-in prompt overlay)');
   console.log('  hopper-dispatch --status                        Show queue summary');
@@ -283,6 +284,57 @@ async function main() {
     } else {
       await runDispatch(hopperDir, id, { write: true, adapterOpts, vendorOverride: vendor, adhocSpec });
     }
+    return;
+  }
+
+  // Multi-vendor SWARM (panel): fan the SAME qualitative brief out to N vendors, each as
+  // its own ad-hoc background dispatch (N single-spawns, no retry; one per vendor). The
+  // vendor selection + per-vendor config is confirmed HOST-side (/hopper:swarm); this just
+  // executes the confirmed list with shared config (per-vendor config → N `--adhoc` calls).
+  if (args.includes('--swarm')) {
+    const valueAfter = (flag) => {
+      const i = args.indexOf(flag);
+      return i !== -1 && args[i + 1] !== undefined && !args[i + 1].startsWith('-') ? args[i + 1] : null;
+    };
+    const taskType = valueAfter('--task-type');
+    const brief = valueAfter('--brief');
+    const vendorsArg = valueAfter('--vendors');
+    if (!taskType || !brief || !vendorsArg) {
+      console.error('Error: --swarm requires --task-type <t> --brief "<text>" --vendors <v1,v2,...>.');
+      console.error('Example: hopper-dispatch --swarm --task-type code-review-acceptance --brief "review X" --vendors codex,grok,claude');
+      process.exit(2);
+    }
+    let panels;
+    try {
+      panels = planSwarm({ taskType, brief, vendors: vendorsArg, idBase: valueAfter('--id-base') });
+    } catch (err) {
+      console.error(`Error: ${err.message}`);
+      process.exit(2);
+    }
+    const known = listAdapters();
+    for (const p of panels) {
+      if (!known.includes(p.vendor)) {
+        console.error(`Error: unknown vendor '${p.vendor}' in --vendors. Registered: ${known.join(', ')}`);
+        process.exit(2);
+      }
+    }
+    const adapterOpts = {};
+    try {
+      if (args.includes('--web-search')) adapterOpts.webSearch = true;
+      const model = valueAfter('--model'); if (model) { validateModelName(model); adapterOpts.model = model; }
+      const reasoning = valueAfter('--reasoning'); if (reasoning) { validateReasoning(reasoning); adapterOpts.reasoning = reasoning; }
+      const sandbox = valueAfter('--sandbox'); if (sandbox) { validateSandbox(sandbox); adapterOpts.sandbox = sandbox; }
+    } catch (err) {
+      console.error(`Error: ${err.message}`);
+      process.exit(2);
+    }
+    console.error(`hopper-dispatch v${VERSION} — swarm ${taskType}: ${panels.length} panelists [${panels.map((p) => p.vendor).join(', ')}]`);
+    for (const p of panels) {
+      await runBackgroundDispatch(hopperDir, p.id, { adapterOpts, vendorOverride: p.vendor, adhocSpec: { taskType: p.taskType, brief: p.brief } });
+    }
+    console.log('');
+    console.log('SWARM_IDS: ' + panels.map((p) => p.id).join(' '));
+    console.log('Collect each panelist with: hopper-dispatch --result <id> --full');
     return;
   }
 

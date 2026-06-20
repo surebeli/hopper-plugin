@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { resolveDispatch, resolveAdhocDispatch } from '../../cli/src/dispatch.js';
+import { resolveDispatch, resolveAdhocDispatch, planSwarm } from '../../cli/src/dispatch.js';
 import { renderOutputMarkdown, writeOutput } from '../../cli/src/output.js';
 import { validateHostVendorSeparation } from '../../cli/src/validation.js';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
@@ -114,4 +114,20 @@ test('resolveAdhocDispatch: synthetic task renders through writeOutput/renderOut
     assert.equal(typeof written.queueEdit, 'string');
     assert.equal(typeof written.costEdit, 'string');
   } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('planSwarm: fans a qualitative brief to N distinct vendors with per-vendor ids', () => {
+  const panels = planSwarm({ taskType: 'code-review-acceptance', brief: 'review X', vendors: 'codex,grok,claude', idBase: 'sw', now: 1 });
+  assert.equal(panels.length, 3);
+  assert.deepEqual(panels.map((p) => p.vendor), ['codex', 'grok', 'claude']);
+  assert.deepEqual(panels.map((p) => p.id), ['sw-codex', 'sw-grok', 'sw-claude']);
+  assert.ok(panels.every((p) => p.taskType === 'code-review-acceptance' && p.brief === 'review X'));
+});
+
+test('planSwarm: dedups vendors; rejects <2, non-qualitative task-types, empty brief, bad names', () => {
+  assert.equal(planSwarm({ taskType: 'prd-research', brief: 'x', vendors: 'codex,codex,grok', idBase: 'b', now: 1 }).length, 2, 'dedup');
+  assert.throws(() => planSwarm({ taskType: 'prd-research', brief: 'x', vendors: 'codex' }), /at least 2 vendors/);
+  assert.throws(() => planSwarm({ taskType: 'code-impl', brief: 'x', vendors: 'codex,grok' }), /read-only\/qualitative/);
+  assert.throws(() => planSwarm({ taskType: 'prd-research', brief: '   ', vendors: 'codex,grok' }), /non-empty --brief/);
+  assert.throws(() => planSwarm({ taskType: 'prd-research', brief: 'x', vendors: 'codex,Bad Vendor' }), /Invalid vendor name/);
 });

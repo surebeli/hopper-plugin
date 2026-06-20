@@ -120,6 +120,7 @@ hopper-opencode T-PROG-REVIEW --background
 | `/hopper:review` | One-shot read-only code review of a diff/path/PR (ad-hoc, no queue.md row). |
 | `/hopper:research` | One-shot web-search-backed product/feature research (ad-hoc, read-only). |
 | `/hopper:market` | One-shot web-search-backed market/competitor research (ad-hoc, read-only). |
+| `/hopper:swarm` | Fan a qualitative task out to a panel of N vendors (confirm → parallel → synthesize). |
 | `/hopper:setup` | Vendor readiness: installed/auth/models/sandbox/web-search. |
 | `/hopper:status` | Show queue summary. |
 | `/hopper:result` | Fetch a completed task verdict and log tail (`--full` for the complete text). |

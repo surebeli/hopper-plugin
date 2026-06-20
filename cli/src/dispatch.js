@@ -21,7 +21,7 @@ import { resolvePromptDelivery } from './prompt-delivery.js';
 import {
   resolveDefaultReasoning, resolveDefaultSandbox,
   READ_ONLY_DEFAULT_TASK_TYPES, WEB_SEARCH_TASK_TYPES,
-  validateTaskId, TASK_TYPE_PATTERN,
+  validateTaskId, TASK_TYPE_PATTERN, VENDOR_PATTERN,
 } from './validation.js';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -109,6 +109,45 @@ export async function resolveAdhocDispatch({ hopperDir, taskType, brief, id, ven
   const governance = await resolveGovernance({ hopperDir, vendor, task });
   const composedPrompt = composePrompt(frame, taskSpec, { governance });
   return { task, frame, vendor, composedPrompt, taskSpec };
+}
+
+/**
+ * Plan a multi-vendor SWARM (panel) — fan the SAME qualitative brief out to N vendors,
+ * each as its own ad-hoc dispatch (one single-spawn per panelist; N tasks, not N retries).
+ * PURE: validates + returns the per-panelist plan; the caller dispatches each via the
+ * normal ad-hoc path. Restricted to READ-ONLY/qualitative task-types — swarming a write
+ * task would have N vendors edit the same files. The vendor *selection* + per-vendor config
+ * is a host-side confirmation gate; this only executes the confirmed list.
+ *
+ * @param {object} args
+ * @param {string} args.taskType   a read-only/qualitative task-type (review/research/audit)
+ * @param {string} args.brief
+ * @param {string[]|string} args.vendors   panelists (array or comma-separated)
+ * @param {string} [args.idBase]
+ * @returns {Array<{ vendor: string, id: string, taskType: string, brief: string }>}
+ */
+export function planSwarm({ taskType, brief, vendors, idBase, now = Date.now() }) {
+  if (typeof taskType !== 'string' || !TASK_TYPE_PATTERN.test(taskType)) {
+    throw new Error(`Invalid --task-type "${taskType}".`);
+  }
+  if (!READ_ONLY_DEFAULT_TASK_TYPES.includes(taskType)) {
+    throw new Error(`--swarm only supports read-only/qualitative task-types (${READ_ONLY_DEFAULT_TASK_TYPES.join(', ')}); got "${taskType}". Swarming a write task would have N vendors edit the same files.`);
+  }
+  if (typeof brief !== 'string' || brief.trim().length === 0) {
+    throw new Error('--swarm requires a non-empty --brief.');
+  }
+  const list = (Array.isArray(vendors) ? vendors : String(vendors || '').split(','))
+    .map((v) => v.trim()).filter(Boolean);
+  const uniq = [...new Set(list)];
+  if (uniq.length < 2) {
+    throw new Error('--swarm needs at least 2 vendors (--vendors v1,v2,...). Use --adhoc for a single vendor.');
+  }
+  for (const v of uniq) {
+    if (!VENDOR_PATTERN.test(v)) throw new Error(`Invalid vendor name "${v}" in --vendors.`);
+  }
+  const base = idBase || `swarm-${taskType}-${now.toString(36)}`;
+  validateTaskId(base);
+  return uniq.map((vendor) => ({ vendor, id: `${base}-${vendor}`, taskType, brief }));
 }
 
 async function loadTaskSpec(hopperDir, taskId) {
