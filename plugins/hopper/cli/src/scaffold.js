@@ -26,6 +26,8 @@ export const SCAFFOLD_TASK_TYPES = Object.freeze([
   'code-review-acceptance',
   'sidecar-polish',
   'spec-blindspot-hunt',
+  'prd-research',
+  'market-research',
 ]);
 
 /**
@@ -208,6 +210,8 @@ never route a task to the same CLI that is dispatching it.
 | \`code-review-acceptance\` | codex | Acceptance-criteria verification |
 | \`sidecar-polish\` | kimi | Fast, cheap hygiene/cleanup pass |
 | \`spec-blindspot-hunt\` | opencode | Alternative perspective for unknown-unknowns |
+| \`prd-research\` | codex | Web-search-backed product-requirement research (read-only by default) |
+| \`market-research\` | codex | Web-search-backed market/competitor research (read-only by default) |
 
 ---
 
@@ -271,6 +275,8 @@ function taskFrame(type) {
     'code-review-acceptance': 'Verify a change against its stated acceptance criteria. Review only — no edits.',
     'sidecar-polish': 'Hygiene/cleanup on existing output (formatting, docs, dead code). Declare review-only vs edit-allowed up front.',
     'spec-blindspot-hunt': 'Surface unknown-unknowns, gaps, and risks in a plan or spec before implementation.',
+    'prd-research': 'Research a product requirement / feature need using web search — synthesize findings, prior art, comparable products, and open questions into PRD input. Research only — no code, no edits.',
+    'market-research': 'Research a market / competitor / trend question using web search — synthesize a sourced, structured brief (sizing, players, trends, risks). Research only — no code, no edits.',
   }[type] || 'Describe the task-type purpose here.';
 
   const verdict = type.startsWith('code-review')

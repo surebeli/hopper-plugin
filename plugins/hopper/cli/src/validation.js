@@ -18,7 +18,7 @@
 export const TASK_ID_PATTERN = /^[A-Za-z][A-Za-z0-9._-]{0,99}$/;
 
 /** Canonical bare flag whitelist for dispatch invocations. */
-export const ALLOWED_DISPATCH_FLAGS = Object.freeze(['--write', '--force', '--background']);
+export const ALLOWED_DISPATCH_FLAGS = Object.freeze(['--write', '--force', '--background', '--web-search']);
 
 /** Value-taking flag whitelist (each consumes the next argv as its value). */
 export const ALLOWED_DISPATCH_VALUE_FLAGS = Object.freeze(['--model', '--reasoning', '--sandbox', '--timeout']);
@@ -71,6 +71,45 @@ export function resolveDefaultReasoning() {
  */
 export const ALLOWED_SANDBOXES = Object.freeze(['read-only', 'workspace-write', 'danger-full-access']);
 export const DEFAULT_DISPATCH_SANDBOX = 'danger-full-access';
+
+/**
+ * Resolve the effective DEFAULT sandbox when a dispatch neither passes --sandbox
+ * nor matches a more-specific rule (read-only task text or a read-only task-type).
+ * HOPPER_DEFAULT_SANDBOX (if a legal mode) > DEFAULT_DISPATCH_SANDBOX. Lets a
+ * safety-conscious operator flip the global baseline (e.g. to workspace-write or
+ * read-only) without editing each dispatch. Never throws (invalid env ignored).
+ * @returns {string}
+ */
+export function resolveDefaultSandbox() {
+  const env = process.env.HOPPER_DEFAULT_SANDBOX;
+  if (env && ALLOWED_SANDBOXES.includes(env)) return env;
+  return DEFAULT_DISPATCH_SANDBOX;
+}
+
+/**
+ * Task-types that default to a READ-ONLY vendor sandbox — review / research work
+ * that must not edit the repo. This is the opt-in policy layer that DOES infer
+ * read-only from task-type, sitting BELOW explicit --sandbox and read-only task
+ * text in precedence. A task that genuinely needs to write still wins by passing
+ * --sandbox workspace-write / danger-full-access.
+ */
+export const READ_ONLY_DEFAULT_TASK_TYPES = Object.freeze([
+  'code-review-adversarial',
+  'code-review-acceptance',
+  'spec-blindspot-hunt',
+  'prd-research',
+  'market-research',
+]);
+
+/**
+ * Task-types that AUTO-ENABLE web search (defined as web-needing). The dispatch
+ * layer sets opts.webSearch=true for these unless an explicit --web-search has
+ * already set it; only web-capable adapters act on it (codex/claude/copilot).
+ */
+export const WEB_SEARCH_TASK_TYPES = Object.freeze([
+  'prd-research',
+  'market-research',
+]);
 
 /**
  * Legal queue status values per .hopper/queue.md schema convention.

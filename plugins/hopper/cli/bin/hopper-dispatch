@@ -89,7 +89,8 @@ function printUsage() {
   console.log('  --reasoning <level>  minimal | low | medium | high | xhigh');
   console.log('                       Honored by: codex (model_reasoning_effort); grok + copilot (--effort, clamped); mimo (--variant, xhigh->max)');
   console.log('  --sandbox <mode>     read-only | workspace-write | danger-full-access');
-  console.log('                       Default: danger-full-access unless task text explicitly says read-only');
+  console.log('                       Default: danger-full-access; auto read-only for review/research task-types or read-only task text; global override HOPPER_DEFAULT_SANDBOX');
+  console.log('  --web-search         Enable vendor web search (codex: --search live). Auto-on for prd-research / market-research task-types.');
   console.log('');
   console.log('Env: HOPPER_DIR overrides .hopper/ location');
   console.log('     HOPPER_VENDOR_CWD overrides the vendor working dir (default: repo root that owns .hopper/);');
@@ -372,7 +373,9 @@ async function main() {
   const writeFlag = bareFlags.includes('--write');
   const forceFlag = bareFlags.includes('--force');
   const backgroundFlag = bareFlags.includes('--background');
+  const webSearchFlag = bareFlags.includes('--web-search');
   const adapterOpts = {};
+  if (webSearchFlag) adapterOpts.webSearch = true;
   if (valueFlags.model !== undefined) adapterOpts.model = valueFlags.model;
   if (valueFlags.reasoning !== undefined) adapterOpts.reasoning = valueFlags.reasoning;
   if (valueFlags.sandbox !== undefined) adapterOpts.sandbox = valueFlags.sandbox;

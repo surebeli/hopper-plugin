@@ -290,7 +290,10 @@ export const codexAdapter = {
       // HOPPER-3: isolate the dispatched codex from the HOST's global config so
       // dispatch stays deterministic (Host != Vendor, spec §3 #4).
       ...codexIsolationConfig(),
-      ...(opts.webSearch ? ['--enable', 'web_search_cached'] : []),
+      // Web search (research/PRD/market dispatches). codex enables CACHED search BY
+      // DEFAULT, so the old `--enable web_search_cached` was a deprecated no-op (2026
+      // vendor research). `--search` opts into LIVE web search (web_search=live).
+      ...(opts.webSearch ? ['--search'] : []),
       // ISSUE-codex-bypass-flag-missing-from-argv (ROOT CAUSE): the PROMPT
       // positional MUST be the LAST argv element. On Windows `codex` is reached
       // through a cmd.exe `.cmd` shim whose command line is capped at ~8191 chars;

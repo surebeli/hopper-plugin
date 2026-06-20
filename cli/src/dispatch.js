@@ -18,7 +18,10 @@ import { resolveCommandWithKnownPaths } from './path-resolve.js';
 import { runSubprocessOnce, resolveDispatchTimeouts } from './subprocess.js';
 import { resolveVendorCwd } from './background.js';
 import { resolvePromptDelivery } from './prompt-delivery.js';
-import { DEFAULT_DISPATCH_SANDBOX, resolveDefaultReasoning } from './validation.js';
+import {
+  resolveDefaultReasoning, resolveDefaultSandbox,
+  READ_ONLY_DEFAULT_TASK_TYPES, WEB_SEARCH_TASK_TYPES,
+} from './validation.js';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -134,10 +137,22 @@ export function taskTextRequestsReadOnly(resolved) {
  */
 export function resolveAdapterOptsForTask(resolved, adapterOpts = {}) {
   const out = { ...adapterOpts };
-  // Permission default: explicit --sandbox wins; else read-only text downgrades;
-  // else product default (danger-full-access).
+  const taskType = resolved?.task?.taskType;
+  // Permission default (precedence, most specific first):
+  //   1. explicit --sandbox (already in out.sandbox) wins
+  //   2. read-only task TEXT (brief/spec says read-only / 只读)
+  //   3. read-only-by-default TASK-TYPE (review / research — must not edit the repo)
+  //   4. global HOPPER_DEFAULT_SANDBOX, else the product default (danger-full-access)
   if (!out.sandbox) {
-    out.sandbox = taskTextRequestsReadOnly(resolved) ? 'read-only' : DEFAULT_DISPATCH_SANDBOX;
+    if (taskTextRequestsReadOnly(resolved)) out.sandbox = 'read-only';
+    else if (taskType && READ_ONLY_DEFAULT_TASK_TYPES.includes(taskType)) out.sandbox = 'read-only';
+    else out.sandbox = resolveDefaultSandbox();
+  }
+  // Web search: auto-enable for web-needing task-types (prd-research / market-research)
+  // unless the caller already decided. An explicit --web-search sets out.webSearch=true
+  // before this runs; only web-capable adapters (codex/claude/copilot) act on it.
+  if (out.webSearch == null && taskType && WEB_SEARCH_TASK_TYPES.includes(taskType)) {
+    out.webSearch = true;
   }
   // Reasoning/effort default: max out unless the caller passed --reasoning. Only
   // codex/grok/mimo consume it (kimi/opencode/copilot/agy/claude ignore it
