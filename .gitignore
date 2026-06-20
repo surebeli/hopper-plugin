@@ -26,6 +26,10 @@ Thumbs.db
 npm-debug.log*
 yarn-debug.log*
 
+# hopper auto-generated prompt files (size-gated pointer delivery) — these hold the
+# composed task brief + governance overlay; never commit (also written mode 0600).
+**/handoffs/*-prompt.md
+
 # Env / secrets (NEVER commit)
 .env
 .env.local

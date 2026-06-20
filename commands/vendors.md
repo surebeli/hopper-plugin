@@ -11,7 +11,7 @@ Print the registered vendor adapters:
 node "$CLAUDE_PLUGIN_ROOT/cli/bin/hopper-dispatch" --vendors
 ```
 
-The dispatcher will print its own version banner and the registered adapter list. As of v0.13.0, 8 functional vendors are registered: codex, kimi, opencode, copilot, agy, grok, mimo, claude.
+The dispatcher will print its own version banner and the registered adapter list. As of v0.14.0, 8 functional vendors are registered: codex, kimi, opencode, copilot, agy, grok, mimo, claude.
 
 Note on the `claude` vendor: it spawns `claude -p` (Claude Code headless) and is meant for dispatch FROM another host (codex / opencode / grok / standalone); the host≠vendor rule blocks a Claude Code host from dispatching back to it. Billing for `claude -p` against a Claude plan changed repeatedly across 2026 (the 2026-06-15 separate-Agent-SDK-credit split was later rolled back) — the adapter is billing-agnostic; verify the current policy at anthropic.com if cost matters to you.
 

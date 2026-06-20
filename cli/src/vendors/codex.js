@@ -257,9 +257,19 @@ export const codexAdapter = {
     const sandboxArgs = bypassSandbox
       ? ['--dangerously-bypass-approvals-and-sandbox']
       : ['-s', sandbox];
+    // ISSUE-codex-bypass-flag-missing-from-argv (run #1 footgun): when the vendor
+    // CWD is widened to a non-git root (HOPPER_VENDOR_CWD), `codex exec` aborts
+    // early with "Not inside a trusted directory and --skip-git-repo-check was not
+    // specified" — codex never runs. In full-access bypass mode we are already
+    // running codex with no sandbox BY INTENT, so skip the git-repo trust gate
+    // too (`--skip-git-repo-check` is a documented `codex exec` flag). Kept on the
+    // bypass path only, so read-only / workspace-write dispatches still honor the
+    // trust gate. Escape hatch: HOPPER_CODEX_SKIP_GIT_CHECK=0 keeps codex default.
+    const skipGitArgs = bypassSandbox && process.env.HOPPER_CODEX_SKIP_GIT_CHECK !== '0'
+      ? ['--skip-git-repo-check']
+      : [];
     return [
       'exec',
-      input,
       // Forward an explicit model when the dispatch sets one. `codex exec -m <MODEL>`
       // (ISSUE-codex-vendor-model-effort). ChatGPT-account auth accepts BARE names
       // only (gpt-5.5 / gpt-5.4-mini / gpt-5.3-codex-spark); provider-prefixed ids
@@ -271,6 +281,7 @@ export const codexAdapter = {
       // opts.cwd = resolved vendor CWD (repo root by default, or $HOPPER_VENDOR_CWD).
       ...(opts.cwd ? ['--cd', opts.cwd] : []),
       ...sandboxArgs,
+      ...skipGitArgs,
       '-c', `model_reasoning_effort="${opts.reasoning ?? 'medium'}"`,
       // Suppress codex's global orchestration (multi-agent sub-spawns + hooks) so
       // only the dispatched brief runs — prevents the marketplace-plugin hijack
@@ -280,6 +291,19 @@ export const codexAdapter = {
       // dispatch stays deterministic (Host != Vendor, spec §3 #4).
       ...codexIsolationConfig(),
       ...(opts.webSearch ? ['--enable', 'web_search_cached'] : []),
+      // ISSUE-codex-bypass-flag-missing-from-argv (ROOT CAUSE): the PROMPT
+      // positional MUST be the LAST argv element. On Windows `codex` is reached
+      // through a cmd.exe `.cmd` shim whose command line is capped at ~8191 chars;
+      // an over-long line is silently truncated. The composed prompt is large
+      // (frame + governance + spec), so with the prompt placed BEFORE the flags
+      // (the previous order) the truncation casualty was the TRAILING sandbox /
+      // bypass / -c / --disable flags — codex then fell back to its default
+      // `workspace-write` sandbox and hit CreateProcessWithLogonW 1326 on every
+      // child (a silent no-op). Keeping the prompt last makes the *end of the
+      // prompt* the only thing a truncation can eat — the safety flags always
+      // reach codex. This also matches codex's own documented usage form,
+      // `codex exec [FLAGS] "<prompt>"` (docs/research/async-execution/01-openai-hosts.md).
+      input,
     ];
   },
 

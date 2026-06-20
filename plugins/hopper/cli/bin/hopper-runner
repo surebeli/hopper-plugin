@@ -200,6 +200,35 @@ async function main() {
   const resolvedCmd = resolved ? resolved.command : adapter.command;
   const prependArgs = resolved ? resolved.prependArgs : [];
   const finalArgv = [...prependArgs, ...adapterArgv];
+
+  // ISSUE-codex-bypass-flag-missing-from-argv: log the FINAL spawned argv (not
+  // just the resolved opts) and the total command-line length, and warn loudly
+  // when a vendor reached via a cmd.exe `.cmd`/`.bat` shim is near cmd.exe's
+  // ~8191-char command-line limit. An over-long line is silently truncated by
+  // cmd.exe, dropping TRAILING argv — historically codex's --sandbox /
+  // --dangerously-bypass-* flags — so the vendor fell back to its default
+  // sandbox and hit CreateProcessWithLogonW 1326 (a silent no-op). The codex
+  // adapter now places the large prompt LAST so the flags survive truncation,
+  // but this guard still surfaces the over-long condition for any vendor.
+  const isWindowsHost = process.platform === 'win32';
+  const viaCmdShim = isWindowsHost && (/cmd\.exe$/i.test(resolvedCmd)
+    || prependArgs.some((a) => /\.(cmd|bat)$/i.test(String(a))));
+  const cmdlineLen = [resolvedCmd, ...finalArgv].join(' ').length;
+  if (process.env.HOPPER_DEBUG) {
+    process.stderr.write(`hopper-runner: spawn command = ${resolvedCmd}\n`);
+    process.stderr.write(`hopper-runner: final argv (${finalArgv.length} args, ~${cmdlineLen} chars) = ${JSON.stringify(finalArgv)}\n`);
+  }
+  if (viaCmdShim && cmdlineLen > 7000) {
+    process.stderr.write(
+      `hopper-runner: WARNING ${adapter.command} is spawned via a cmd.exe shim and the composed ` +
+      `command line is ~${cmdlineLen} chars (cmd.exe limit ≈ 8191). Trailing arguments may be ` +
+      `truncated, which can make ${adapter.command} ignore --sandbox/--dangerously-* and fall back ` +
+      `to its default sandbox (Windows CreateProcessWithLogonW 1326 → silent no-op). Reduce the ` +
+      `prompt/spec size, widen via a shorter HOPPER_VENDOR_CWD, or install ${adapter.command} as a ` +
+      `native .exe on PATH (avoids the cmd.exe wrapper and its 8191-char limit).\n`
+    );
+  }
+
   let releaseVendorLock = () => {};
   let vendorLockReleased = false;
   const releaseVendorLockOnce = () => {

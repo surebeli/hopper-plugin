@@ -17,6 +17,7 @@ import { getAdapter } from './vendors/index.js';
 import { resolveCommandWithKnownPaths } from './path-resolve.js';
 import { runSubprocessOnce, resolveDispatchTimeouts } from './subprocess.js';
 import { resolveVendorCwd } from './background.js';
+import { resolvePromptDelivery } from './prompt-delivery.js';
 import { DEFAULT_DISPATCH_SANDBOX, resolveDefaultReasoning } from './validation.js';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -174,7 +175,7 @@ export async function executeDispatch({ hopperDir, taskId, adapterOpts = {} }) {
   const adapter = getAdapter(resolved.vendor);
   // Retro #3 fix: sync-mode vendor runs in the repo root that owns .hopper/
   // (or $HOPPER_VENDOR_CWD if set), not the dir hopper-dispatch was invoked from.
-  return executeWithAdapter({ resolved, adapter, adapterOpts, cwd: resolveVendorCwd(hopperDir) });
+  return executeWithAdapter({ resolved, adapter, adapterOpts, cwd: resolveVendorCwd(hopperDir), hopperDir });
 }
 
 /**
@@ -187,7 +188,7 @@ export async function executeDispatch({ hopperDir, taskId, adapterOpts = {} }) {
  * @param {import('./types.js').VendorAdapter} args.adapter
  * @param {import('./types.js').AdapterOpts} [args.adapterOpts]
  */
-export async function executeWithAdapter({ resolved, adapter, adapterOpts = {}, cwd = null }) {
+export async function executeWithAdapter({ resolved, adapter, adapterOpts = {}, cwd = null, hopperDir = null }) {
   const { task, vendor, composedPrompt } = resolved;
   const dispatchAdapterOpts = resolveAdapterOptsForTask(resolved, adapterOpts);
 
@@ -218,17 +219,37 @@ export async function executeWithAdapter({ resolved, adapter, adapterOpts = {}, 
   // Thread the resolved vendor CWD through opts so adapters that take a
   // working-dir flag (e.g. opencode --dir) can pass it explicitly.
   const effectiveOpts = { ...dispatchAdapterOpts, logFile: logPath, taskType: task.taskType, cwd: cwd || undefined };
-  const args = adapter.args(composedPrompt, effectiveOpts);
 
   // Spawn subprocess ONCE (per spec §3 #4).
   // Phase 6c F2: resolve adapter.command with deterministic known-install
   // paths (NOT vendor-retry orchestration) so installers that don't add
-  // their bin to PATH (agy on Windows) still work.
+  // their bin to PATH (agy on Windows) still work. Resolved FIRST so size-gated
+  // prompt delivery knows the OS command-line regime (cmd.exe shim vs native .exe).
   const resolvedCmd = resolveCommandWithKnownPaths(adapter.command, adapter.knownInstallPaths || []);
   const spawnCommand = resolvedCmd ? resolvedCmd.command : adapter.command;
-  const spawnArgs = resolvedCmd && resolvedCmd.prependArgs.length > 0
-    ? [...resolvedCmd.prependArgs, ...args]
-    : args;
+  const prependArgs = resolvedCmd ? resolvedCmd.prependArgs : [];
+
+  // Size-gated prompt delivery (ISSUE-codex-bypass-flag-missing-from-argv): inline
+  // small prompts; for an over-budget command line write handoffs/<task>-prompt.md
+  // and pass the vendor a small "read this file" pointer. Needs hopperDir to locate
+  // handoffs/; without it (e.g. direct-injected E2E adapters) fall back to inline.
+  let args;
+  if (hopperDir) {
+    const delivery = resolvePromptDelivery({
+      adapter, composedPrompt, opts: effectiveOpts,
+      resolvedCmd: spawnCommand, prependArgs,
+      handoffsDir: join(hopperDir, 'handoffs'), taskId: task.id,
+    });
+    if (delivery.fallbackReason) {
+      // Pointer delivery was wanted but unusable → INLINE with bytes > budget (the
+      // silent-no-op risk class). Surface it instead of falling back quietly.
+      process.stderr.write(`hopper: WARNING prompt-file delivery fell back to INLINE — ${delivery.fallbackReason}. Command line ${delivery.bytes}B (budget ${delivery.budget}B, ${delivery.regime}); may be truncated on Windows cmd.exe.\n`);
+    }
+    args = delivery.args;
+  } else {
+    args = adapter.args(composedPrompt, effectiveOpts);
+  }
+  const spawnArgs = prependArgs.length > 0 ? [...prependArgs, ...args] : args;
 
   const stdinInput = adapter.stdinMode === 'pipe' ? composedPrompt : null;
   // HOPPER-3: optional adapter env (e.g. codex CODEX_HOME auto-isolation).

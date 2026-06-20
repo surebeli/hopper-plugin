@@ -8,6 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { codexAdapter, codexIsolationConfig, resolveIsolatedCodexHome, stripCodexSkillsConfig, codexOrchestrationDisableFlags } from '../../cli/src/vendors/codex.js';
+import { resolveAdapterOptsForTask } from '../../cli/src/dispatch.js';
 
 function withEnv(key, value, fn) {
   return withEnvs({ [key]: value }, fn);
@@ -220,6 +221,58 @@ test('callchain: read-only keeps a real -s sandbox (no bypass)', () => {
   const argv = codexAdapter.args('hi', { sandbox: 'read-only' });
   assert.equal(argv[argv.indexOf('-s') + 1], 'read-only');
   assert.ok(!argv.includes('--dangerously-bypass-approvals-and-sandbox'));
+});
+
+// ── ISSUE-codex-bypass-flag-missing-from-argv ──────────────────────────────
+// ROOT CAUSE: on Windows codex is reached via a cmd.exe `.cmd` shim whose
+// command line is capped at ~8191 chars. The large composed prompt placed
+// BEFORE the flags meant an over-long line truncated the TRAILING sandbox /
+// bypass flags, so codex fell back to workspace-write and hit 1326. Fix: the
+// prompt positional is now LAST, so the safety flags always precede it (and
+// survive any tail truncation).
+
+test('ISSUE-bypass-argv: prompt positional is LAST so flags survive Windows cmd.exe truncation', () => {
+  const prompt = 'COMPOSED PROMPT BODY (normally several KB)';
+  const argv = codexAdapter.args(prompt, {
+    sandbox: 'danger-full-access', model: 'gpt-5.5', reasoning: 'xhigh', cwd: 'F:/x-agents',
+  });
+  assert.equal(argv[argv.length - 1], prompt, 'prompt must be the LAST argv element');
+  const bypassIdx = argv.indexOf('--dangerously-bypass-approvals-and-sandbox');
+  assert.ok(bypassIdx !== -1, 'bypass flag must be present');
+  assert.ok(bypassIdx < argv.length - 1, 'bypass flag must come BEFORE the prompt positional');
+  // EVERY flag (and its value) must precede the prompt — none may be the truncation casualty.
+  for (const flag of ['-m', '--cd', '-c', '--disable']) {
+    const i = argv.indexOf(flag);
+    if (i !== -1) assert.ok(i < argv.length - 1, `${flag} must precede the prompt positional`);
+  }
+});
+
+test('ISSUE-bypass-argv: background-runner code path emits the sandbox bypass flag', () => {
+  // Mirror runBackgroundDispatch EXACTLY: resolveAdapterOptsForTask → effectiveOpts
+  // → adapter.args (the same chain the background runner uses). Asserts the flag
+  // the live codex argv was missing actually appears, ahead of the prompt.
+  const resolved = { task: { brief: 'implement the fix', taskType: 'code-impl' }, taskSpec: '' };
+  const effOpts = resolveAdapterOptsForTask(resolved, {
+    sandbox: 'danger-full-access', model: 'gpt-5.5', reasoning: 'xhigh',
+  });
+  const effectiveOpts = { ...effOpts, background: true, logFile: '/tmp/x.log', taskType: 'code-impl', cwd: 'F:/x-agents' };
+  const argv = codexAdapter.args('COMPOSED PROMPT', effectiveOpts);
+  assert.ok(argv.includes('--dangerously-bypass-approvals-and-sandbox'),
+    'the background-runner code path must emit --dangerously-bypass-approvals-and-sandbox');
+  assert.equal(argv[argv.length - 1], 'COMPOSED PROMPT', 'prompt stays last (truncation safety)');
+});
+
+test('ISSUE-bypass-argv: full-access bypass adds --skip-git-repo-check (non-git CWD footgun)', () => {
+  const argv = codexAdapter.args('hi', { sandbox: 'danger-full-access' });
+  assert.ok(argv.includes('--skip-git-repo-check'),
+    'full-access bypass should skip codex git-repo trust gate (HOPPER_VENDOR_CWD widening)');
+  // Escape hatch reverts it.
+  withEnv('HOPPER_CODEX_SKIP_GIT_CHECK', '0', () => {
+    assert.ok(!codexAdapter.args('hi', { sandbox: 'danger-full-access' }).includes('--skip-git-repo-check'));
+  });
+  // Non-bypass sandboxes keep codex's trust gate.
+  assert.ok(!codexAdapter.args('hi', { sandbox: 'read-only' }).includes('--skip-git-repo-check'));
+  assert.ok(!codexAdapter.args('hi', { sandbox: 'workspace-write' }).includes('--skip-git-repo-check'));
 });
 
 test('callchain: parseResult flags CreateProcessWithLogonW 1326 as permission-fail (not false success)', () => {
