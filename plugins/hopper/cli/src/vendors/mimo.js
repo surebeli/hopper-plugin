@@ -37,6 +37,7 @@ export const mimoAdapter = {
       streaming: { supported: true, mechanism: '`mimo run --format json` emits newline-delimited JSON events; text events carry `part.text`.' },
       permissions: { supported: true, mechanism: 'Default hopper dispatch uses `--agent build --dangerously-skip-permissions`; explicit read-only dispatch uses `--agent plan` and does not skip permissions.' },
     },
+    webSearch: { headless: true, hopperEnabled: false, how: 'Exa websearch; set MIMOCODE_ENABLE_EXA=1 or use the MiMo provider (not auto-forwarded)' },
     staleAfter: '2026-09-11',
   },
 

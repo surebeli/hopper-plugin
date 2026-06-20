@@ -49,6 +49,7 @@ export const copilotAdapter = {
       fileOutput: { supported: false, mechanism: 'stdout only.' },
       streaming: { supported: true, mechanism: 'copilot -p streams during execution.' },
     },
+    webSearch: { headless: true, hopperEnabled: true, how: 'bundled GitHub-MCP web_search; --allow-tool web_search when opts.webSearch' },
     staleAfter: '2026-08-21',
   },
 
@@ -70,6 +71,10 @@ export const copilotAdapter = {
       ...(sandbox === 'danger-full-access' ? ['--allow-all-tools', '--allow-all-paths'] : []),
       // Optional --model when explicitly chosen
       ...(opts.model ? ['--model', opts.model] : []),
+      // Web search (research/PRD/market): web_search is a bundled GitHub-MCP tool;
+      // --allow-tool permits it non-interactively (redundant under the --allow-all-tools
+      // granted for danger-full-access, but needed in read-only research dispatches).
+      ...(opts.webSearch ? ['--allow-tool', 'web_search'] : []),
       // Reasoning effort -> --effort, clamped to copilot's universal {low,medium,high}
       // (ISSUE-codex-vendor-model-effort). HOPPER_COPILOT_EFFORT overrides the level
       // (empty string omits --effort entirely, for builds/models that predate it).

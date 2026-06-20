@@ -38,6 +38,11 @@ export function sandboxControl(adapter) {
  * @returns {'yes'|'no'|'?'}
  */
 export function webSearchSupport(adapter) {
+  const ws = adapter && adapter.capabilities && adapter.capabilities.webSearch;
+  if (ws && typeof ws.hopperEnabled === 'boolean') {
+    if (ws.hopperEnabled) return 'yes';      // hopper enables it on --web-search
+    return ws.headless ? 'manual' : 'no';    // vendor can search but needs env/config, or unsupported
+  }
   try {
     const on = adapter.args('x', { webSearch: true }).join('');
     const off = adapter.args('x', {}).join('');

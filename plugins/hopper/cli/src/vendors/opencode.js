@@ -38,6 +38,7 @@ export const opencodeAdapter = {
       fileOutput: { supported: false, mechanism: 'No --output flag; stdout-only. Use `--format json` + shell redirect.' },
       streaming: { supported: true, mechanism: 'opencode run streams events; exits when idle.' },
     },
+    webSearch: { headless: false, hopperEnabled: false, how: 'off by default; set OPENCODE_ENABLE_EXA=1 or use the Zen provider (not headless out of the box)' },
     staleAfter: '2026-08-21',
   },
 

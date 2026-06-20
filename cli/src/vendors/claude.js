@@ -56,6 +56,7 @@ export const claudeAdapter = {
       fileOutput: { supported: false, mechanism: 'stdout only; no --output-file flag. `--output-format json` puts the answer text in `.result`; redirect at the shell layer if a file is needed.' },
       streaming: { supported: true, mechanism: '`--output-format stream-json` (with --verbose / --include-partial-messages) emits newline-delimited event JSON. Adapter uses `json` for a single trailing result object suited to background capture.' },
     },
+    webSearch: { headless: true, hopperEnabled: true, how: 'built-in WebSearch tool; auto-allowed via --allowedTools WebSearch when opts.webSearch' },
     staleAfter: '2026-09-30',
   },
 
@@ -97,6 +98,10 @@ export const claudeAdapter = {
       // total_cost_usd, usage, ... } — parseResult reads `.result`.
       '--output-format', 'json',
       ...(opts.model ? ['--model', opts.model] : []),
+      // Web search (research/PRD/market): WebSearch is a built-in claude tool requiring
+      // permission; in headless -p it must be pre-authorized. --allowedTools "WebSearch"
+      // grants it (redundant but harmless under --dangerously-skip-permissions).
+      ...(opts.webSearch ? ['--allowedTools', 'WebSearch'] : []),
       // Working-dir parity (mirrors agy --add-dir / grok --cwd / codex --cd).
       // hopper injects opts.cwd = resolved vendor CWD (repo root by default, or
       // $HOPPER_VENDOR_CWD). --add-dir grants the dir to claude's workspace

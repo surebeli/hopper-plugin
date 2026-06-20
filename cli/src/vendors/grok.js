@@ -56,6 +56,7 @@ export const grokAdapter = {
       fileOutput: { supported: false, mechanism: 'stdout only; no --output-file flag (CONFIRMED absent). Redirect --output-format json at the shell layer if a file is needed.' },
       streaming: { supported: true, mechanism: '`--output-format streaming-json` emits NDJSON events; accepted values are plain|json|streaming-json (plain = human-readable, CONFIRMED). Adapter uses `json` for a single trailing object suited to background capture.' },
     },
+    webSearch: { headless: true, hopperEnabled: true, how: 'automatic — web_search/x_search are default agent tools (no flag needed)' },
     staleAfter: '2026-08-31',
   },
 

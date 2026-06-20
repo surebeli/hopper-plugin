@@ -68,6 +68,7 @@ export const agyAdapter = {
     // Distinct binary: `antigravity` (Google's VS-Code-fork editor at
     // ~/AppData/Local/Programs/Antigravity/bin/) is a SEPARATE product
     // from `agy` (the agentic CLI). They are NOT aliases of each other.
+    webSearch: { headless: false, hopperEnabled: false, how: 'none found (agy -p exposes no web-search tool/flag)' },
     staleAfter: '2026-08-21',
     installPath: 'Default Windows install: ~/AppData/Local/agy/bin/agy.exe. PATH coverage shell-dependent on Windows (PowerShell yes; Git-Bash may need manual setup).',
   },

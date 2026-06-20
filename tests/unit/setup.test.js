@@ -14,7 +14,7 @@ test('setup: buildVendorReadiness returns one well-formed row per registered ven
     assert.equal(typeof r.installed, 'boolean');
     assert.ok(['ok', true, false].includes(r.authOk) || typeof r.authOk === 'boolean');
     assert.ok(['argv', 'native', '?'].includes(r.sandboxControl), `${r.name} sandboxControl`);
-    assert.ok(['yes', 'no', '?'].includes(r.webSearch), `${r.name} webSearch`);
+    assert.ok(['yes', 'manual', 'no', '?'].includes(r.webSearch), `${r.name} webSearch`);
     assert.ok('models' in r && 'capsStaleAfter' in r);
   }
 });
@@ -24,11 +24,13 @@ test('setup: sandboxControl is argv for codex, native for kimi (not argv-downgra
   assert.equal(sandboxControl(getAdapter('kimi')), 'native');
 });
 
-test('setup: web-search support is yes only for codex (point-2 routing gate)', () => {
-  assert.equal(webSearchSupport(getAdapter('codex')), 'yes');
-  for (const v of ['kimi', 'opencode', 'copilot', 'grok', 'mimo', 'claude', 'agy']) {
-    assert.equal(webSearchSupport(getAdapter(v)), 'no', `${v} must not plumb web-search yet`);
+test('setup: web-search readiness reflects per-adapter capability (T3)', () => {
+  for (const v of ['codex', 'claude', 'grok', 'copilot', 'kimi']) {
+    assert.equal(webSearchSupport(getAdapter(v)), 'yes', `${v} headless web search (hopper-enabled)`);
   }
+  assert.equal(webSearchSupport(getAdapter('mimo')), 'manual', 'mimo: possible via env, not auto-forwarded');
+  assert.equal(webSearchSupport(getAdapter('opencode')), 'no', 'opencode: config-gated, not headless out of the box');
+  assert.equal(webSearchSupport(getAdapter('agy')), 'no');
 });
 
 test('setup: only-filter restricts to a single vendor', async () => {

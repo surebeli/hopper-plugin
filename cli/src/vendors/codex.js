@@ -239,6 +239,7 @@ export const codexAdapter = {
       fileOutput: { supported: true, mechanism: '`--output-last-message <path>` exists (NOT currently used by adapter)' },
       streaming: { supported: true, mechanism: 'codex exec streams progress to stderr; final message to stdout' },
     },
+    webSearch: { headless: true, hopperEnabled: true, how: 'cached on by default; --search forwards LIVE web_search when opts.webSearch (2026 research)' },
     staleAfter: '2026-08-21',
   },
 

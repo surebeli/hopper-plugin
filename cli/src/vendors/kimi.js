@@ -47,6 +47,7 @@ export const kimiAdapter = {
       streaming: { supported: true, mechanism: '`-p` streams assistant text to stdout; thinking, tool progress, and resume notices go to stderr. `--output-format stream-json` emits one JSON object per stdout line (thinking excluded); default `text`.' },
       permissions: { supported: true, mechanism: '`kimi -p` uses Kimi prompt-mode auto permission policy by default. Kimi 0.14 rejects `--prompt` combined with `--yolo`, `--auto`, or `--plan`; adapter therefore does not forward hopper sandbox flags. Static deny rules in Kimi config still apply.' },
     },
+    webSearch: { headless: true, hopperEnabled: true, how: 'automatic — built-in SearchWeb tool (auto-wired on Kimi Code login)' },
     staleAfter: '2026-09-11',
   },
 
