@@ -13,6 +13,7 @@ import { writeOutput } from '../src/output.js';
 import { scaffoldHopper, scaffoldGovernance } from '../src/scaffold.js';
 import { renderRulesMarkdown } from '../src/rules.js';
 import { compatCheckForAdapter } from '../src/vendor-compat.js';
+import { buildVendorReadiness, summarizeReadiness } from '../src/setup.js';
 import {
   validateTaskId,
   validateDispatchFlags,
@@ -78,14 +79,15 @@ function printUsage() {
   console.log('  hopper-dispatch --capabilities <vendor>         Show static model/reasoning/feature support + cached data if probed');
   console.log('  hopper-dispatch --probe [<vendor>]              Run vendor introspection, write cache to ~/.hopper/cache/');
   console.log('  hopper-dispatch --models [<vendor>]             Show cached model list per vendor (run --probe first)');
+  console.log('  hopper-dispatch --setup [<vendor>] [--deep]     Vendor readiness: installed/auth/models/sandbox/web-search (--doctor alias)');
   console.log('  hopper-dispatch --help                          Show this message');
   console.log('  hopper-dispatch --version                       Print version');
   console.log('');
   console.log('Adapter opts (forwarded to vendor adapter; ignored if adapter does not honor):');
   console.log('  --model <name>       Examples: gpt-5.5, claude-opus-4-7, deepseek/v4-flash, kimi-code/kimi-for-coding, xiaomi/mimo-v2.5-pro');
-  console.log('                       Honored by: kimi, opencode, copilot, grok, mimo');
+  console.log('                       Honored by: codex, kimi, opencode, copilot, grok, mimo, claude (NOT agy)');
   console.log('  --reasoning <level>  minimal | low | medium | high | xhigh');
-  console.log('                       Honored by: codex; mimo maps this to --variant (xhigh -> max)');
+  console.log('                       Honored by: codex (model_reasoning_effort); grok + copilot (--effort, clamped); mimo (--variant, xhigh->max)');
   console.log('  --sandbox <mode>     read-only | workspace-write | danger-full-access');
   console.log('                       Default: danger-full-access unless task text explicitly says read-only');
   console.log('');
@@ -152,6 +154,18 @@ async function main() {
       if (!args[i].startsWith('-')) { target = args[i]; break; }
     }
     await runCheck(target, { compat: args.includes('--compat') });
+    return;
+  }
+  // Consolidated vendor readiness ("setup"/"doctor") — one table answering
+  // installed? · auth? · models? · capability fresh? · full-access? · web-search?
+  if (args.includes('--setup') || args.includes('--doctor')) {
+    const idx = args.indexOf('--setup') !== -1 ? args.indexOf('--setup') : args.indexOf('--doctor');
+    const only = args[idx + 1] && !args[idx + 1].startsWith('-') ? args[idx + 1] : null;
+    if (only && !listAdapters().includes(only)) {
+      console.error(`Error: unknown vendor '${only}'. Known: ${listAdapters().join(', ')}`);
+      process.exit(1);
+    }
+    await runSetup({ only, deep: args.includes('--deep') || args.includes('--compat') });
     return;
   }
   const capIdx = args.indexOf('--capabilities');
@@ -381,7 +395,7 @@ async function main() {
 function parseDispatchArgs(args) {
   const META_FLAGS = new Set(['--help', '-h', '--version', '-v', '--smoke', '--status',
     '--task-types', '--vendors', '--rules', '--resolve', '--watch', '--progress', '--watch-events', '--jobs', '--reap', '--stop',
-    '--check', '--capabilities', '--probe', '--models', '--init-tasks', '--init-governance']);
+    '--check', '--capabilities', '--probe', '--models', '--setup', '--doctor', '--init-tasks', '--init-governance']);
   const VALUE_FLAGS = new Set(ALLOWED_DISPATCH_VALUE_FLAGS);
   const BARE_FLAGS = new Set(ALLOWED_DISPATCH_FLAGS);
 
@@ -1240,6 +1254,55 @@ async function runWatch(hopperDir, taskId) {
 }
 
 // ─── Discovery commands (Phase 6a) ────────────────────────────────────
+
+async function runSetup({ only = null, deep = false } = {}) {
+  const rows = await buildVendorReadiness({ only, deep });
+  const sum = summarizeReadiness(rows);
+  const yn = (b) => (b ? 'yes' : 'no');
+  const cell = (s, w) => String(s == null ? '—' : s).slice(0, w).padEnd(w);
+
+  console.log(`hopper-dispatch v${VERSION} — vendor readiness (${sum.ready}/${sum.total} ready)`);
+  console.log('');
+  console.log('| Vendor    | Installed | Auth | Sandbox | WebSrch | Models | Caps stale |');
+  console.log('|-----------|-----------|------|---------|---------|--------|------------|');
+  for (const r of rows) {
+    const models = r.models ? `${r.models.length} cached` : 'not probed';
+    const capsState = r.capsStaleAfter ? (r.capsStale ? `STALE ${r.capsStaleAfter}` : r.capsStaleAfter) : '—';
+    console.log(
+      `| ${cell(r.name, 9)} | ${cell(r.installed ? 'yes' : 'NO', 9)} | ${cell(r.authOk ? 'ok' : (r.installed ? 'NO' : '—'), 4)} | `
+      + `${cell(r.sandboxControl === 'argv' ? 'argv' : (r.sandboxControl === 'native' ? 'native' : '?'), 7)} | `
+      + `${cell(r.webSearch, 7)} | ${cell(models, 6)} | ${cell(capsState, 10)} |`,
+    );
+  }
+  console.log('');
+  console.log('Legend: Sandbox=argv → hopper can force read-only/full-access via flags; native → vendor');
+  console.log('  enforces its own policy (not argv-downgradable). WebSrch=yes → adapter plumbs a web-search');
+  console.log('  toggle (needed for research tasks). Models: run `--probe <vendor>` to populate; `--rules`');
+  console.log('  for the full model/effort/sandbox matrix.');
+
+  if (sum.notInstalled.length) console.log(`\nNot installed: ${sum.notInstalled.join(', ')}  (PATH is shell-dependent on Windows — see \`--check\`)`);
+  if (sum.authMissing.length) console.log(`Auth missing/unverified: ${sum.authMissing.join(', ')}  (run \`--check ${sum.authMissing[0]}\` for the auth note)`);
+  if (sum.capsStale.length) console.log(`Capability metadata STALE (re-verify the adapter): ${sum.capsStale.join(', ')}`);
+
+  const notes = rows.filter((r) => r.installed && r.authNotes && r.authNotes.length);
+  if (notes.length) {
+    console.log('\nAuth notes:');
+    for (const r of notes) for (const n of r.authNotes) console.log(`  ${r.name}: ${n}`);
+  }
+
+  if (deep) {
+    console.log('\nFlag/param drift (`<vendor> --help` vs adapter-emitted flags):');
+    for (const r of rows) {
+      const c = r.compat;
+      if (!c) { console.log(`  ${r.name.padEnd(9)} —`); continue; }
+      if (!c.ran) console.log(`  ${r.name.padEnd(9)} skipped — ${c.reason}`);
+      else if ((c.missing || []).length === 0) console.log(`  ${r.name.padEnd(9)} OK — ${c.present.length} expected flag(s) present`);
+      else console.log(`  ${r.name.padEnd(9)} DRIFT — missing: ${c.missing.join(', ')}`);
+    }
+  } else {
+    console.log('\nTip: `--setup --deep` adds per-vendor flag-drift (spawns `<vendor> --help` once each).');
+  }
+}
 
 async function runCheck(target, { compat = false } = {}) {
   const vendors = target ? [target] : listAdapters();
