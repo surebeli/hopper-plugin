@@ -14,6 +14,7 @@ import { loadTaskFrame, composePrompt } from './tasks.js';
 import { parseAgentsFile, resolveVendor } from './agents.js';
 import { resolveGovernance } from './governance.js';
 import { getAdapter } from './vendors/index.js';
+import { normalizeModel } from './model-normalize.js';
 import { resolveCommandWithKnownPaths } from './path-resolve.js';
 import { runSubprocessOnce, resolveDispatchTimeouts } from './subprocess.js';
 import { resolveVendorCwd } from './background.js';
@@ -218,6 +219,15 @@ export function taskTextRequestsReadOnly(resolved) {
 export function resolveAdapterOptsForTask(resolved, adapterOpts = {}) {
   const out = { ...adapterOpts };
   const taskType = resolved?.task?.taskType;
+  // V4: normalize a user-specified model to the vendor's canonical name (fuzzy-match against
+  // knownGood; advisory — passthrough if no confident match). Single chokepoint — every
+  // dispatch path (sync / background / adhoc / swarm) flows through resolveAdapterOptsForTask.
+  if (out.model && resolved?.vendor) {
+    try {
+      const kg = getAdapter(resolved.vendor)?.capabilities?.modelArg?.knownGood || [];
+      out.model = normalizeModel(resolved.vendor, out.model, kg);
+    } catch (_) { /* normalization is advisory; keep the original on any error */ }
+  }
   // Permission default (precedence, most specific first):
   //   1. explicit --sandbox (already in out.sandbox) wins
   //   2. read-only task TEXT (brief/spec says read-only / 只读)
