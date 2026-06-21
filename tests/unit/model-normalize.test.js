@@ -126,3 +126,9 @@ test('V3 modelKeysMatch: vendor-scoped — bare-slug strips prefix, alias is ful
   assert.ok(modelKeysMatch('codex', 'openai/gpt-5.5', 'gpt-5.5'), 'bare-slug strips the provider prefix on both sides');
   assert.ok(!modelKeysMatch('kimi', 'kimi-code/kimi-for-coding', 'kimi-for-coding'), 'alias vendor uses full-key only — tail must NOT match');
 });
+
+test('V3 modelKeysMatch: provider-prefixed — bare↔prefixed matches by tail, prefixed↔prefixed does NOT', () => {
+  assert.ok(modelKeysMatch('mimo', 'xiaomi/mimo-v2.5-pro', 'mimo-v2.5-pro'), 'a bare live id matches a prefixed default by tail');
+  assert.ok(modelKeysMatch('mimo', 'xiaomi/mimo-v2.5-pro', 'xiaomi/mimo-v2.5-pro'), 'identical prefixed ids match');
+  assert.ok(!modelKeysMatch('mimo', 'xiaomi/mimo-v2.5-pro', 'openai/mimo-v2.5-pro'), 'two providers same tail → NOT a match (real drift not hidden)');
+});

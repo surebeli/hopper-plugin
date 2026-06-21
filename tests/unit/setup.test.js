@@ -5,6 +5,10 @@ import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { buildVendorReadiness, summarizeReadiness, sandboxControl, webSearchSupport } from '../../cli/src/setup.js';
 import { listAdapters, getAdapter } from '../../cli/src/vendors/index.js';
+import { getVendorCache, setVendorCache } from '../../cli/src/cache.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 test('setup: buildVendorReadiness returns one well-formed row per registered vendor', async () => {
   const rows = await buildVendorReadiness();
@@ -59,10 +63,8 @@ test('setup: summarizeReadiness rolls up ready/notInstalled/authMissing/capsStal
 
 // ─── V3: doctor --deep live model enumeration + reconcile (injected probe, no spawn) ───
 
-test('V3 deep: live enumeration reconciles against knownGood via an injected probe', async () => {
-  const fakeProbe = async (name) => (name === 'codex'
-    ? { introspection_supported: 'full', models: ['gpt-5.5', 'GPT-5.4', 'gpt-6-new'], models_source: 'fake' }
-    : { introspection_supported: 'none', models: [] });
+test('V3 deep: a genuinely-live (introspection:full) catalog reconciles against knownGood', async () => {
+  const fakeProbe = async () => ({ introspection_supported: 'full', models: ['gpt-5.5', 'GPT-5.4', 'gpt-6-new'], models_source: 'fake' });
   const rows = await buildVendorReadiness({ only: 'codex', deep: true, persist: false, probeFn: fakeProbe });
   const rec = rows[0].modelReconcile;
   assert.equal(rec.applicable, true);
@@ -72,11 +74,27 @@ test('V3 deep: live enumeration reconciles against knownGood via an injected pro
   assert.deepEqual(rows[0].modelsLive, ['gpt-5.5', 'GPT-5.4', 'gpt-6-new']);
 });
 
-test('V3 deep: a vendor with no enumeration command reports n/a (no false "missing")', async () => {
-  const fakeProbe = async () => ({ introspection_supported: 'none', models: [], models_source: 'claude exposes no model-list command' });
+test('V3 deep: introspection:partial with a non-empty STATIC list is n/a — NOT false drift (claude/kimi shape)', async () => {
+  // The regression the review caught: claude returns introspection 'partial' with 4
+  // static aliases; reconciling against its 9-entry knownGood would falsely flag 5 STALE.
+  const fakeProbe = async () => ({ introspection_supported: 'partial', models: ['sonnet', 'opus', 'haiku', 'fable'], models_source: 'static aliases (no catalog command)' });
   const rows = await buildVendorReadiness({ only: 'claude', deep: true, persist: false, probeFn: fakeProbe });
+  assert.equal(rows[0].modelReconcile.applicable, false, 'a static/partial list must not be reconciled');
+  assert.match(rows[0].modelReconcile.reason, /introspection: partial|no live model-enumeration/);
+});
+
+test('V3 deep: introspection:none reports n/a (no false "missing")', async () => {
+  const fakeProbe = async () => ({ introspection_supported: 'none', models: [], models_source: 'no enumeration command' });
+  const rows = await buildVendorReadiness({ only: 'agy', deep: true, persist: false, probeFn: fakeProbe });
   assert.equal(rows[0].modelReconcile.applicable, false);
-  assert.match(rows[0].modelReconcile.reason, /no model-list command|no live model catalog/);
+  assert.match(rows[0].modelReconcile.reason, /introspection: none|no live model-enumeration/);
+});
+
+test('V3 deep: a live catalog but a PLACEHOLDER knownGood (opencode sentinel) is n/a', async () => {
+  const fakeProbe = async () => ({ introspection_supported: 'full', models: ['anthropic/claude-opus-4.8', 'openai/gpt-5.5'], models_source: 'opencode models' });
+  const rows = await buildVendorReadiness({ only: 'opencode', deep: true, persist: false, probeFn: fakeProbe });
+  assert.equal(rows[0].modelReconcile.applicable, false, 'sentinel knownGood (`<provider>/<model>`) must not be reconciled');
+  assert.match(rows[0].modelReconcile.reason, /placeholder|no hardcoded knownGood/);
 });
 
 test('V3 deep: a probe that throws degrades to applicable:false (never blocks the report)', async () => {
@@ -92,4 +110,42 @@ test('V3 shallow: non-deep doctor never enumerates (probeFn is not called)', asy
   const rows = await buildVendorReadiness({ only: 'codex', deep: false, probeFn: async () => { called = true; return { introspection_supported: 'full', models: [] }; } });
   assert.equal(called, false, 'shallow doctor must not spawn/enumerate');
   assert.ok(rows[0].modelReconcile == null, 'no reconcile attached without --deep');
+});
+
+test('V3 deep: persist gate — true writes the live catalog to cache; false suppresses the write', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-setup-cache-'));
+  const oldEnv = process.env.HOPPER_CACHE_DIR;
+  process.env.HOPPER_CACHE_DIR = tmp;
+  try {
+    const fakeProbe = async () => ({ introspection_supported: 'full', models: ['gpt-5.5', 'gpt-6'], models_source: 'fake' });
+    // persist:false → no cache file written
+    await buildVendorReadiness({ only: 'codex', deep: true, persist: false, probeFn: fakeProbe });
+    assert.equal(getVendorCache('codex'), null, 'persist:false must not write the cache');
+    // persist:true → cache reflects the live catalog
+    await buildVendorReadiness({ only: 'codex', deep: true, persist: true, probeFn: fakeProbe });
+    const cached = getVendorCache('codex');
+    assert.ok(cached && Array.isArray(cached.models), 'persist:true writes a cache entry');
+    assert.deepEqual(cached.models, ['gpt-5.5', 'gpt-6']);
+  } finally {
+    if (oldEnv === undefined) delete process.env.HOPPER_CACHE_DIR; else process.env.HOPPER_CACHE_DIR = oldEnv;
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('V3 deep: a non-live (partial) probe never clobbers an existing cache entry', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-setup-cache2-'));
+  const oldEnv = process.env.HOPPER_CACHE_DIR;
+  process.env.HOPPER_CACHE_DIR = tmp;
+  try {
+    // seed a good prior cache entry
+    setVendorCache('claude', { models: ['sonnet', 'opus'], introspection_supported: 'partial', probed_at: '2020-01-01T00:00:00.000Z' });
+    const fakeProbe = async () => ({ introspection_supported: 'partial', models: ['sonnet', 'opus', 'haiku', 'fable'], models_source: 'static' });
+    await buildVendorReadiness({ only: 'claude', deep: true, persist: true, probeFn: fakeProbe });
+    const cached = getVendorCache('claude');
+    assert.equal(cached.probed_at, '2020-01-01T00:00:00.000Z', 'a partial/static probe must not refresh the cache timestamp');
+    assert.deepEqual(cached.models, ['sonnet', 'opus'], 'a partial/static probe must not overwrite cached models');
+  } finally {
+    if (oldEnv === undefined) delete process.env.HOPPER_CACHE_DIR; else process.env.HOPPER_CACHE_DIR = oldEnv;
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });

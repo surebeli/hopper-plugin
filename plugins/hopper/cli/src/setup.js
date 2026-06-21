@@ -105,19 +105,31 @@ export async function buildVendorReadiness({ deep = false, only = null, now = ne
         const live = await probeFn(name);
         const liveModels = live && Array.isArray(live.models) ? live.models.filter((m) => typeof m === 'string' && m.trim()) : [];
         const introspection = (live && live.introspection_supported) || 'none';
+        // A GENUINELY-live catalog requires `introspection_supported === 'full'` — NOT
+        // merely a non-empty list. 'partial' (claude version+static aliases) and
+        // 'config-only' (kimi config names) return a static/fallback list that is NOT a
+        // live enumeration; reconciling it would flag every default as STALE — the exact
+        // false alarm this guards against.
+        const liveEnumerated = introspection === 'full' && liveModels.length > 0;
+        // knownGood must be a real catalog, not a placeholder sentinel (opencode ships
+        // `['<provider>/<model>']` as a format example, not a model list).
+        const kgUsable = kg.length > 0 && !kg.some((g) => typeof g === 'string' && g.includes('<'));
         row.modelsLive = liveModels;
         row.modelsLiveSource = live ? (live.models_source || null) : null;
         row.introspection = introspection;
-        if (persist && live && liveModels.length) {
+        // Refresh the cache + Models column ONLY for genuinely-live catalogs, so doctor
+        // never stamps a fresh probed_at onto static/fallback data.
+        if (persist && liveEnumerated) {
           try { setVendorCache(name, { ...live, probed_at: now.toISOString() }); } catch (_) { /* cache write best-effort */ }
-          row.models = liveModels;          // reflect the fresh probe in the Models column
+          row.models = liveModels;
           row.modelsProbedAt = now.toISOString();
         }
-        // Only reconcile when a live catalog actually exists — a vendor with no
-        // enumeration command (introspection 'none') would otherwise flag every
-        // default as "missing", a false alarm.
-        if (introspection === 'none' || liveModels.length === 0) {
-          row.modelReconcile = { applicable: false, reason: (live && live.models_source) || 'no live model catalog (vendor exposes no enumeration command)' };
+        if (!liveEnumerated) {
+          row.modelReconcile = { applicable: false, reason: introspection === 'full'
+            ? 'live enumeration returned no models'
+            : `no live model-enumeration command (introspection: ${introspection}); model list is static/account-dependent` };
+        } else if (!kgUsable) {
+          row.modelReconcile = { applicable: false, reason: 'no hardcoded knownGood catalog to reconcile against (placeholder/empty)' };
         } else {
           row.modelReconcile = { applicable: true, ...reconcileModels(name, kg, liveModels) };
         }

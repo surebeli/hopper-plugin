@@ -87,7 +87,15 @@ function tailSlug(s) {
 export function modelKeysMatch(vendor, a, b) {
   if (BARE_SLUG_VENDORS.has(vendor)) return canonKey(tailSlug(a)) === canonKey(tailSlug(b));
   if (PROVIDER_PREFIXED_VENDORS.has(vendor)) {
-    return canonKey(a) === canonKey(b) || canonKey(tailSlug(a)) === canonKey(tailSlug(b));
+    if (canonKey(a) === canonKey(b)) return true;
+    // Tail-match ONLY bridges the bare↔prefixed namespace gap (a live bare id vs a
+    // prefixed default). Never tail-match prefixed↔prefixed: `xiaomi/mimo-v2.5-pro`
+    // and `openai/mimo-v2.5-pro` are different models, and conflating them would
+    // hide real drift (a model moving providers).
+    const aHasPrefix = a.includes('/');
+    const bHasPrefix = b.includes('/');
+    if (aHasPrefix !== bHasPrefix) return canonKey(tailSlug(a)) === canonKey(tailSlug(b));
+    return false;
   }
   return canonKey(a) === canonKey(b);
 }
