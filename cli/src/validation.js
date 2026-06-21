@@ -38,12 +38,18 @@ export function validateVendor(name) {
 }
 
 /**
- * Model-name pattern: alphanumeric + . - _ / : (for namespaced model strings
- * like `gpt-5.5`, `claude-opus-4-7`, `deepseek/v4-flash`, `org/model:tag`).
+ * Model-name pattern: alphanumeric + . - _ / : for namespaced model strings
+ * (`gpt-5.5`, `claude-opus-4-7`, `deepseek/v4-flash`, `org/model:tag`), PLUS
+ * space ( ) [ ] for the display-label aliases some vendors accept verbatim
+ * (claude `opus[1m]`/`sonnet[1m]`; agy `Gemini 3.5 Flash (High)`) — these are
+ * exactly the V4 normalizer's canonical outputs, so a user must be able to type
+ * them too. Injection-safe: every spawn passes the value as one argv element
+ * (no `shell: true`), and the leading [A-Za-z] still blocks `-flag` injection;
+ * shell metacharacters (; | & $ ` ' ") remain disallowed.
  * Per cross-host validation discipline: same regex applies at every entry
  * point (CLI / dispatch.md / Tier C wrappers).
  */
-export const MODEL_PATTERN = /^[A-Za-z][A-Za-z0-9._/:-]{0,99}$/;
+export const MODEL_PATTERN = /^[A-Za-z][A-Za-z0-9._/:()[\] -]{0,99}$/;
 
 /**
  * Reasoning effort whitelist. Matches codex CLI's vocabulary; kimi/opencode/

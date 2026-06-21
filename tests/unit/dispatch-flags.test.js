@@ -83,16 +83,19 @@ function makeMinimalHopper(vendor = 'codex-builder', { brief = 'test', taskSpec 
 
 // ─── Static validation tests ──────────────────────────────────────────
 
-test('MODEL_PATTERN accepts realistic model names', () => {
+test('MODEL_PATTERN accepts realistic model names + V2/V4 display-label aliases', () => {
   for (const m of ['gpt-5.5', 'claude-opus-4-7', 'deepseek/v4-flash', 'kimi-thinking',
-                   'meta-llama/llama-3-70b', 'org/model:tag', 'a', 'A1.b-c_d']) {
+                   'meta-llama/llama-3-70b', 'org/model:tag', 'a', 'A1.b-c_d',
+                   // V2/V4: bracket/paren/space canonical labels must be typeable as --model.
+                   'opus[1m]', 'sonnet[1m]', 'Gemini 3.5 Flash (High)']) {
     assert.ok(MODEL_PATTERN.test(m), `should accept "${m}"`);
   }
 });
 
-test('MODEL_PATTERN rejects shell metachars + path traversal', () => {
-  for (const bad of ['', 'foo bar', 'a; rm -rf /', '`evil`', '$(evil)', 'foo|bar', '..',
-                     '../escape', '<script>', '"quoted"', "'quoted'", '\nnewline']) {
+test('MODEL_PATTERN rejects shell metachars + path traversal + flag injection (spaces/brackets/parens now allowed)', () => {
+  for (const bad of ['', 'a; rm -rf /', '`evil`', '$(evil)', 'foo|bar', '..',
+                     '../escape', '<script>', '"quoted"', "'quoted'", '\nnewline',
+                     '-rf', '--dangerously', 'a&b', 'a${x}', 'a (High); rm']) {
     assert.ok(!MODEL_PATTERN.test(bad), `should reject "${bad}"`);
   }
 });

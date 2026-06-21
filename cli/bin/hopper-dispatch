@@ -88,7 +88,7 @@ function printUsage() {
   console.log('');
   console.log('Adapter opts (forwarded to vendor adapter; ignored if adapter does not honor):');
   console.log('  --model <name>       Examples: gpt-5.5, claude-opus-4-7, deepseek/v4-flash, kimi-code/kimi-for-coding, xiaomi/mimo-v2.5-pro');
-  console.log('                       Honored by: codex, kimi, opencode, copilot, grok, mimo, claude (NOT agy)');
+  console.log('                       Honored by: codex, kimi, opencode, copilot, grok, mimo, claude, agy (loose names are normalized to each vendor\'s canonical form)');
   console.log('  --reasoning <level>  minimal | low | medium | high | xhigh');
   console.log('                       Honored by: codex (model_reasoning_effort); grok + copilot (--effort, clamped); mimo (--variant, xhigh->max)');
   console.log('  --sandbox <mode>     read-only | workspace-write | danger-full-access');

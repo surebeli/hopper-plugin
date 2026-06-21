@@ -52,3 +52,43 @@ test('V4 integration: resolveAdapterOptsForTask normalizes against the resolved 
   assert.equal(resolveAdapterOptsForTask(resolved, { model: 'GPT-5.5' }).model, 'gpt-5.5', 'normalized via the chokepoint');
   assert.equal(resolveAdapterOptsForTask(resolved, { model: 'gpt-9-future' }).model, 'gpt-9-future', 'unknown passes through');
 });
+
+// ─── review follow-ups: validation-legal loose forms, ambiguity/cross-vendor safety, hygiene ───
+
+test('V4 normalizeModel: claude/agy — VALIDATION-LEGAL loose forms reach the canonical bracket/paren label', () => {
+  // The dash/no-separator forms (what actually passes MODEL_PATTERN as --model) must
+  // still collide onto the bracket/paren canonical names V2 ships.
+  assert.equal(normalizeModel('claude', 'opus-1m', ['opus', 'opus[1m]']), 'opus[1m]');
+  assert.equal(normalizeModel('claude', 'opus1m', ['opus', 'opus[1m]']), 'opus[1m]');
+  const agyKg = ['Gemini 3.5 Flash (High)', 'Gemini 3.1 Pro (Low)'];
+  assert.equal(normalizeModel('agy', 'gemini-3.5-flash-high', agyKg), 'Gemini 3.5 Flash (High)');
+});
+
+test('V4 normalizeModel: mimo AMBIGUOUS tail → passthrough (never invent a prefix)', () => {
+  assert.equal(normalizeModel('mimo', 'shared', ['a/shared', 'b/shared']), 'shared', 'two providers share the tail → no guess');
+});
+
+test('V4 normalizeModel: cross-vendor safety — one vendor id offered to another passes through unchanged', () => {
+  // codex catalog has gpt-5.3-codex-spark (canonKey gpt53codexspark) — a bare gpt-5.3-codex
+  // (gpt53codex) must NOT collide onto it.
+  assert.equal(normalizeModel('codex', 'gpt-5.3-codex', ['gpt-5.5', 'gpt-5.3-codex-spark']), 'gpt-5.3-codex');
+  assert.equal(normalizeModel('grok', 'claude-opus-4.8', ['grok-build']), 'claude-opus-4.8');
+});
+
+test('V4 normalizeModel: input hygiene — non-string / nullish / bad knownGood never throw', () => {
+  assert.equal(normalizeModel('codex', undefined, ['gpt-5.5']), undefined);
+  assert.equal(normalizeModel('codex', null, ['gpt-5.5']), null);
+  assert.equal(normalizeModel('codex', '   ', ['gpt-5.5']), '   ');
+  assert.equal(normalizeModel('codex', 42, ['gpt-5.5']), 42);
+  assert.equal(normalizeModel('codex', 'gpt-5.5', null), 'gpt-5.5', 'null knownGood → passthrough');
+  assert.equal(normalizeModel('codex', 'gpt-5.5', undefined), 'gpt-5.5');
+});
+
+test('V4 normalizeModel: idempotent — normalizing the canonical output again is a fixpoint', () => {
+  const kg = ['gpt-5.5', 'gpt-5.4-mini'];
+  const once = normalizeModel('codex', 'GPT-5.5', kg);
+  assert.equal(normalizeModel('codex', once, kg), once);
+  const agyKg = ['Gemini 3.5 Flash (High)'];
+  const a1 = normalizeModel('agy', 'gemini-3.5-flash-high', agyKg);
+  assert.equal(normalizeModel('agy', a1, agyKg), a1);
+});
