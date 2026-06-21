@@ -33,9 +33,14 @@ export const agyAdapter = {
   // Phase 6a static capability hint — sourced from docs/research/.
   capabilities: {
     modelArg: {
-      accepted: 'ignored',
-      knownGood: [],
-      sourceNote: 'agy -p does not expose --model. Marketing references "Gemini 3.5 Flash" as default; some third-party blog mentions `antigravity agent run --model gemini-3.5-flash` separate binary, UNCONFIRMED.',
+      accepted: 'freeform',
+      // V1 verification (2026-06): agy NOW exposes `--model` + a `models` subcommand (added
+      // since the 2026-05 research). The flag takes the FULL DISPLAY LABEL with the reasoning
+      // tier in parens — bare slugs (gemini-3.5-flash) are rejected and silently fall back to
+      // the default "Gemini 3.5 Flash (Medium)". Claude/GPT-OSS labels appear in the picker but
+      // are plan-gated (rejected on consumer accounts), so excluded here.
+      knownGood: ['Gemini 3.5 Flash (High)', 'Gemini 3.5 Flash (Medium)', 'Gemini 3.1 Pro (High)', 'Gemini 3.1 Pro (Low)'],
+      sourceNote: 'agy --model "<Display Label (Tier)>" (verified live 2026-06; labels only, no bare slug; account/tier-gated — list with `agy models`). Adapter forwards opts.model verbatim.',
     },
     reasoningArg: {
       accepted: 'ignored',
@@ -77,6 +82,8 @@ export const agyAdapter = {
     const sandbox = opts.sandbox ?? 'danger-full-access';
     return [
       '-p', input,
+      // V1: agy now honors `--model "<Display Label (Tier)>"` (verbatim; bare slugs rejected).
+      ...(opts.model ? ['--model', opts.model] : []),
       ...(sandbox === 'danger-full-access' ? ['--dangerously-skip-permissions'] : []),
       // Cross-vendor working-dir support (mirrors opencode --dir / grok --cwd /
       // codex --cd). agy has no cwd-setting flag, but `--add-dir <path>`
@@ -166,15 +173,21 @@ export const agyAdapter = {
     const signal = `${log}\n${raw.stderr || ''}`;
     const hasStdout = Boolean((raw.stdout || '').trim());
 
-    // Auth-fail patterns (per T-00b diagnostic + codex F2 enumeration)
-    // agy print mode may emit early "not logged in" log lines, then recover via
-    // silent auth and still return a valid answer on stdout. Treat these auth
-    // patterns as terminal only when there is no successful stdout payload.
-    if ((!hasStdout || raw.exitCode !== 0) && /You are not logged into Antigravity|Failed to get OAuth token|error getting token source/i.test(signal)) {
+    // Auth classification (V5 fix — agy false "never auth"). agy print mode emits transient
+    // "not logged in" / "Failed to get OAuth token" noise during boot, then recovers ~0.3s
+    // later via silent KEYRING auth, emitting an AUTHORITATIVE success marker. The old
+    // heuristic matched the boot noise even AFTER recovery (and the empty stdout from the
+    // non-TTY drop) → FALSE auth-fail although the run authed + completed. Fix = a
+    // success-marker VETO: if a terminal auth-success marker is present, agy authed, so never
+    // classify auth-fail regardless of early noise or empty stdout. A genuine failure shows
+    // the noise (incl. "silent auth failed" / "keyringAuth timed out") WITHOUT a success marker.
+    const authSucceeded = /Print mode: silent auth succeeded|OAuth: authenticated successfully|authenticated via keyring/i.test(signal);
+    const authNoise = /You are not logged into Antigravity|Failed to get OAuth token|error getting token source|Print mode: silent auth failed|keyringAuth: timed out/i.test(signal);
+    if (authNoise && !authSucceeded) {
       return {
         text: '',
         status: 'auth-fail',
-        error: `agy is not OAuth-authed. Run \`agy\` interactively once (browser OAuth flow). After login, -p mode works headless.${logFileMissing ? ' [Note: --log-file content was missing; auth pattern matched stderr]' : ''}`,
+        error: `agy is not OAuth-authed (no silent-auth success marker in this run). Run \`agy\` interactively once (browser OAuth) to populate the keyring.${logFileMissing ? ' [Note: --log-file content was missing; matched stderr]' : ''}`,
       };
     }
 
@@ -198,8 +211,18 @@ export const agyAdapter = {
       return { text: raw.stdout.trim(), status: 'success' };
     }
 
-    // Exit 0 + empty stdout + no specific error pattern = unknown silent fail
+    // Exit 0 + empty stdout. V5: when the log shows auth + a completed run, this is agy's
+    // known NON-TTY STDOUT DROP (it drops the final answer to stdout under a pipe), NOT a
+    // failure of agy itself — the answer is in the .log. Surface that precisely (the real fix
+    // is a PTY wrap; until then read the full answer via `--result <id> --full`).
     if (raw.exitCode === 0 && !raw.stdout.trim()) {
+      if (authSucceeded) {
+        return {
+          text: '',
+          status: 'unknown-fail',
+          error: `agy authed + ran but emitted NO stdout — agy's known non-TTY stdout drop (it ran under a pipe). The full answer is in the .log; read it with \`--result <id> --full\`. (PTY capture is a follow-up.) Log tail: ${log.slice(-400)}`,
+        };
+      }
       return {
         text: '',
         status: 'unknown-fail',

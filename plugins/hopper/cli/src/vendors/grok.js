@@ -43,7 +43,7 @@ export const grokAdapter = {
   capabilities: {
     modelArg: {
       accepted: 'freeform',
-      knownGood: ['grok-build', 'grok-4.3'],
+      knownGood: ['grok-build', 'grok-composer-2.5-fast'],
       sourceNote: 'grok `-m, --model <MODEL>` (CONFIRMED docs.x.ai/build/cli/headless-scripting). Local dogfood feedback on 2026-06-02 confirmed `grok-build` as the working coding-model slug; `grok-build-0.1` returned `unknown model id`. CLI built-in default when -m omitted is still UNCONFIRMED, so this adapter ALWAYS passes -m (default grok-build). NAME COLLISION: the third-party grok-cli defaults to grok-code-fast-1 and uses different auth/output flags.',
     },
     reasoningArg: {

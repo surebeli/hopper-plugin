@@ -21,8 +21,8 @@ export async function probe() {
     version: null,
     // Static catalog: no CONFIRMED CLI models subcommand. 2026-06-02 dogfood
     // feedback corrected the coding-model slug from grok-build-0.1 → grok-build.
-    models: binaryPath ? ['grok-build', 'grok-4.3'] : [],
-    models_source: 'xAI Grok Build static catalog (source: docs.x.ai/developers/models + 2026-06-02 dogfood feedback); no CONFIRMED CLI models-introspection subcommand. Adapter passes grok-build by default.',
+    models: binaryPath ? ['grok-build', 'grok-composer-2.5-fast'] : [],
+    models_source: 'xAI Grok Build static catalog (V1 verified 2026-06: grok-build default + grok-composer-2.5-fast; grok-4.3 was a stale chat slug, removed). NOTE: `grok models` DOES exist in v0.2.51 — a live-introspection upgrade is a follow-up (V3).',
     // grok headless `--effort <LEVEL>` exists (CONFIRMED `grok --help`, 2026-06-15);
     // adapter forwards opts.reasoning -> --effort opt-in. Levels not fully documented.
     reasoning_levels: ['low', 'medium', 'high'],

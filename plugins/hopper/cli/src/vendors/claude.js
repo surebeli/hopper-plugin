@@ -43,7 +43,7 @@ export const claudeAdapter = {
   capabilities: {
     modelArg: {
       accepted: 'freeform',
-      knownGood: ['sonnet', 'opus', 'haiku', 'fable'],
+      knownGood: ['sonnet', 'opus', 'haiku', 'fable', 'opusplan', 'best', 'default', 'sonnet[1m]', 'opus[1m]'],
       sourceNote: '`claude --model <NAME>` accepts a latest-model alias (sonnet|opus|haiku|fable) OR a full model id (e.g. claude-sonnet-4-6) — CONFIRMED code.claude.com/docs/en/cli-reference 2026-06-16. The exact ids/tiers an account can reach depend on its subscription/entitlements, so this adapter does NOT hardcode a default: it omits --model unless opts.model is set and lets the CLI pick the account default (mirrors codex, which also leaves the model to the account).',
     },
     reasoningArg: {

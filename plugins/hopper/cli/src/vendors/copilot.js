@@ -30,7 +30,7 @@ export const copilotAdapter = {
   capabilities: {
     modelArg: {
       accepted: 'freeform',
-      knownGood: [],  // No canonical list — depends on user Copilot subscription tier
+      knownGood: ['auto', 'claude-sonnet-4.6', 'claude-opus-4.8', 'claude-haiku-4.5', 'claude-fable-5', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gemini-3.1-pro-preview', 'gemini-3.5-flash'],  // advisory; tier-dependent — `copilot help config` is authoritative
       sourceNote: 'copilot --model <name>. Available models depend on YOUR Copilot subscription tier (premium-request meter applies; Business/Enterprise tiers see different models). Not hardcoded in this adapter.',
     },
     reasoningArg: {
