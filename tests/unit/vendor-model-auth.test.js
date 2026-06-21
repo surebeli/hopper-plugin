@@ -45,6 +45,28 @@ test('V5 agy parseResult: exit 0 + real stdout + auth marker = success', () => {
   assert.equal(r.text, 'THE ANSWER');
 });
 
+test('V5 agy parseResult: boot noise + success marker + REAL stdout = success (the common recovery)', () => {
+  const r = agyAdapter.parseResult({
+    exitCode: 0, timedOut: false, durationMs: 5000, stdout: 'HOPPER_AGY_OK', stderr: '',
+    logFileContent: [
+      'Failed to get OAuth token: error getting token source',
+      'You are not logged into Antigravity',
+      'ChainedAuth: authenticated via keyring (effective: keyring)',
+      'Print mode: silent auth succeeded',
+    ].join('\n'),
+  });
+  assert.equal(r.status, 'success', 'veto must coexist with a real payload');
+  assert.equal(r.text, 'HOPPER_AGY_OK');
+});
+
+test('V5 agy parseResult: a NEGATED "authenticated via keyring" phrase does NOT veto a real auth failure', () => {
+  const r = agyAdapter.parseResult({
+    exitCode: 1, timedOut: false, durationMs: 1000, stdout: '', stderr: '',
+    logFileContent: 'You are not logged into Antigravity\ncould not be authenticated via keyring backend: locked',
+  });
+  assert.equal(r.status, 'auth-fail', 'negated keyring phrase must not be read as a success marker (anchored regex)');
+});
+
 // ─── V2: agy --model + bare-model knownGood corrections ───
 
 test('V2 agy: --model forwarded as a verbatim label; modelArg freeform with the 4 labels', () => {

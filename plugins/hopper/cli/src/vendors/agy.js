@@ -181,7 +181,10 @@ export const agyAdapter = {
     // success-marker VETO: if a terminal auth-success marker is present, agy authed, so never
     // classify auth-fail regardless of early noise or empty stdout. A genuine failure shows
     // the noise (incl. "silent auth failed" / "keyringAuth timed out") WITHOUT a success marker.
-    const authSucceeded = /Print mode: silent auth succeeded|OAuth: authenticated successfully|authenticated via keyring/i.test(signal);
+    // Anchor the keyring marker to its real emitter ("ChainedAuth: authenticated via keyring
+    // (effective: keyring)") so a NEGATED phrase (e.g. "could not be authenticated via keyring")
+    // can't falsely veto a genuine auth failure. The other two markers are already specific.
+    const authSucceeded = /Print mode: silent auth succeeded|OAuth: authenticated successfully|ChainedAuth:[^\n]*authenticated via keyring/i.test(signal);
     const authNoise = /You are not logged into Antigravity|Failed to get OAuth token|error getting token source|Print mode: silent auth failed|keyringAuth: timed out/i.test(signal);
     if (authNoise && !authSucceeded) {
       return {

@@ -224,7 +224,7 @@ export const codexAdapter = {
       // prefixed ids (openai-codex/gpt-5.1-codex) are rejected (openai/codex#12295).
       // Catalog is subscription-dependent; list via `codex debug models --bundled`.
       knownGood: ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex-spark'],
-      sourceNote: 'codex exec -m <MODEL>; adapter forwards opts.model verbatim (ISSUE-codex-vendor-model-effort, 2026-06). ChatGPT-account auth accepts BARE model names only (gpt-5.5 / gpt-5.4-mini / gpt-5.3-codex-spark); provider-prefixed names rejected (openai/codex#12295). Effort is SEPARATE from the model name: --reasoning -> -c model_reasoning_effort. Catalog: `codex debug models --bundled`.',
+      sourceNote: 'codex exec -m <MODEL>; adapter forwards opts.model verbatim (ISSUE-codex-vendor-model-effort, 2026-06; V1-verified 2026-06). ChatGPT-account auth accepts BARE model names only (gpt-5.5 / gpt-5.4 / gpt-5.4-mini); provider-prefixed names rejected (openai/codex#12295). gpt-5.3-codex-spark is a ChatGPT-Pro-only research preview (conditional — not on every account). Effort is SEPARATE from the model name: --reasoning -> -c model_reasoning_effort. Catalog: `codex debug models --bundled`.',
     },
     reasoningArg: {
       accepted: 'enumerated',
