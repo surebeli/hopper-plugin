@@ -56,3 +56,40 @@ test('setup: summarizeReadiness rolls up ready/notInstalled/authMissing/capsStal
   assert.ok(Array.isArray(sum.notInstalled) && Array.isArray(sum.authMissing) && Array.isArray(sum.capsStale));
   assert.equal(sum.capsStale.length, 0, 'no vendor is stale against a year-2000 clock');
 });
+
+// ─── V3: doctor --deep live model enumeration + reconcile (injected probe, no spawn) ───
+
+test('V3 deep: live enumeration reconciles against knownGood via an injected probe', async () => {
+  const fakeProbe = async (name) => (name === 'codex'
+    ? { introspection_supported: 'full', models: ['gpt-5.5', 'GPT-5.4', 'gpt-6-new'], models_source: 'fake' }
+    : { introspection_supported: 'none', models: [] });
+  const rows = await buildVendorReadiness({ only: 'codex', deep: true, persist: false, probeFn: fakeProbe });
+  const rec = rows[0].modelReconcile;
+  assert.equal(rec.applicable, true);
+  assert.ok(rec.matched.includes('gpt-5.5') && rec.matched.includes('gpt-5.4'), 'case-insensitive live match');
+  assert.ok(rec.missingFromLive.includes('gpt-5.4-mini'), 'a default missing from the live catalog is STALE');
+  assert.deepEqual(rec.newOnLive, ['gpt-6-new'], 'a live model absent from defaults is NEW');
+  assert.deepEqual(rows[0].modelsLive, ['gpt-5.5', 'GPT-5.4', 'gpt-6-new']);
+});
+
+test('V3 deep: a vendor with no enumeration command reports n/a (no false "missing")', async () => {
+  const fakeProbe = async () => ({ introspection_supported: 'none', models: [], models_source: 'claude exposes no model-list command' });
+  const rows = await buildVendorReadiness({ only: 'claude', deep: true, persist: false, probeFn: fakeProbe });
+  assert.equal(rows[0].modelReconcile.applicable, false);
+  assert.match(rows[0].modelReconcile.reason, /no model-list command|no live model catalog/);
+});
+
+test('V3 deep: a probe that throws degrades to applicable:false (never blocks the report)', async () => {
+  const fakeProbe = async () => { throw new Error('boom'); };
+  const rows = await buildVendorReadiness({ only: 'grok', deep: true, persist: false, probeFn: fakeProbe });
+  assert.equal(rows[0].modelReconcile.applicable, false);
+  assert.match(rows[0].modelReconcile.reason, /probe failed: boom/);
+  assert.equal(rows[0].modelsLive, null);
+});
+
+test('V3 shallow: non-deep doctor never enumerates (probeFn is not called)', async () => {
+  let called = false;
+  const rows = await buildVendorReadiness({ only: 'codex', deep: false, probeFn: async () => { called = true; return { introspection_supported: 'full', models: [] }; } });
+  assert.equal(called, false, 'shallow doctor must not spawn/enumerate');
+  assert.ok(rows[0].modelReconcile == null, 'no reconcile attached without --deep');
+});

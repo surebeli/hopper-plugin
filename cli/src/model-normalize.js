@@ -69,3 +69,51 @@ export function normalizeModel(vendor, model, knownGood = []) {
 
   return trimmed; // no confident match → passthrough (newer/account-specific model)
 }
+
+/** Last path segment (the bare model id) — `xiaomi/mimo-v2.5-pro` → `mimo-v2.5-pro`. */
+function tailSlug(s) {
+  return s.includes('/') ? s.slice(s.lastIndexOf('/') + 1) : s;
+}
+
+/**
+ * Vendor-scoped equality between two model identifiers, tolerant of the
+ * bare-vs-prefixed / label-vs-id namespace gap between hardcoded defaults and a
+ * live catalog. Mirrors normalizeModel's matching discipline:
+ *   - bare-slug vendors: compare the canon key of each side's bare slug.
+ *   - provider-prefixed: full canon key OR (tail canon key) match.
+ *   - alias / unknown: full canon key only.
+ * @returns {boolean}
+ */
+export function modelKeysMatch(vendor, a, b) {
+  if (BARE_SLUG_VENDORS.has(vendor)) return canonKey(tailSlug(a)) === canonKey(tailSlug(b));
+  if (PROVIDER_PREFIXED_VENDORS.has(vendor)) {
+    return canonKey(a) === canonKey(b) || canonKey(tailSlug(a)) === canonKey(tailSlug(b));
+  }
+  return canonKey(a) === canonKey(b);
+}
+
+/**
+ * Reconcile a vendor's hardcoded `knownGood` defaults against a LIVE-enumerated
+ * model list (from --probe / doctor --deep). Advisory, vendor-scoped drift report:
+ *   - matched:         knownGood entries the live catalog still lists
+ *   - missingFromLive: knownGood entries the live catalog NO LONGER lists (stale defaults)
+ *   - newOnLive:       live models not represented in knownGood (candidates to add)
+ * Caller must only invoke this when a live catalog actually exists — a vendor with
+ * no enumeration command (introspection 'none') would otherwise show every default
+ * as "missing", a false alarm.
+ * @param {string} vendor
+ * @param {string[]} [knownGood]
+ * @param {string[]} [enumerated]  live model identifiers
+ * @returns {{matched:string[], missingFromLive:string[], newOnLive:string[]}}
+ */
+export function reconcileModels(vendor, knownGood = [], enumerated = []) {
+  const clean = (arr) => (Array.isArray(arr) ? arr.filter((s) => typeof s === 'string' && s.trim()) : []);
+  const kg = clean(knownGood);
+  const live = clean(enumerated);
+  const matches = (a, b) => modelKeysMatch(vendor, a, b);
+  return {
+    matched: kg.filter((g) => live.some((l) => matches(g, l))),
+    missingFromLive: kg.filter((g) => !live.some((l) => matches(g, l))),
+    newOnLive: live.filter((l) => !kg.some((g) => matches(g, l))),
+  };
+}

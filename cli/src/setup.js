@@ -14,9 +14,10 @@
 // dispatch: installed? · auth? · models? · capability fresh? · full-access? ·
 // web-search? — the three axes the operator cares about (run / safety / research).
 
-import { listAdapters, getAdapter, installCheckForAdapter, capabilitiesForAdapter } from './vendors/index.js';
-import { getVendorCache } from './cache.js';
+import { listAdapters, getAdapter, installCheckForAdapter, capabilitiesForAdapter, probeVendor } from './vendors/index.js';
+import { getVendorCache, setVendorCache } from './cache.js';
 import { compatCheckForAdapter } from './vendor-compat.js';
+import { reconcileModels } from './model-normalize.js';
 
 /**
  * Does the adapter enforce the sandbox through argv (so hopper can downgrade a
@@ -54,11 +55,16 @@ export function webSearchSupport(adapter) {
  * Build the per-vendor readiness rows. Pure except for the optional `deep` tier.
  * @param {object} [o]
  * @param {boolean} [o.deep]  also run the flag-drift compat probe (spawns --help)
+ *                            AND live-enumerate each vendor's models, reconciling
+ *                            the result against the hardcoded knownGood (V3).
  * @param {string}  [o.only]  restrict to a single vendor
  * @param {Date}    [o.now]   injectable clock for capability-staleness (testable)
+ * @param {Function}[o.probeFn] injectable model-enumeration probe (defaults to the
+ *                            real probeVendor; tests pass a fake to avoid spawning)
+ * @param {boolean} [o.persist] write the live catalog to the probe cache (default true)
  * @returns {Promise<Array<object>>}
  */
-export async function buildVendorReadiness({ deep = false, only = null, now = new Date() } = {}) {
+export async function buildVendorReadiness({ deep = false, only = null, now = new Date(), probeFn = probeVendor, persist = true } = {}) {
   const names = only ? [only] : listAdapters();
   const rows = [];
   for (const name of names) {
@@ -92,6 +98,33 @@ export async function buildVendorReadiness({ deep = false, only = null, now = ne
     if (deep) {
       try { row.compat = compatCheckForAdapter(name); }
       catch (e) { row.compat = { ran: false, reason: String((e && e.message) || e) }; }
+
+      // V3: live-enumerate the vendor's models, reconcile vs hardcoded knownGood.
+      const kg = (caps && caps.modelArg && Array.isArray(caps.modelArg.knownGood)) ? caps.modelArg.knownGood : [];
+      try {
+        const live = await probeFn(name);
+        const liveModels = live && Array.isArray(live.models) ? live.models.filter((m) => typeof m === 'string' && m.trim()) : [];
+        const introspection = (live && live.introspection_supported) || 'none';
+        row.modelsLive = liveModels;
+        row.modelsLiveSource = live ? (live.models_source || null) : null;
+        row.introspection = introspection;
+        if (persist && live && liveModels.length) {
+          try { setVendorCache(name, { ...live, probed_at: now.toISOString() }); } catch (_) { /* cache write best-effort */ }
+          row.models = liveModels;          // reflect the fresh probe in the Models column
+          row.modelsProbedAt = now.toISOString();
+        }
+        // Only reconcile when a live catalog actually exists — a vendor with no
+        // enumeration command (introspection 'none') would otherwise flag every
+        // default as "missing", a false alarm.
+        if (introspection === 'none' || liveModels.length === 0) {
+          row.modelReconcile = { applicable: false, reason: (live && live.models_source) || 'no live model catalog (vendor exposes no enumeration command)' };
+        } else {
+          row.modelReconcile = { applicable: true, ...reconcileModels(name, kg, liveModels) };
+        }
+      } catch (e) {
+        row.modelsLive = null;
+        row.modelReconcile = { applicable: false, reason: `probe failed: ${String((e && e.message) || e)}` };
+      }
     }
     rows.push(row);
   }

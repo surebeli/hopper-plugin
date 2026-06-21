@@ -1464,8 +1464,23 @@ async function runSetup({ only = null, deep = false } = {}) {
       else if ((c.missing || []).length === 0) console.log(`  ${r.name.padEnd(9)} OK — ${c.present.length} expected flag(s) present`);
       else console.log(`  ${r.name.padEnd(9)} DRIFT — missing: ${c.missing.join(', ')}`);
     }
+
+    // V3: live model catalog vs the hardcoded knownGood defaults.
+    console.log('\nModel catalog drift (live enumeration vs hardcoded knownGood defaults):');
+    for (const r of rows) {
+      const rec = r.modelReconcile;
+      if (!rec) { console.log(`  ${r.name.padEnd(9)} —`); continue; }
+      if (rec.applicable === false) { console.log(`  ${r.name.padEnd(9)} n/a — ${rec.reason}`); continue; }
+      const liveN = Array.isArray(r.modelsLive) ? r.modelsLive.length : 0;
+      const parts = [`${rec.matched.length}/${liveN} live match defaults`];
+      if (rec.missingFromLive.length) parts.push(`STALE default(s) not in live catalog: ${rec.missingFromLive.join(', ')}`);
+      if (rec.newOnLive.length) parts.push(`NEW live model(s) absent from defaults: ${rec.newOnLive.slice(0, 8).join(', ')}${rec.newOnLive.length > 8 ? '…' : ''}`);
+      const verdict = (rec.missingFromLive.length || rec.newOnLive.length) ? 'DRIFT' : 'OK';
+      console.log(`  ${r.name.padEnd(9)} ${verdict} — ${parts.join('; ')}`);
+    }
+    console.log('  (DRIFT is advisory: add NEW models to the adapter knownGood, or drop STALE ones. --deep also refreshed the probe cache.)');
   } else {
-    console.log('\nTip: `--setup --deep` adds per-vendor flag-drift (spawns `<vendor> --help` once each).');
+    console.log('\nTip: `--setup --deep` adds per-vendor flag-drift + live model-catalog reconciliation (spawns `<vendor> --help` and the model-enumeration probe once each).');
   }
 }
 

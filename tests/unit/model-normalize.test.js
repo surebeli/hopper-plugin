@@ -3,7 +3,7 @@
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { normalizeModel } from '../../cli/src/model-normalize.js';
+import { normalizeModel, reconcileModels, modelKeysMatch } from '../../cli/src/model-normalize.js';
 import { resolveAdapterOptsForTask } from '../../cli/src/dispatch.js';
 
 test('V4 normalizeModel: codex — case/dash/dot-insensitive, prefix-strip, FULL-key equality, passthrough', () => {
@@ -91,4 +91,38 @@ test('V4 normalizeModel: idempotent — normalizing the canonical output again i
   const agyKg = ['Gemini 3.5 Flash (High)'];
   const a1 = normalizeModel('agy', 'gemini-3.5-flash-high', agyKg);
   assert.equal(normalizeModel('agy', a1, agyKg), a1);
+});
+
+// ─── V3: reconcile hardcoded knownGood vs a live-enumerated catalog ───
+
+test('V3 reconcileModels: codex — matched / stale-default / new-on-live (canon-insensitive)', () => {
+  const r = reconcileModels('codex', ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'], ['GPT-5.5', 'gpt5.4', 'gpt-6']);
+  assert.deepEqual(r.matched, ['gpt-5.5', 'gpt-5.4']);
+  assert.deepEqual(r.missingFromLive, ['gpt-5.4-mini'], 'a default the live catalog no longer lists is STALE');
+  assert.deepEqual(r.newOnLive, ['gpt-6'], 'a live model absent from defaults is NEW');
+});
+
+test('V3 reconcileModels: mimo — a prefixed default matches a bare live id by tail', () => {
+  const r = reconcileModels('mimo', ['xiaomi/mimo-v2.5-pro', 'mimo/mimo-auto'], ['mimo-v2.5-pro']);
+  assert.ok(r.matched.includes('xiaomi/mimo-v2.5-pro'));
+  assert.ok(r.missingFromLive.includes('mimo/mimo-auto'));
+  assert.deepEqual(r.newOnLive, []);
+});
+
+test('V3 reconcileModels: claude — opus[1m] stays distinct from a live `opus` (no false match)', () => {
+  const r = reconcileModels('claude', ['opus', 'opus[1m]'], ['opus', 'sonnet']);
+  assert.deepEqual(r.matched, ['opus']);
+  assert.deepEqual(r.missingFromLive, ['opus[1m]']);
+  assert.deepEqual(r.newOnLive, ['sonnet']);
+});
+
+test('V3 reconcileModels: empty edges — empty live → all missing; empty kg → all new; junk filtered', () => {
+  assert.deepEqual(reconcileModels('codex', ['gpt-5.5'], []), { matched: [], missingFromLive: ['gpt-5.5'], newOnLive: [] });
+  assert.deepEqual(reconcileModels('codex', [], ['gpt-5.5']), { matched: [], missingFromLive: [], newOnLive: ['gpt-5.5'] });
+  assert.deepEqual(reconcileModels('codex', ['gpt-5.5', '', null], ['gpt-5.5', '  ']), { matched: ['gpt-5.5'], missingFromLive: [], newOnLive: [] });
+});
+
+test('V3 modelKeysMatch: vendor-scoped — bare-slug strips prefix, alias is full-key only', () => {
+  assert.ok(modelKeysMatch('codex', 'openai/gpt-5.5', 'gpt-5.5'), 'bare-slug strips the provider prefix on both sides');
+  assert.ok(!modelKeysMatch('kimi', 'kimi-code/kimi-for-coding', 'kimi-for-coding'), 'alias vendor uses full-key only — tail must NOT match');
 });
