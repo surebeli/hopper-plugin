@@ -111,9 +111,10 @@ export const copilotAdapter = {
     //    backed (NOT a readable file), so the presence of the ~/.copilot profile is the
     //    on-disk signal that `copilot` has been set up; parseResult is the backstop for
     //    an expired/revoked session at dispatch time.
-    const copilotDir = join(homedir(), '.copilot');
-    const profileMarkers = ['config.json', 'settings.json', 'session-store.db'];
-    if (existsSync(copilotDir) && profileMarkers.some((f) => existsSync(join(copilotDir, f)))) {
+    // Key on session-store.db only: config.json/settings.json are written merely by
+    // launching the CLI (persist after logout), whereas the session store reflects
+    // actual authenticated use. Still a heuristic — parseResult catches a stale session.
+    if (existsSync(join(homedir(), '.copilot', 'session-store.db'))) {
       return { ok: true, missing: [] };
     }
     // Soft warn — nothing detected; copilot may still auth via keychain.
@@ -139,6 +140,17 @@ export const copilotAdapter = {
         text: '',
         status: 'permission-fail',
         error: 'copilot binary not found. Install: npm install -g @github/copilot OR brew install copilot-cli',
+      };
+    }
+    // Auth failure backstop: envPreflight's profile heuristic can't tell a logged-OUT
+    // copilot (stale ~/.copilot session-store) from a logged-in one, so catch a real
+    // auth failure here and label it (don't bury it in the generic unknown-fail bucket).
+    const authFail = /not (authenticated|logged in|signed in)|unauthorized|401|authentication (failed|required)|please (sign in|log in|authenticate)|run `?copilot`? to (sign in|log in)|invalid (token|credentials)/i;
+    if ((raw.exitCode !== 0) && (authFail.test(raw.stderr || '') || authFail.test(raw.stdout || ''))) {
+      return {
+        text: '',
+        status: 'auth-fail',
+        error: 'copilot is not authenticated. Run `copilot` once to log in, or set GH_TOKEN/GITHUB_TOKEN/COPILOT_GITHUB_TOKEN.',
       };
     }
     // Copilot quota exhaustion: surfaces as specific error in stdout/stderr

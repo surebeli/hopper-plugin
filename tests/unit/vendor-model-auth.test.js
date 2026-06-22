@@ -6,6 +6,9 @@ import { strict as assert } from 'node:assert';
 import { agyAdapter } from '../../cli/src/vendors/agy.js';
 import { copilotAdapter } from '../../cli/src/vendors/copilot.js';
 import { getAdapter, listAdapters, installCheckForAdapter } from '../../cli/src/vendors/index.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // ─── V5: agy never-auth was a false positive (boot noise + non-TTY stdout drop) ───
 
@@ -127,4 +130,38 @@ test('copilot envPreflight: env token → clean ok; never a hard fail (keychain/
       if (v === undefined) delete process.env[k]; else process.env[k] = v;
     }
   }
+});
+
+test('installCheck threading: a soft-warn copilot is authOk + authSoftWarn (deterministic, empty HOME)', async () => {
+  // Deterministically force the soft-warn branch (no env token, no gh, no ~/.copilot)
+  // and assert the index.js threading: authOk=true AND authSoftWarn=true with a note —
+  // this is the exact pairing the bug broke (authOk was false on a soft-warn).
+  const saved = {
+    GH_TOKEN: process.env.GH_TOKEN, GITHUB_TOKEN: process.env.GITHUB_TOKEN,
+    COPILOT_GITHUB_TOKEN: process.env.COPILOT_GITHUB_TOKEN,
+    HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE,
+  };
+  const emptyHome = mkdtempSync(join(tmpdir(), 'hopper-emptyhome-ic-'));
+  try {
+    delete process.env.GH_TOKEN; delete process.env.GITHUB_TOKEN; delete process.env.COPILOT_GITHUB_TOKEN;
+    process.env.HOME = emptyHome; process.env.USERPROFILE = emptyHome;
+    const r = await installCheckForAdapter('copilot');
+    assert.equal(r.authOk, true, 'soft-warn copilot is authOk=true (not a hard NO)');
+    assert.equal(r.authSoftWarn, true, 'and flagged as soft-warn (assumed/unverifiable)');
+    assert.ok(r.authNotes.length > 0, 'carries the advisory note');
+    if (r.binaryFound) assert.equal(r.overallStatus, 'READY', 'soft-warn does not downgrade overallStatus');
+  } finally {
+    for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    rmSync(emptyHome, { recursive: true, force: true });
+  }
+});
+
+test('copilot parseResult: a real auth failure is labeled auth-fail (heuristic backstop)', () => {
+  const fail = copilotAdapter.parseResult({
+    exitCode: 1, timedOut: false, durationMs: 200, stdout: '', stderr: 'Error: not authenticated. Run `copilot` to sign in.',
+  });
+  assert.equal(fail.status, 'auth-fail');
+  // exit 0 with the word "authenticated" in normal output must NOT be misread as a failure
+  const ok = copilotAdapter.parseResult({ exitCode: 0, timedOut: false, durationMs: 200, stdout: 'You are authenticated and ready.', stderr: '' });
+  assert.equal(ok.status, 'success');
 });

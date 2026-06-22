@@ -1461,7 +1461,7 @@ async function runSetup({ only = null, deep = false } = {}) {
   console.log('  for the full model/effort/sandbox matrix.');
 
   if (sum.notInstalled.length) console.log(`\nNot installed: ${sum.notInstalled.join(', ')}  (PATH is shell-dependent on Windows — see \`--check\`)`);
-  if (sum.authMissing.length) console.log(`Auth missing/unverified: ${sum.authMissing.join(', ')}  (run \`--check ${sum.authMissing[0]}\` for the auth note)`);
+  if (sum.authMissing.length) console.log(`Not authenticated (hard fail — set up auth before dispatch): ${sum.authMissing.join(', ')}  (run \`--check ${sum.authMissing[0]}\` for the fix)`);
   if (sum.capsStale.length) console.log(`Capability metadata STALE (re-verify the adapter): ${sum.capsStale.join(', ')}`);
 
   const notes = rows.filter((r) => r.installed && r.authNotes && r.authNotes.length);
@@ -1546,7 +1546,8 @@ async function runCheck(target, { compat = false } = {}) {
     const cmd = r.binaryFound
       ? `${redact(r.resolvedPath) || r.command}${r.needsShellWrap ? ' (cmd.exe /c wrap)' : ''}`
       : '(not on PATH)';
-    const auth = r.authOk ? 'OK' : (r.authNotes.length > 0 ? 'note' : 'missing');
+    // 3-state, consistent with --setup: OK (verified) / warn (soft-warn, keychain-backed) / NO (hard fail).
+    const auth = r.authOk ? (r.authSoftWarn ? 'warn' : 'OK') : (r.binaryFound ? 'NO' : '—');
     console.log(`| ${v.padEnd(9)} | ${cmd.slice(0, 50).padEnd(50)} | ${auth.padEnd(9)} | ${r.overallStatus.padEnd(14)} |`);
   }
   console.log('');
