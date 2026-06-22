@@ -145,6 +145,30 @@ export async function buildVendorReadiness({ deep = false, only = null, now = ne
 }
 
 /**
+ * Format the per-vendor "Model catalog drift" detail (doctor --deep). PURE and
+ * exported so the renderer logic is unit-testable without spawning the CLI.
+ * @param {object} row a buildVendorReadiness row (expects .modelReconcile, .modelsLive)
+ * @returns {{verdict: 'OK'|'DRIFT'|'n/a'|'—', detail: string}}
+ */
+export function formatModelDrift(row) {
+  const rec = row && row.modelReconcile;
+  if (!rec) return { verdict: '—', detail: '' };
+  if (rec.applicable === false) return { verdict: 'n/a', detail: rec.reason || '' };
+  const liveN = Array.isArray(row.modelsLive) ? row.modelsLive.length : 0;
+  const suppressed = Array.isArray(rec.expectedSuppressed) ? rec.expectedSuppressed.length : 0;
+  // Count matches from the LIVE side (liveN minus the new + suppressed live models) so
+  // the "N of M" is accurate even if two defaults map to one live model (rec.matched is
+  // a knownGood-side count that could exceed the distinct matched-live count).
+  const liveMatched = Math.max(0, liveN - rec.newOnLive.length - suppressed);
+  const parts = [`${liveMatched} of ${liveN} live model(s) match defaults`];
+  if (suppressed > 0) parts.push(`${suppressed} expected-divergence suppressed (driftExpected)`);
+  if (rec.missingFromLive.length) parts.push(`STALE default(s) not in live catalog: ${rec.missingFromLive.join(', ')}`);
+  if (rec.newOnLive.length) parts.push(`NEW live model(s) absent from defaults: ${rec.newOnLive.slice(0, 8).join(', ')}${rec.newOnLive.length > 8 ? '…' : ''}`);
+  const verdict = (rec.missingFromLive.length || rec.newOnLive.length) ? 'DRIFT' : 'OK';
+  return { verdict, detail: parts.join('; ') };
+}
+
+/**
  * Roll the rows up into a one-line readiness verdict.
  * @param {Array<object>} rows
  * @returns {{ ready: number, total: number, notInstalled: string[], authMissing: string[], capsStale: string[] }}

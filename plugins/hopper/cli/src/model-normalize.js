@@ -120,7 +120,12 @@ export function modelKeysMatch(vendor, a, b) {
  * @param {string[]} [knownGood]
  * @param {string[]} [enumerated]  live model identifiers
  * @param {string[]} [driftExpected]  names whose divergence is expected (suppressed)
- * @returns {{matched:string[], missingFromLive:string[], newOnLive:string[]}}
+ * @returns {{matched:string[], missingFromLive:string[], newOnLive:string[], expectedSuppressed:string[]}}
+ *   `expectedSuppressed` is the LIVE-side models that were suppressed by driftExpected
+ *   (present in the live catalog, not matched to a default, but expected) — exactly the
+ *   models that explain a `matched < liveCount` gap on an OK row. Counting it from the
+ *   live side avoids the unsound `liveCount - matched - new` arithmetic (matched is a
+ *   knownGood-side count and can exceed the distinct matched-live count).
  */
 export function reconcileModels(vendor, knownGood = [], enumerated = [], driftExpected = []) {
   const clean = (arr) => (Array.isArray(arr) ? arr.filter((s) => typeof s === 'string' && s.trim()) : []);
@@ -129,9 +134,11 @@ export function reconcileModels(vendor, knownGood = [], enumerated = [], driftEx
   const expected = clean(driftExpected);
   const matches = (a, b) => modelKeysMatch(vendor, a, b);
   const isExpected = (m) => expected.some((e) => matches(e, m));
+  const liveUnmatched = (l) => !kg.some((g) => matches(g, l));
   return {
     matched: kg.filter((g) => live.some((l) => matches(g, l))),
     missingFromLive: kg.filter((g) => !live.some((l) => matches(g, l)) && !isExpected(g)),
-    newOnLive: live.filter((l) => !kg.some((g) => matches(g, l)) && !isExpected(l)),
+    newOnLive: live.filter((l) => liveUnmatched(l) && !isExpected(l)),
+    expectedSuppressed: live.filter((l) => liveUnmatched(l) && isExpected(l)),
   };
 }

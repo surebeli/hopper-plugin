@@ -13,7 +13,8 @@ import { writeOutput } from '../src/output.js';
 import { scaffoldHopper, scaffoldGovernance } from '../src/scaffold.js';
 import { renderRulesMarkdown } from '../src/rules.js';
 import { compatCheckForAdapter } from '../src/vendor-compat.js';
-import { buildVendorReadiness, summarizeReadiness } from '../src/setup.js';
+import { buildVendorReadiness, summarizeReadiness, formatModelDrift } from '../src/setup.js';
+import { modelKeysMatch } from '../src/model-normalize.js';
 import {
   validateTaskId,
   validateDispatchFlags,
@@ -656,7 +657,10 @@ function warnIfModelUnknown(vendor, model) {
     console.error(`  (b) Populate the cache once: \`hopper-dispatch --probe ${vendor}\`, then re-dispatch.`);
     return;
   }
-  if (!cached.models.includes(model)) {
+  // Form-tolerant membership: a cached `xiaomi/mimo-v2.5-pro` should satisfy a
+  // normalized bare `mimo-v2.5-pro` (and vice versa), matching V3/V4 canon rules.
+  const inCache = cached.models.some((m) => { try { return modelKeysMatch(vendor, m, model); } catch (_) { return m === model; } });
+  if (!inCache) {
     console.error(`  warn: model '${model}' not in cached list for ${vendor}`);
     console.error(`  cached models (${staleness(cached.probed_at)}): ${cached.models.slice(0, 8).join(', ')}${cached.models.length > 8 ? '...' : ''}`);
     console.error(`  proceeding anyway; three fix paths:`);
@@ -703,8 +707,10 @@ async function runDispatch(hopperDir, taskId, { write = false, force = false, ad
 
     // Soft-warn: --model passed but X not in cached list. Non-blocking. Single-
     // spawn invariant unaffected (resolveDispatch is in-process; cache read is FS).
-    if (adapterOpts.model) {
-      try { warnIfModelUnknown(resolved.vendor, adapterOpts.model); } catch (_) { /* never block dispatch */ }
+    if (effectiveAdapterOpts.model) {
+      // Warn on the NORMALIZED model (matches the --background path); otherwise a
+      // user-typed `GPT-5.5` would false-warn "not in cached list" then run `gpt-5.5`.
+      try { warnIfModelUnknown(resolved.vendor, effectiveAdapterOpts.model); } catch (_) { /* never block dispatch */ }
     }
 
     const startedAt = Date.now();
@@ -1465,22 +1471,12 @@ async function runSetup({ only = null, deep = false } = {}) {
       else console.log(`  ${r.name.padEnd(9)} DRIFT — missing: ${c.missing.join(', ')}`);
     }
 
-    // V3: live model catalog vs the hardcoded knownGood defaults.
+    // V3: live model catalog vs the hardcoded knownGood defaults. Formatting lives
+    // in the pure setup.formatModelDrift (unit-tested); this loop is just I/O.
     console.log('\nModel catalog drift (live enumeration vs hardcoded knownGood defaults):');
     for (const r of rows) {
-      const rec = r.modelReconcile;
-      if (!rec) { console.log(`  ${r.name.padEnd(9)} —`); continue; }
-      if (rec.applicable === false) { console.log(`  ${r.name.padEnd(9)} n/a — ${rec.reason}`); continue; }
-      const liveN = Array.isArray(r.modelsLive) ? r.modelsLive.length : 0;
-      const parts = [`${rec.matched.length} of ${liveN} live model(s) match defaults`];
-      // Live models that are neither matched nor flagged-new were suppressed by the
-      // adapter's driftExpected list — surface the count so an OK row's gap is explained.
-      const suppressed = liveN - rec.matched.length - rec.newOnLive.length;
-      if (suppressed > 0) parts.push(`${suppressed} expected-divergence suppressed (driftExpected)`);
-      if (rec.missingFromLive.length) parts.push(`STALE default(s) not in live catalog: ${rec.missingFromLive.join(', ')}`);
-      if (rec.newOnLive.length) parts.push(`NEW live model(s) absent from defaults: ${rec.newOnLive.slice(0, 8).join(', ')}${rec.newOnLive.length > 8 ? '…' : ''}`);
-      const verdict = (rec.missingFromLive.length || rec.newOnLive.length) ? 'DRIFT' : 'OK';
-      console.log(`  ${r.name.padEnd(9)} ${verdict} — ${parts.join('; ')}`);
+      const { verdict, detail } = formatModelDrift(r);
+      console.log(`  ${r.name.padEnd(9)} ${verdict}${detail ? ` — ${detail}` : ''}`);
     }
     console.log('  (DRIFT is advisory: add NEW models to the adapter knownGood, or drop STALE ones. --deep also refreshed the probe cache.)');
   } else {

@@ -232,6 +232,20 @@ test('CLI parses --model + --reasoning together and prints them in dispatch line
   assert.ok(!/reasoning.*invalid/i.test(r.stderr));
 });
 
+test('CLI accepts display-label --model aliases end-to-end (relaxed MODEL_PATTERN)', () => {
+  // The whole point of the relaxation: bracket/paren/space canonical names must be
+  // typeable as --model and survive parseDispatchArgs + validateModelName in the binary.
+  for (const m of ['opus[1m]', 'Gemini 3.5 Flash (High)']) {
+    const r = runCli(['T-PLUGIN-MISSING', '--model', m]);
+    assert.ok(!/unsafe characters/i.test(r.stderr), `"${m}" must pass model validation, got: ${r.stderr}`);
+    assert.notEqual(r.exitCode, 2, `"${m}" must not be a validation rejection (exit 2)`);
+  }
+  // and a genuinely unsafe value is still rejected at exit 2
+  const bad = runCli(['T-PLUGIN-MISSING', '--model', 'a | whoami']);
+  assert.equal(bad.exitCode, 2);
+  assert.match(bad.stderr, /unsafe characters/i);
+});
+
 test('CLI prints adapter opts summary on dispatch line', () => {
   // We can't fully exercise dispatch without a real vendor, but we can confirm
   // the parser DOES reach runDispatch by checking a known-bad task triggers

@@ -3,7 +3,8 @@
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { buildVendorReadiness, summarizeReadiness, sandboxControl, webSearchSupport } from '../../cli/src/setup.js';
+import { buildVendorReadiness, summarizeReadiness, sandboxControl, webSearchSupport, formatModelDrift } from '../../cli/src/setup.js';
+import { reconcileModels } from '../../cli/src/model-normalize.js';
 import { listAdapters, getAdapter } from '../../cli/src/vendors/index.js';
 import { getVendorCache, setVendorCache } from '../../cli/src/cache.js';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -59,6 +60,38 @@ test('setup: summarizeReadiness rolls up ready/notInstalled/authMissing/capsStal
   assert.ok(sum.ready <= sum.total);
   assert.ok(Array.isArray(sum.notInstalled) && Array.isArray(sum.authMissing) && Array.isArray(sum.capsStale));
   assert.equal(sum.capsStale.length, 0, 'no vendor is stale against a year-2000 clock');
+});
+
+// ─── V3 renderer: formatModelDrift (pure; the runSetup drift line) ───
+
+test('formatModelDrift: OK row with suppression explains the gap accurately', () => {
+  const kg = ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.3-codex-spark'];
+  const live = ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.2', 'codex-auto-review'];
+  const rec = { applicable: true, ...reconcileModels('codex', kg, live, ['gpt-5.3-codex-spark', 'codex-auto-review', 'gpt-5.2']) };
+  const out = formatModelDrift({ name: 'codex', modelsLive: live, modelReconcile: rec });
+  assert.equal(out.verdict, 'OK');
+  assert.match(out.detail, /4 of 6 live model\(s\) match defaults/);
+  assert.match(out.detail, /2 expected-divergence suppressed \(driftExpected\)/);
+});
+
+test('formatModelDrift: DRIFT row lists NEW + STALE; n/a passes the reason; no-rec is a dash', () => {
+  const drift = formatModelDrift({ name: 'mimo', modelsLive: ['a', 'b'], modelReconcile: { applicable: true, matched: ['a'], missingFromLive: ['x'], newOnLive: ['b'], expectedSuppressed: [] } });
+  assert.equal(drift.verdict, 'DRIFT');
+  assert.match(drift.detail, /NEW live model\(s\) absent from defaults: b/);
+  assert.match(drift.detail, /STALE default\(s\) not in live catalog: x/);
+  const na = formatModelDrift({ name: 'claude', modelsLive: [], modelReconcile: { applicable: false, reason: 'no live model-enumeration command (introspection: partial)' } });
+  assert.equal(na.verdict, 'n/a');
+  assert.match(na.detail, /introspection: partial/);
+  assert.deepEqual(formatModelDrift({ name: 'x', modelReconcile: null }), { verdict: '—', detail: '' });
+});
+
+test('formatModelDrift: duplicate-tail defaults never yield a negative/over-100% count', () => {
+  // pathological: two knownGood entries match the same single live model.
+  const rec = { applicable: true, ...reconcileModels('codex', ['openai/gpt-5.5', 'gpt-5.5'], ['gpt-5.5'], []) };
+  const out = formatModelDrift({ name: 'codex', modelsLive: ['gpt-5.5'], modelReconcile: rec });
+  assert.equal(out.verdict, 'OK');
+  assert.match(out.detail, /1 of 1 live model\(s\) match defaults/, 'live-side count stays sane (not "2 of 1")');
+  assert.ok(!/-\d/.test(out.detail), 'no negative count leaks into the output');
 });
 
 // ─── V3: doctor --deep live model enumeration + reconcile (injected probe, no spawn) ───

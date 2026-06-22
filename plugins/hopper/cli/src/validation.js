@@ -46,8 +46,12 @@ export function validateVendor(name) {
  * them too. Injection-safe: every spawn passes the value as one argv element
  * (no `shell: true`), and the leading [A-Za-z] still blocks `-flag` injection;
  * shell metacharacters (; | & $ ` ' ") remain disallowed.
- * Per cross-host validation discipline: same regex applies at every entry
- * point (CLI / dispatch.md / Tier C wrappers).
+ * Scope note: this relaxed regex applies to the JS dispatcher (CLI + dispatch.md),
+ * where every model value is passed as a discrete argv element (no shell). The Tier
+ * C bash wrappers under hosts/ (hopper-codex, hopper-cursor, etc.) deliberately keep
+ * the STRICTER pre-relaxation pattern, because they interpolate `--model $1` UNQUOTED
+ * into a prompt-embedded shell command — so spaces/parens must stay out there.
+ * Display-label aliases are therefore a JS-dispatcher feature, not a Tier C one.
  */
 export const MODEL_PATTERN = /^[A-Za-z][A-Za-z0-9._/:()[\] -]{0,99}$/;
 
@@ -197,7 +201,8 @@ export function validateModelName(model) {
   if (model.length === 0) throw new Error('--model value must not be empty');
   if (!MODEL_PATTERN.test(model)) {
     throw new Error(`--model "${model}" contains unsafe characters. ` +
-      `Allowed: ^[A-Za-z][A-Za-z0-9._/:-]{0,99}$ (no shell metachars, no spaces).`);
+      `Allowed: ${MODEL_PATTERN.source} — letters/digits . _ / : plus space ( ) [ ] for ` +
+      `display-label aliases; no shell metachars (; | & $ \` ' " < >) and no leading '-'.`);
   }
 }
 

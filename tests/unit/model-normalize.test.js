@@ -117,9 +117,9 @@ test('V3 reconcileModels: claude — opus[1m] stays distinct from a live `opus` 
 });
 
 test('V3 reconcileModels: empty edges — empty live → all missing; empty kg → all new; junk filtered', () => {
-  assert.deepEqual(reconcileModels('codex', ['gpt-5.5'], []), { matched: [], missingFromLive: ['gpt-5.5'], newOnLive: [] });
-  assert.deepEqual(reconcileModels('codex', [], ['gpt-5.5']), { matched: [], missingFromLive: [], newOnLive: ['gpt-5.5'] });
-  assert.deepEqual(reconcileModels('codex', ['gpt-5.5', '', null], ['gpt-5.5', '  ']), { matched: ['gpt-5.5'], missingFromLive: [], newOnLive: [] });
+  assert.deepEqual(reconcileModels('codex', ['gpt-5.5'], []), { matched: [], missingFromLive: ['gpt-5.5'], newOnLive: [], expectedSuppressed: [] });
+  assert.deepEqual(reconcileModels('codex', [], ['gpt-5.5']), { matched: [], missingFromLive: [], newOnLive: ['gpt-5.5'], expectedSuppressed: [] });
+  assert.deepEqual(reconcileModels('codex', ['gpt-5.5', '', null], ['gpt-5.5', '  ']), { matched: ['gpt-5.5'], missingFromLive: [], newOnLive: [], expectedSuppressed: [] });
 });
 
 test('V3 modelKeysMatch: vendor-scoped — bare-slug strips prefix, alias is full-key only', () => {
@@ -138,6 +138,7 @@ test('V3 reconcileModels: driftExpected suppresses BOTH directions, but a genuin
   assert.deepEqual(r.missingFromLive, [], 'spark (Pro-only, expected) is NOT flagged STALE');
   assert.deepEqual(r.newOnLive, ['gpt-6'], 'gpt-5.2/codex-auto-review suppressed; only the genuinely-new gpt-6 surfaces');
   assert.ok(r.matched.includes('gpt-5.3-codex'), 'the newly-curated default matches the live catalog');
+  assert.deepEqual(r.expectedSuppressed, ['gpt-5.2', 'codex-auto-review'], 'live-side suppressed models reported for the renderer (NOT spark, which is kg-side)');
 });
 
 test('V3 modelKeysMatch: provider-prefixed — bare↔prefixed matches by tail, prefixed↔prefixed does NOT', () => {
