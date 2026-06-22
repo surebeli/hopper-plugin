@@ -191,4 +191,15 @@ test('version consistency across plugin.json, package.json, CLI, and prompts', (
     assert.ok(content.includes(manifestVer),
       `${cmd}: missing reference to current version ${manifestVer} (drift detector)`);
   }
+
+  // marketplace.json is what the INSTALL prompt reads — both the catalog version and
+  // the plugin entry version must track plugin.json (this is the field that silently
+  // lagged at 0.12.0 while plugin.json advanced — guard it so it can't drift again).
+  const market = JSON.parse(readFileSync(join(REPO_ROOT, '.claude-plugin', 'marketplace.json'), 'utf-8'));
+  assert.equal(market.version, manifestVer,
+    `marketplace.json catalog version "${market.version}" drifted from plugin.json "${manifestVer}"`);
+  const hopperEntry = (market.plugins || []).find((p) => p.name === 'hopper');
+  assert.ok(hopperEntry, 'marketplace.json must list the hopper plugin entry');
+  assert.equal(hopperEntry.version, manifestVer,
+    `marketplace.json hopper entry version "${hopperEntry.version}" drifted from plugin.json "${manifestVer}" (this is the version the install prompt shows)`);
 });
