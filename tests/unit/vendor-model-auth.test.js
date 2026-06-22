@@ -82,8 +82,12 @@ test('V2 knownGood corrections: grok drops stale grok-4.3; codex includes gpt-5.
   const grok = getAdapter('grok').capabilities.modelArg.knownGood;
   assert.ok(grok.includes('grok-build') && grok.includes('grok-composer-2.5-fast'));
   assert.ok(!grok.includes('grok-4.3'), 'stale grok-4.3 removed');
-  const codex = getAdapter('codex').capabilities.modelArg.knownGood;
+  const codexModelArg = getAdapter('codex').capabilities.modelArg;
+  const codex = codexModelArg.knownGood;
   assert.ok(codex.includes('gpt-5.4') && codex.includes('gpt-5.5'), 'codex now lists gpt-5.4');
+  assert.ok(codex.includes('gpt-5.3-codex'), 'V3 curation: codex adds the GA gpt-5.3-codex default');
+  assert.deepEqual(codexModelArg.driftExpected, ['gpt-5.3-codex-spark', 'codex-auto-review', 'gpt-5.2'],
+    'V3: codex declares expected-divergence so doctor --deep stays a clean signal');
   const claude = getAdapter('claude').capabilities.modelArg.knownGood;
   assert.ok(claude.includes('opusplan') && claude.includes('sonnet[1m]'), 'claude lists compound aliases');
   assert.ok(getAdapter('copilot').capabilities.modelArg.knownGood.includes('auto'), 'copilot populated');

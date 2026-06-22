@@ -74,6 +74,20 @@ test('V3 deep: a genuinely-live (introspection:full) catalog reconciles against 
   assert.deepEqual(rows[0].modelsLive, ['gpt-5.5', 'GPT-5.4', 'gpt-6-new']);
 });
 
+test('V3 deep: codex driftExpected suppresses Pro-only/internal noise; OK until a genuinely-new model appears', async () => {
+  // Real codex knownGood + driftExpected, with a live catalog mirroring the bundled list.
+  const liveBundled = ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.2', 'codex-auto-review'];
+  const okProbe = async () => ({ introspection_supported: 'full', models: liveBundled, models_source: 'codex debug models --bundled' });
+  const ok = await buildVendorReadiness({ only: 'codex', deep: true, persist: false, probeFn: okProbe });
+  assert.equal(ok[0].modelReconcile.applicable, true);
+  assert.deepEqual(ok[0].modelReconcile.missingFromLive, [], 'spark (Pro-only) not flagged STALE');
+  assert.deepEqual(ok[0].modelReconcile.newOnLive, [], 'gpt-5.2/codex-auto-review suppressed as expected');
+
+  const newProbe = async () => ({ introspection_supported: 'full', models: [...liveBundled, 'gpt-6'], models_source: 'codex debug models --bundled' });
+  const drift = await buildVendorReadiness({ only: 'codex', deep: true, persist: false, probeFn: newProbe });
+  assert.deepEqual(drift[0].modelReconcile.newOnLive, ['gpt-6'], 'a genuinely-new model still surfaces as NEW');
+});
+
 test('V3 deep: introspection:partial with a non-empty STATIC list is n/a — NOT false drift (claude/kimi shape)', async () => {
   // The regression the review caught: claude returns introspection 'partial' with 4
   // static aliases; reconciling against its 9-entry knownGood would falsely flag 5 STALE.

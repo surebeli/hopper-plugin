@@ -127,6 +127,19 @@ test('V3 modelKeysMatch: vendor-scoped — bare-slug strips prefix, alias is ful
   assert.ok(!modelKeysMatch('kimi', 'kimi-code/kimi-for-coding', 'kimi-for-coding'), 'alias vendor uses full-key only — tail must NOT match');
 });
 
+test('V3 reconcileModels: driftExpected suppresses BOTH directions, but a genuinely-new model still surfaces', () => {
+  // codex shape: spark is a Pro-only default (absent from the free bundle → would be
+  // false-STALE); gpt-5.2 + codex-auto-review ship in the bundle but are intentionally
+  // not promoted (→ would be false-NEW). gpt-6 is genuinely new.
+  const kg = ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.3-codex-spark'];
+  const live = ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.2', 'codex-auto-review', 'gpt-6'];
+  const expected = ['gpt-5.3-codex-spark', 'codex-auto-review', 'gpt-5.2'];
+  const r = reconcileModels('codex', kg, live, expected);
+  assert.deepEqual(r.missingFromLive, [], 'spark (Pro-only, expected) is NOT flagged STALE');
+  assert.deepEqual(r.newOnLive, ['gpt-6'], 'gpt-5.2/codex-auto-review suppressed; only the genuinely-new gpt-6 surfaces');
+  assert.ok(r.matched.includes('gpt-5.3-codex'), 'the newly-curated default matches the live catalog');
+});
+
 test('V3 modelKeysMatch: provider-prefixed — bare↔prefixed matches by tail, prefixed↔prefixed does NOT', () => {
   assert.ok(modelKeysMatch('mimo', 'xiaomi/mimo-v2.5-pro', 'mimo-v2.5-pro'), 'a bare live id matches a prefixed default by tail');
   assert.ok(modelKeysMatch('mimo', 'xiaomi/mimo-v2.5-pro', 'xiaomi/mimo-v2.5-pro'), 'identical prefixed ids match');

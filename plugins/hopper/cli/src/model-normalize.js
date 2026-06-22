@@ -109,19 +109,29 @@ export function modelKeysMatch(vendor, a, b) {
  * Caller must only invoke this when a live catalog actually exists — a vendor with
  * no enumeration command (introspection 'none') would otherwise show every default
  * as "missing", a false alarm.
+ *
+ * `driftExpected` lists names whose divergence is KNOWN and intentional, so they are
+ * suppressed from BOTH drift directions: a knownGood entry that is `driftExpected`
+ * and absent from the live catalog is NOT flagged STALE (e.g. a Pro-only model not in
+ * the free bundle), and a live model that is `driftExpected` and absent from knownGood
+ * is NOT flagged NEW (e.g. an internal/older model intentionally not promoted). A
+ * genuinely-new model still surfaces as NEW — that is the signal worth keeping.
  * @param {string} vendor
  * @param {string[]} [knownGood]
  * @param {string[]} [enumerated]  live model identifiers
+ * @param {string[]} [driftExpected]  names whose divergence is expected (suppressed)
  * @returns {{matched:string[], missingFromLive:string[], newOnLive:string[]}}
  */
-export function reconcileModels(vendor, knownGood = [], enumerated = []) {
+export function reconcileModels(vendor, knownGood = [], enumerated = [], driftExpected = []) {
   const clean = (arr) => (Array.isArray(arr) ? arr.filter((s) => typeof s === 'string' && s.trim()) : []);
   const kg = clean(knownGood);
   const live = clean(enumerated);
+  const expected = clean(driftExpected);
   const matches = (a, b) => modelKeysMatch(vendor, a, b);
+  const isExpected = (m) => expected.some((e) => matches(e, m));
   return {
     matched: kg.filter((g) => live.some((l) => matches(g, l))),
-    missingFromLive: kg.filter((g) => !live.some((l) => matches(g, l))),
-    newOnLive: live.filter((l) => !kg.some((g) => matches(g, l))),
+    missingFromLive: kg.filter((g) => !live.some((l) => matches(g, l)) && !isExpected(g)),
+    newOnLive: live.filter((l) => !kg.some((g) => matches(g, l)) && !isExpected(l)),
   };
 }

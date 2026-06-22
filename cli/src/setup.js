@@ -131,7 +131,8 @@ export async function buildVendorReadiness({ deep = false, only = null, now = ne
         } else if (!kgUsable) {
           row.modelReconcile = { applicable: false, reason: 'no hardcoded knownGood catalog to reconcile against (placeholder/empty)' };
         } else {
-          row.modelReconcile = { applicable: true, ...reconcileModels(name, kg, liveModels) };
+          const driftExpected = (caps && caps.modelArg && Array.isArray(caps.modelArg.driftExpected)) ? caps.modelArg.driftExpected : [];
+          row.modelReconcile = { applicable: true, ...reconcileModels(name, kg, liveModels, driftExpected) };
         }
       } catch (e) {
         row.modelsLive = null;

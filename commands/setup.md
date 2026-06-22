@@ -30,7 +30,7 @@ node "$CLAUDE_PLUGIN_ROOT/cli/bin/hopper-dispatch" --setup codex --deep
 With `--deep`, two extra sections print after the table:
 
 - **Flag/param drift** — per vendor, whether the flags the adapter emits are still present in `<vendor> --help`.
-- **Model catalog drift** — per vendor, `OK` or `DRIFT` comparing the live-enumerated catalog against the hardcoded `knownGood`: `STALE default(s)` are names hopper ships that the vendor no longer lists, and `NEW live model(s)` are names the vendor now lists that hopper hasn't adopted. It is **advisory** — the live source can differ from what an account can actually use (e.g. a bundled-but-Pro-only model may show as STALE), so treat it as a prompt to review the adapter's `knownGood`, not an auto-edit.
+- **Model catalog drift** — per vendor, `OK` or `DRIFT` comparing the live-enumerated catalog against the hardcoded `knownGood`: `STALE default(s)` are names hopper ships that the vendor no longer lists, and `NEW live model(s)` are names the vendor now lists that hopper hasn't adopted. It is **advisory** — the live source can differ from what an account can actually use, so treat it as a prompt to review the adapter's `knownGood`, not an auto-edit. An adapter may declare a `modelArg.driftExpected` list (names whose divergence is intentional — e.g. a Pro-only model absent from the free bundle, or an internal model deliberately not promoted); those are suppressed so the verdict stays `OK` until a *genuinely new* model appears.
 
 ## How to use the output
 

@@ -223,8 +223,16 @@ export const codexAdapter = {
       // as `-m <MODEL>`. ChatGPT-account auth accepts BARE names only — provider-
       // prefixed ids (openai-codex/gpt-5.1-codex) are rejected (openai/codex#12295).
       // Catalog is subscription-dependent; list via `codex debug models --bundled`.
-      knownGood: ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex-spark'],
-      sourceNote: 'codex exec -m <MODEL>; adapter forwards opts.model verbatim (ISSUE-codex-vendor-model-effort, 2026-06; V1-verified 2026-06). ChatGPT-account auth accepts BARE model names only (gpt-5.5 / gpt-5.4 / gpt-5.4-mini); provider-prefixed names rejected (openai/codex#12295). gpt-5.3-codex-spark is a ChatGPT-Pro-only research preview (conditional — not on every account). Effort is SEPARATE from the model name: --reasoning -> -c model_reasoning_effort. Catalog: `codex debug models --bundled`.',
+      knownGood: ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.3-codex-spark'],
+      // V3 drift-suppression: names whose absence-from / presence-in the live
+      // `codex debug models --bundled` catalog is EXPECTED, so doctor --deep does
+      // not flag them. `gpt-5.3-codex-spark` is ChatGPT-Pro-only (absent from the
+      // free bundle → would false-STALE). `codex-auto-review` is an internal
+      // review model and `gpt-5.2` is an older/superseded model — both ship in the
+      // bundle but are intentionally NOT promoted as dispatch defaults (→ false-NEW).
+      // A genuinely-new model codex ships will still surface as NEW (the useful signal).
+      driftExpected: ['gpt-5.3-codex-spark', 'codex-auto-review', 'gpt-5.2'],
+      sourceNote: 'codex exec -m <MODEL>; adapter forwards opts.model verbatim (ISSUE-codex-vendor-model-effort, 2026-06; V1-verified 2026-06). ChatGPT-account auth accepts BARE model names only (gpt-5.5 / gpt-5.4 / gpt-5.4-mini / gpt-5.3-codex); provider-prefixed names rejected (openai/codex#12295). gpt-5.3-codex-spark is a ChatGPT-Pro-only research preview (conditional — not on every account). Effort is SEPARATE from the model name: --reasoning -> -c model_reasoning_effort. Catalog: `codex debug models --bundled` (V3 doctor --deep reconciles it; see driftExpected).',
     },
     reasoningArg: {
       accepted: 'enumerated',
