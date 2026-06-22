@@ -200,6 +200,24 @@ async function main() {
     return;
   }
 
+  // Static registry/listing introspection — these compute purely from the adapter
+  // registry (no project context), so they run from ANYWHERE, before the .hopper/ gate,
+  // like --setup/--capabilities/--probe/--models. (--task-types is NOT here: it reads
+  // the project's task-types and genuinely needs hopperDir.) `--vendors` is overloaded
+  // as the --swarm value flag, so only treat it as the adapter-list command when
+  // --swarm is absent — `--swarm … --vendors a,b,c` falls through to the swarm handler.
+  if (args.includes('--vendors') && !args.includes('--swarm')) {
+    console.log(`hopper-dispatch v${VERSION} — registered vendor adapters:`);
+    for (const v of listAdapters()) console.log(`  - ${v}`);
+    return;
+  }
+  if (args.includes('--rules')) {
+    // GENERATED dispatch-rules matrix (single source of truth = the adapters).
+    // Persist into a project: `hopper-dispatch --rules > .hopper/DISPATCH.md`.
+    process.stdout.write(renderRulesMarkdown({ version: VERSION }) + '\n');
+    return;
+  }
+
   // HOPPER-4: project bootstrap — scaffolds .hopper/ in the CURRENT directory.
   // Project-agnostic (must run BEFORE the findHopperDir gate, since the whole
   // point is that no .hopper/ exists yet).
@@ -437,20 +455,6 @@ async function main() {
     const types = await listTaskTypes(hopperDir);
     console.log(`hopper-dispatch v${VERSION} — available task-types:`);
     for (const t of types) console.log(`  - ${t}`);
-    return;
-  }
-
-  if (args.includes('--vendors')) {
-    const vendors = listAdapters();
-    console.log(`hopper-dispatch v${VERSION} — registered vendor adapters:`);
-    for (const v of vendors) console.log(`  - ${v}`);
-    return;
-  }
-
-  if (args.includes('--rules')) {
-    // GENERATED dispatch-rules matrix (single source of truth = the adapters).
-    // Persist into a project: `hopper-dispatch --rules > .hopper/DISPATCH.md`.
-    process.stdout.write(renderRulesMarkdown({ version: VERSION }) + '\n');
     return;
   }
 
