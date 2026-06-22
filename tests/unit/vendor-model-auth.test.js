@@ -4,7 +4,8 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { agyAdapter } from '../../cli/src/vendors/agy.js';
-import { getAdapter } from '../../cli/src/vendors/index.js';
+import { copilotAdapter } from '../../cli/src/vendors/copilot.js';
+import { getAdapter, listAdapters, installCheckForAdapter } from '../../cli/src/vendors/index.js';
 
 // ─── V5: agy never-auth was a false positive (boot noise + non-TTY stdout drop) ───
 
@@ -91,4 +92,39 @@ test('V2 knownGood corrections: grok drops stale grok-4.3; codex includes gpt-5.
   const claude = getAdapter('claude').capabilities.modelArg.knownGood;
   assert.ok(claude.includes('opusplan') && claude.includes('sonnet[1m]'), 'claude lists compound aliases');
   assert.ok(getAdapter('copilot').capabilities.modelArg.knownGood.includes('auto'), 'copilot populated');
+});
+
+// ─── copilot 'never auth' false-negative: soft-warn must not render as Auth=NO ───
+
+test('installCheck invariant: authOk mirrors overallStatus (soft-warn is NOT a hard NO)', async () => {
+  // The bug: authOk flipped false on a soft-warn note while overallStatus stayed READY.
+  // Encode the contract across ALL real adapters (machine-independent — the invariant
+  // holds regardless of which vendors happen to be authed on this host).
+  for (const name of listAdapters()) {
+    const r = await installCheckForAdapter(name);
+    if (r.overallStatus === 'READY') assert.equal(r.authOk, true, `${name}: READY must have authOk=true`);
+    if (r.overallStatus === 'AUTH_NEEDED') assert.equal(r.authOk, false, `${name}: AUTH_NEEDED must have authOk=false`);
+    if (r.authSoftWarn) assert.equal(r.authOk, true, `${name}: a soft-warn implies authed (authOk=true)`);
+    if (r.authSoftWarn) assert.ok(r.authNotes.length > 0, `${name}: soft-warn must carry an advisory note`);
+  }
+});
+
+test('copilot envPreflight: env token → clean ok; never a hard fail (keychain/profile backstop)', () => {
+  const saved = { gh: process.env.GH_TOKEN, ght: process.env.GITHUB_TOKEN, cop: process.env.COPILOT_GITHUB_TOKEN };
+  try {
+    process.env.GH_TOKEN = 'ghp_test';
+    delete process.env.GITHUB_TOKEN; delete process.env.COPILOT_GITHUB_TOKEN;
+    const withTok = copilotAdapter.envPreflight();
+    assert.deepEqual(withTok, { ok: true, missing: [] }, 'an explicit token is a clean ok');
+    // copilot must NEVER hard-fail auth (ok:false) — it falls back to gh cache /
+    // ~/.copilot profile / soft-warn, so it is always at worst "warn", never "NO".
+    delete process.env.GH_TOKEN;
+    const result = copilotAdapter.envPreflight();
+    assert.equal(result.ok, true, 'copilot envPreflight is never ok:false');
+    assert.ok(Array.isArray(result.missing), 'shape: {ok, missing}');
+  } finally {
+    for (const [k, v] of [['GH_TOKEN', saved.gh], ['GITHUB_TOKEN', saved.ght], ['COPILOT_GITHUB_TOKEN', saved.cop]]) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  }
 });

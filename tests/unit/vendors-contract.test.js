@@ -231,26 +231,26 @@ test('mimo adapter parseResult() reconstructs text and token usage from json eve
   assert.deepEqual(result.usage, { totalTokens: 1234 });
 });
 
-test('copilot adapter surfaces GH_TOKEN warning when no env token present', () => {
-  // Per codex Phase 2 audit F1: preflight is now SOFT-WARN (ok=true) when no
-  // env token, because gh CLI auth cache can be a fallback. The warning text
-  // must still mention GH_TOKEN so the user knows what to set.
-  const saved = process.env.GH_TOKEN;
-  const savedAlt = process.env.GITHUB_TOKEN;
-  const savedCopilot = process.env.COPILOT_GITHUB_TOKEN;
-  delete process.env.GH_TOKEN;
-  delete process.env.GITHUB_TOKEN;
-  delete process.env.COPILOT_GITHUB_TOKEN;
+test('copilot adapter soft-warns (mentioning GH_TOKEN) only when NO auth source is detectable', () => {
+  // copilot can auth via an env token, the gh CLI cache, OR its own ~/.copilot login
+  // profile. With NONE of those present it SOFT-WARNS (ok:true + a note naming the
+  // sources) — it must never hard-fail. Point homedir() at an empty temp dir so the
+  // gh/profile file checks deterministically miss regardless of the test host.
+  const saved = {
+    GH_TOKEN: process.env.GH_TOKEN, GITHUB_TOKEN: process.env.GITHUB_TOKEN,
+    COPILOT_GITHUB_TOKEN: process.env.COPILOT_GITHUB_TOKEN,
+    HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE,
+  };
+  const emptyHome = mkdtempSync(join(tmpdir(), 'hopper-emptyhome-'));
   try {
-    const a = getAdapter('copilot');
-    const result = a.envPreflight();
-    assert.equal(result.ok, true, 'soft-warn: ok=true even without env token (gh CLI may cover)');
-    assert.ok(result.missing.some((m) => /GH_TOKEN/i.test(m)),
-      'warning text must mention GH_TOKEN so user can fix it');
+    delete process.env.GH_TOKEN; delete process.env.GITHUB_TOKEN; delete process.env.COPILOT_GITHUB_TOKEN;
+    process.env.HOME = emptyHome; process.env.USERPROFILE = emptyHome;
+    const result = getAdapter('copilot').envPreflight();
+    assert.equal(result.ok, true, 'soft-warn: ok=true even with no detectable auth (never a hard fail)');
+    assert.ok(result.missing.some((m) => /GH_TOKEN/i.test(m)), 'note must mention GH_TOKEN so the user can fix it');
   } finally {
-    if (saved !== undefined) process.env.GH_TOKEN = saved;
-    if (savedAlt !== undefined) process.env.GITHUB_TOKEN = savedAlt;
-    if (savedCopilot !== undefined) process.env.COPILOT_GITHUB_TOKEN = savedCopilot;
+    for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    rmSync(emptyHome, { recursive: true, force: true });
   }
 });
 

@@ -82,11 +82,20 @@ export async function installCheckForAdapter(name) {
   const resolved = resolveCommandWithKnownPaths(adapter.command, adapter.knownInstallPaths || []);
   const binaryFound = resolved !== null && resolved.resolvedPath !== null;
   const auth = adapter.envPreflight();
-  const authOk = auth.ok && (!auth.missing || auth.missing.length === 0);
+  // authOk MUST mirror overallStatus's treatment of the soft-warn pattern: every
+  // adapter returns `ok:true` when auth is found OR is undetectable-but-probably-fine
+  // (keychain/session-backed), attaching an advisory `Note: …` in `missing` for the
+  // latter. That advisory must NOT render as Auth=NO (the previous
+  // `missing.length === 0` test did, contradicting overallStatus=READY and producing
+  // a false negative for keychain-only vendors like copilot). Only `ok:false` — a
+  // hard, detectable auth-requirement gap — is not-authed. The `authNotes` carry the
+  // soft-warn for display; parseResult is the backstop for a real auth failure at dispatch.
+  const authOk = Boolean(auth.ok);
+  const softWarn = authOk && Array.isArray(auth.missing) && auth.missing.length > 0;
   let overallStatus = 'READY';
   if (!binaryFound) overallStatus = 'NOT_INSTALLED';
   else if (!auth.ok) overallStatus = 'AUTH_NEEDED';
-  else if (auth.missing && auth.missing.length > 0) overallStatus = 'READY';  // soft-warn doesn't downgrade
+  else if (softWarn) overallStatus = 'READY';  // soft-warn doesn't downgrade
   return {
     name,
     command: adapter.command,
@@ -94,6 +103,7 @@ export async function installCheckForAdapter(name) {
     resolvedPath: resolved ? resolved.resolvedPath : null,
     needsShellWrap: resolved ? resolved.prependArgs.length > 0 : false,
     authOk,
+    authSoftWarn: softWarn,   // authed-but-unverifiable-on-disk (keychain/session) — advisory, not a failure
     authNotes: auth.missing || [],
     overallStatus,
   };

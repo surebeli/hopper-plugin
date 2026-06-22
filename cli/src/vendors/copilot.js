@@ -5,6 +5,9 @@
 // Per subagent research: requires GH_TOKEN env with "Copilot Requests" PAT permission.
 // Quota meter: every -p call consumes premium request quota; use sparingly.
 
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { applyTaskTypeFloor } from '../subprocess.js';
 
 // Copilot `--effort` (alias `--reasoning-effort`) enum is MODEL-dependent: GPT
@@ -91,15 +94,32 @@ export const copilotAdapter = {
   },
 
   envPreflight() {
-    // Per codex Phase 2 audit F1: broaden to include COPILOT_GITHUB_TOKEN
-    // + gh CLI auth fallback (Copilot CLI can sometimes pick up `gh auth status`).
+    // Auth sources in confidence order (mirrors the file-checking pattern of every
+    // other adapter — copilot previously checked ONLY env vars, so a CLI-logged-in
+    // copilot always fell to the soft-warn branch and rendered as Auth=NO).
+    // 1) explicit env tokens.
     if (process.env.GH_TOKEN || process.env.GITHUB_TOKEN || process.env.COPILOT_GITHUB_TOKEN) {
       return { ok: true, missing: [] };
     }
-    // Soft warn — gh CLI may have auth cached (Copilot can fall back to it on some installs)
+    // 2) gh CLI cached auth (copilot can fall back to it) — Windows + XDG locations.
+    const ghHosts = [
+      join(homedir(), '.config', 'gh', 'hosts.yml'),
+      join(homedir(), 'AppData', 'Roaming', 'GitHub CLI', 'hosts.yml'),
+    ];
+    if (ghHosts.some((p) => existsSync(p))) return { ok: true, missing: [] };
+    // 3) copilot CLI's own login profile. The token itself is OS-keychain / session-db
+    //    backed (NOT a readable file), so the presence of the ~/.copilot profile is the
+    //    on-disk signal that `copilot` has been set up; parseResult is the backstop for
+    //    an expired/revoked session at dispatch time.
+    const copilotDir = join(homedir(), '.copilot');
+    const profileMarkers = ['config.json', 'settings.json', 'session-store.db'];
+    if (existsSync(copilotDir) && profileMarkers.some((f) => existsSync(join(copilotDir, f)))) {
+      return { ok: true, missing: [] };
+    }
+    // Soft warn — nothing detected; copilot may still auth via keychain.
     return {
       ok: true,
-      missing: ['Note: no GH_TOKEN/GITHUB_TOKEN/COPILOT_GITHUB_TOKEN env var set. Copilot may pick up `gh auth status` cache, or smoke may fail. See https://docs.github.com/copilot/concepts/agents/about-copilot-cli'],
+      missing: ['Note: no GH_TOKEN/GITHUB_TOKEN/COPILOT_GITHUB_TOKEN env var, gh CLI auth (~/.config/gh or %APPDATA%/GitHub CLI), or ~/.copilot login profile found. Run `copilot` once to log in, or set a token. See https://docs.github.com/copilot/concepts/agents/about-copilot-cli'],
     };
   },
 
