@@ -9,7 +9,7 @@ Show Hopper's cached vendor model inventory. This is read-only and does not spaw
 
 ## Steps
 
-1. Locate the target project root containing `.hopper/`, then locate `hopper-dispatch` from `PATH` or the plugin root near this `SKILL.md`.
+1. Locate `hopper-dispatch` from `PATH` or the plugin root near this `SKILL.md`. No `.hopper/` project directory is required — `--models` reads the machine-local cache (`~/.hopper/cache/`) and runs from anywhere.
 2. Accept either no argument or one vendor: `codex`, `kimi`, `opencode`, `copilot`, `agy`, `grok`, or `mimo`.
 3. Run `hopper-dispatch --models` or `hopper-dispatch --models <vendor>`.
 4. Surface the raw output, then briefly call out stale or missing cache entries.

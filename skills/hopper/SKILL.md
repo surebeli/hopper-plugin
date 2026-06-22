@@ -1,6 +1,6 @@
 ---
 name: hopper
-description: "Use when the user asks to operate Hopper or llm-hopper broadly, troubleshoot Hopper's file-backed .hopper protocol, or choose among Hopper dispatch, status, progress, result, probe, models, vendors, and smoke workflows."
+description: "Use when the user asks to operate Hopper or llm-hopper broadly, troubleshoot Hopper's file-backed .hopper protocol, or choose among Hopper dispatch, status, progress, result, probe, models, vendors, setup/doctor (vendor readiness), and smoke workflows."
 ---
 
 # Hopper
@@ -36,7 +36,10 @@ When working inside the source repository, `node .\cli\bin\hopper-dispatch <args
 - Probe vendor capabilities: `hopper-dispatch --probe <vendor>`
 - Read cached models: `hopper-dispatch --models <vendor>`
 - List vendors: `hopper-dispatch --vendors`
+- Vendor readiness (doctor): `hopper-dispatch --setup` (alias `--doctor`; add `--deep` for flag + model-catalog drift)
 - Smoke check: `hopper-dispatch --smoke`
+
+Diagnostics that read only the adapter registry — `--vendors`, `--rules`, `--setup`/`--doctor`, `--capabilities`, `--probe`, `--models`, `--smoke` — do NOT need a `.hopper/` directory and run from anywhere. The project-context steps above apply to dispatch/status/result/progress, which operate on `.hopper/`.
 
 ## Safety Rules
 

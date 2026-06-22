@@ -22,6 +22,7 @@ const EXPECTED_CODEX_SKILLS = [
   'hopper-probe',
   'hopper-progress',
   'hopper-result',
+  'hopper-setup',
   'hopper-smoke',
   'hopper-status',
   'hopper-vendors',

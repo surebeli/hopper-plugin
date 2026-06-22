@@ -9,7 +9,7 @@ Probe is the explicit discovery surface. It may spawn vendor CLIs and writes the
 
 ## Steps
 
-1. Locate the target project root containing `.hopper/`, then locate `hopper-dispatch` from `PATH` or the plugin root near this `SKILL.md`.
+1. Locate `hopper-dispatch` from `PATH` or the plugin root near this `SKILL.md`. No `.hopper/` project directory is required — `--probe` writes the machine-local cache (`~/.hopper/cache/`) and runs from anywhere.
 2. Accept either no argument or one vendor: `codex`, `kimi`, `opencode`, `copilot`, `agy`, `grok`, or `mimo`.
 3. Run `hopper-dispatch --probe` or `hopper-dispatch --probe <vendor>`.
 4. Surface each vendor result line, including introspection level, model count, duration, and any auth or missing-binary errors.
