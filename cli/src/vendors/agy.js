@@ -171,7 +171,13 @@ export const agyAdapter = {
     const log = raw.logFileContent || '';
     const logFileMissing = raw.logFileContent === undefined;
     const signal = `${log}\n${raw.stderr || ''}`;
-    const hasStdout = Boolean((raw.stdout || '').trim());
+    // In BACKGROUND, the runner captures stdout+stderr into one log and passes it as raw.stdout,
+    // so raw.stdout is the whole log (agy's Go-klog diagnostics + any answer). Strip the glog to
+    // recover the actual ANSWER; an answer-less run (only glog) must NOT count as stdout (else a
+    // headless run that emitted no answer false-succeeds — agy 1.0.12 `--print` drops the answer
+    // to a non-TTY stdout entirely, see the empty-stdout branch below).
+    const answerText = stripAgyGlog(raw.stdout);
+    const hasStdout = Boolean(answerText);
 
     // Auth classification (V5 fix — agy false "never auth"). agy print mode emits transient
     // "not logged in" / "Failed to get OAuth token" noise during boot, then recovers ~0.3s
@@ -184,9 +190,13 @@ export const agyAdapter = {
     // Anchor the keyring marker to its real emitter ("ChainedAuth: authenticated via keyring
     // (effective: keyring)") so a NEGATED phrase (e.g. "could not be authenticated via keyring")
     // can't falsely veto a genuine auth failure. The other two markers are already specific.
+    // NOTE: the failure branches below match substrings over the COMBINED log+stderr `signal`,
+    // which in background also holds glog from sub-calls. They are gated on `!hasStdout` so a run
+    // that produced a real answer is NEVER misrouted to a failure by incidental sub-call noise
+    // (e.g. a tool that hit a deadline / permission error mid-run, then recovered and answered).
     const authSucceeded = /Print mode: silent auth succeeded|OAuth: authenticated successfully|ChainedAuth:[^\n]*authenticated via keyring/i.test(signal);
     const authNoise = /You are not logged into Antigravity|Failed to get OAuth token|error getting token source|Print mode: silent auth failed|keyringAuth: timed out/i.test(signal);
-    if (authNoise && !authSucceeded) {
+    if (authNoise && !authSucceeded && !hasStdout) {
       return {
         text: '',
         status: 'auth-fail',
@@ -194,7 +204,7 @@ export const agyAdapter = {
       };
     }
 
-    if (/deadline exceeded|context cancelled|context deadline/i.test(signal)) {
+    if (!hasStdout && /deadline exceeded|context cancelled|context deadline/i.test(signal)) {
       return {
         text: raw.stdout,
         status: 'timeout',
@@ -202,7 +212,7 @@ export const agyAdapter = {
       };
     }
 
-    if (/permission denied|permission error|access denied|forbidden|not allowed/i.test(signal)) {
+    if (!hasStdout && /permission denied|permission error|access denied|forbidden|not allowed/i.test(signal)) {
       return {
         text: raw.stdout,
         status: 'permission-fail',
@@ -211,25 +221,27 @@ export const agyAdapter = {
     }
 
     if (raw.exitCode === 0 && hasStdout) {
-      return { text: raw.stdout.trim(), status: 'success' };
+      return { text: answerText, status: 'success' };
     }
 
-    // Exit 0 + empty stdout. V5: when the log shows auth + a completed run, this is agy's
-    // known NON-TTY STDOUT DROP (it drops the final answer to stdout under a pipe), NOT a
-    // failure of agy itself — the answer is in the .log. Surface that precisely (the real fix
-    // is a PTY wrap; until then read the full answer via `--result <id> --full`).
-    if (raw.exitCode === 0 && !raw.stdout.trim()) {
+    // Exit 0 + NO answer text (after stripping glog). agy 1.0.12 `--print` renders the answer
+    // ONLY in its interactive TUI — under a non-TTY stdout (every headless dispatch) it emits
+    // nothing capturable: the answer is NOT on stdout/stderr and NOT in the --log-file (verified
+    // 2026-06-25 on 1.0.12; regressed from the earlier non-TTY behaviour). A PTY wrap would
+    // capture it but node-pty is excluded for agy by project policy (agy hangs on an open stdin
+    // pipe). So this is a real OUTPUT limitation, surfaced as a failure — NEVER a false success.
+    if (raw.exitCode === 0 && !hasStdout) {
       if (authSucceeded) {
         return {
           text: '',
           status: 'unknown-fail',
-          error: `agy authed + ran but emitted NO stdout — agy's known non-TTY stdout drop (it ran under a pipe). The full answer is in the .log; read it with \`--result <id> --full\`. (PTY capture is a follow-up.) Log tail: ${log.slice(-400)}`,
+          error: `agy authed + ran to completion but emitted NO answer text on a non-TTY stdout — agy 1.0.12 \`--print\` only renders the answer in its interactive TUI (the answer is not on stdout/stderr or in --log-file). Headless answer capture needs a PTY, which is excluded for agy (open-stdin hang). Treat agy as interactive-only until this is resolved upstream.`,
         };
       }
       return {
         text: '',
         status: 'unknown-fail',
-        error: `agy returned empty output with exit 0 but no matching error pattern.${logFileMissing ? ' [Note: --log-file content was missing — adapter could not read diagnostic log.]' : ''} Log excerpt: ${log.slice(0, 300)}. Stderr excerpt: ${(raw.stderr || '').slice(0, 200)}`,
+        error: `agy returned no answer text with exit 0 but no matching error pattern.${logFileMissing ? ' [Note: --log-file content was missing — adapter could not read diagnostic log.]' : ''} Log excerpt: ${log.slice(0, 300)}. Stderr excerpt: ${(raw.stderr || '').slice(0, 200)}`,
       };
     }
 
@@ -240,3 +252,19 @@ export const agyAdapter = {
     };
   },
 };
+
+// agy's diagnostic glog (Go klog) line: `I0625 23:01:44.139735 43904 input_loop.go:518] msg`
+// — a level letter (I/E/W/F), MMDD, HH:MM:SS.micros, pid, file:line], message. In background the
+// runner folds stdout+stderr into one log, so an answer-less agy run still yields a non-empty
+// `raw.stdout` full of glog. This recovers the real ANSWER by dropping glog lines; an empty
+// result means agy emitted no answer (the 1.0.12 non-TTY --print drop). Exported for tests.
+const AGY_GLOG_LINE = /^\s*[IEWF]\d{4}\s+\d{2}:\d{2}:\d{2}\.\d+\s+\d+\s+\S+:\d+\]/;
+export function stripAgyGlog(s) {
+  // Drop ONLY glog lines — keep interior blank lines so a multi-paragraph answer's paragraph
+  // breaks survive — then trim leading/trailing whitespace (incl. blank lines from removed glog).
+  return String(s || '')
+    .split(/\r?\n/)
+    .filter((ln) => !AGY_GLOG_LINE.test(ln))
+    .join('\n')
+    .trim();
+}

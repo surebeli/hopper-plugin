@@ -29,7 +29,7 @@ test('V5 agy parseResult: boot-time auth noise + a success marker is NOT auth-fa
   });
   assert.notEqual(r.status, 'auth-fail', 'boot noise + success marker must NOT be auth-fail');
   assert.equal(r.status, 'unknown-fail');
-  assert.match(r.error, /non-TTY stdout drop|--result <id> --full/, 'explains the real cause (non-TTY drop)');
+  assert.match(r.error, /non-TTY stdout|interactive TUI/, 'explains the real cause (1.0.12 non-TTY --print drop)');
 });
 
 test('V5 agy parseResult: a REAL auth failure marker (no success) is still auth-fail', () => {
