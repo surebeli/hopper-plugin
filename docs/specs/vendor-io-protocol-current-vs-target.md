@@ -99,10 +99,10 @@ Status tokens: `[ ]` TODO · `[~]` WIP · `[x]` DONE(date) · `[defer]` · `[blo
 **P5 — native-exe vendors (grok / agy / kimi / opencode): no-op + guards** — `[x] 2026-06-25`
 - [x] No delivery change (native-exe argv multi-line safe). Invariant guard test: only codex+claude route to stdin on cmd-shim; **agy never** (open-pipe hang); native-exe/posix never route to stdin. Locked against drift.
 
-**Cross-cutting** — `[~]`
+**Cross-cutting** — `[x]`
 - [x] INSTALL-MATRIX async-caveats: documented the runner-pipes-from-file carve-out; dispatcher ban retained.
 - [x] Version bump + FF the installed plugin.
-- [ ] Third-party review of the stdin delivery change.
+- [x] Third-party review (SHIP-WITH-NITS, no MAJOR). MINOR fix applied: `spawnDetached` now unconditionally clears an ambient `HOPPER_PROMPT_STDIN_FILE` (was a latent agy-hang leak) + the runner gates the stdin read on `adapter.promptStdin==='supported'` (defense in depth). TODO (NIT): a runner-level e2e for the `prompt-delivery-fail` / EPIPE path.
 
 ## Open decisions
 1. **mimo** — deterministic shim-bypass (`node …/bin/mimo` → native, more code) now, or argv + documented

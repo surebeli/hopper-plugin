@@ -195,7 +195,12 @@ async function main() {
   // parent — pipes these bytes to the vendor's stdin + end()s (EOF) after spawn. This is
   // NOT the banned dispatcher-stdin pipe (the dispatcher already exited; the runner owns
   // the pipe for the whole run). Bytes flow parent→OS-pipe→child untouched by cmd.exe.
-  const promptStdinFile = process.env.HOPPER_PROMPT_STDIN_FILE || null;
+  // Defense in depth: honor the stdin file ONLY for a vendor that actually declares
+  // stdin support. Even if HOPPER_PROMPT_STDIN_FILE leaked into the env, a non-stdin
+  // adapter (esp. agy, which hangs on an open stdin pipe) keeps stdin `'ignore'`.
+  const promptStdinFile = (process.env.HOPPER_PROMPT_STDIN_FILE && adapter && adapter.promptStdin === 'supported')
+    ? process.env.HOPPER_PROMPT_STDIN_FILE
+    : null;
   let promptStdinBuf = null;
   if (promptStdinFile) {
     try {

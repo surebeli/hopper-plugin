@@ -510,7 +510,10 @@ export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, run
       // the vendor's stdin. This is NOT the banned dispatcher-stdin pipe — the runner
       // (the vendor's alive parent) does the piping locally, so nothing crosses the
       // dispatcher's exit. The dispatcher-supplied `stdinInput` ban below is retained.
-      ...(promptStdinFile ? { HOPPER_PROMPT_STDIN_FILE: promptStdinFile } : {}),
+      // ALWAYS set the key (to undefined → Node omits it) so a non-stdin dispatch
+      // CLEARS any ambient HOPPER_PROMPT_STDIN_FILE instead of leaking it into the
+      // runner — critical for agy, which hangs forever on an open stdin pipe.
+      HOPPER_PROMPT_STDIN_FILE: promptStdinFile || undefined,
     },
   });
 
