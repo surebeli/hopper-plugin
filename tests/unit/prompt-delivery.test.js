@@ -24,6 +24,7 @@ import {
 } from '../../cli/src/prompt-delivery.js';
 import { codexAdapter } from '../../cli/src/vendors/codex.js';
 import { claudeAdapter } from '../../cli/src/vendors/claude.js';
+import { listAdapters, getAdapter } from '../../cli/src/vendors/index.js';
 
 // A minimal real fake adapter (no mock framework): prompt is the last positional.
 const fakeAdapter = { name: 'fake', command: 'fake', args: (input) => ['run', '--flag', input] };
@@ -177,6 +178,26 @@ test('useStdinPrompt: only on cmd-shim for a stdin-capable, enabled vendor', () 
   const optIn = { name: 'copilot', promptStdin: 'supported', promptStdinDefault: false };
   assert.equal(useStdinPrompt(optIn, 'cmd-shim', {}), false, 'opt-in vendor OFF by default');
   assert.equal(useStdinPrompt(optIn, 'cmd-shim', { HOPPER_COPILOT_STDIN: '1' }), true, 'opt-in vendor ON with env=1');
+});
+
+test('P5 invariant: only stdin-capable vendors route to stdin on cmd-shim; agy NEVER (hang guard); native/posix never', () => {
+  // Default-ON stdin vendors today (copilot is opt-in → default OFF; mimo/kimi/opencode/
+  // grok/agy = argv). Locks the channel matrix against accidental drift.
+  const STDIN_ON_CMDSHIM = new Set(['codex', 'claude']);
+  for (const name of listAdapters()) {
+    const a = getAdapter(name);
+    const routed = useStdinPrompt(a, 'cmd-shim', {}); // default env (no opt-in/opt-out)
+    if (STDIN_ON_CMDSHIM.has(name)) {
+      assert.equal(routed, true, `${name} must route to stdin on cmd-shim`);
+    } else {
+      assert.equal(routed, false, `${name} must STAY argv on cmd-shim (no stdin)`);
+    }
+    // agy HANGS forever on an open stdin pipe — it must never declare stdin support.
+    if (name === 'agy') assert.notEqual(a.promptStdin, 'supported', 'agy must NOT be stdin-capable (open-pipe hang)');
+    // native-exe and POSIX argv are multi-line-safe → never route to stdin there.
+    assert.equal(useStdinPrompt(a, 'native-exe', {}), false, `${name} native-exe stays argv`);
+    assert.equal(useStdinPrompt(a, 'posix', {}), false, `${name} posix stays argv`);
+  }
 });
 
 test('codex args() emits the `-` stdin sentinel under promptViaStdin (and the prompt otherwise)', () => {

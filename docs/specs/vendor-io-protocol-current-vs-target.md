@@ -96,12 +96,13 @@ Status tokens: `[ ]` TODO · `[~]` WIP · `[x]` DONE(date) · `[defer]` · `[blo
 - [ ] Default now: keep argv + **document the Windows-cmd-shim multi-line limitation** (multi-line briefs may truncate on an npm-`.cmd` mimo install).
 - [ ] Follow-up: deterministic **shim-bypass** (`node …/bin/mimo` → native regime → argv multi-line safe).
 
-**P5 — native-exe vendors (grok / agy / kimi / opencode): no-op + guards** — `[ ]`
-- [ ] No delivery change. Regression-guard: agy stdin **stays `'ignore'`** (hang invariant); regime detection routes an npm-`.cmd` kimi/opencode to the documented-limit path.
+**P5 — native-exe vendors (grok / agy / kimi / opencode): no-op + guards** — `[x] 2026-06-25`
+- [x] No delivery change (native-exe argv multi-line safe). Invariant guard test: only codex+claude route to stdin on cmd-shim; **agy never** (open-pipe hang); native-exe/posix never route to stdin. Locked against drift.
 
-**Cross-cutting** — `[ ]`
-- [ ] Update spec §14 / INSTALL-MATRIX: runner-pipes-from-file carve-out; dispatcher ban retained.
-- [ ] Third-party review; version bump; FF the installed plugin.
+**Cross-cutting** — `[~]`
+- [x] INSTALL-MATRIX async-caveats: documented the runner-pipes-from-file carve-out; dispatcher ban retained.
+- [x] Version bump + FF the installed plugin.
+- [ ] Third-party review of the stdin delivery change.
 
 ## Open decisions
 1. **mimo** — deterministic shim-bypass (`node …/bin/mimo` → native, more code) now, or argv + documented
