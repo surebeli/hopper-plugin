@@ -325,7 +325,7 @@ export function resolveVendorCwd(hopperDir) {
   return dirname(resolve(hopperDir));
 }
 
-export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, runnerPath, hostNative = null, stdinInput = null, adapterOpts = null }) {
+export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, runnerPath, hostNative = null, stdinInput = null, adapterOpts = null, promptStdinFile = null }) {
   validateTaskId(taskId);
 
   const vendorCwd = resolveVendorCwd(hopperDir);
@@ -506,6 +506,11 @@ export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, run
       ...process.env,
       HOPPER_RUNNER_INVOKED: '1',
       HOPPER_ADAPTER_OPTS: optsJson,
+      // STDIN delivery (win-cmd-shim): the runner reads this 0600 file and pipes it to
+      // the vendor's stdin. This is NOT the banned dispatcher-stdin pipe — the runner
+      // (the vendor's alive parent) does the piping locally, so nothing crosses the
+      // dispatcher's exit. The dispatcher-supplied `stdinInput` ban below is retained.
+      ...(promptStdinFile ? { HOPPER_PROMPT_STDIN_FILE: promptStdinFile } : {}),
     },
   });
 

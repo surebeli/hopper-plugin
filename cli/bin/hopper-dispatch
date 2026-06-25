@@ -869,6 +869,15 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {}, vend
   });
   const adapterArgv = delivery.args;
 
+  // STDIN delivery (win-cmd-shim): the runner pipes the prompt FILE into the vendor's
+  // stdin. The file is required for the background path (the dispatcher has exited; the
+  // runner is the live writer). A missing file = a hard delivery failure — do NOT fall
+  // back to a truncated argv.
+  if (delivery.channel === 'stdin' && !delivery.promptFilePath) {
+    console.error(`Error: stdin prompt delivery for ${taskId} requires a prompt file but it could not be written (handoffs/ unwritable?). Aborting rather than dispatching a truncated prompt.`);
+    process.exit(1);
+  }
+
   try {
     const result = spawnDetached({
       hopperDir,
@@ -878,12 +887,15 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {}, vend
       runnerPath: RUNNER_PATH,
       hostNative: hostVendor || null,
       adapterOpts: effectiveOpts,  // codex Phase 5 F2: opts → runner via env for timeoutMs
+      promptStdinFile: delivery.channel === 'stdin' ? delivery.promptFilePath : null,
     });
     console.log('=== BACKGROUND DISPATCH STARTED ===');
     console.log(`Task:        ${taskId}`);
     console.log(`Vendor:      ${resolved.vendor}`);
     console.log(`Sandbox:     ${effectiveOpts.sandbox}`);
-    if (delivery.fallbackReason) {
+    if (delivery.channel === 'stdin') {
+      console.log(`Prompt:      stdin <- ${delivery.promptFilePath} (full prompt piped by the runner; ${delivery.regime}, no cmd.exe truncation)`);
+    } else if (delivery.fallbackReason) {
       // Pointer delivery was wanted but could not be used → INLINE with bytes > budget.
       // This is the silent-no-op risk class; surface it loudly instead of a false-healthy line.
       console.error(`WARNING: prompt-file delivery fell back to INLINE — ${delivery.fallbackReason}. Command line is ${delivery.bytes}B (budget ${delivery.budget}B, ${delivery.regime}); on Windows cmd.exe it may be truncated, dropping trailing flags.`);

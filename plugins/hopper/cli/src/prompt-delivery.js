@@ -86,6 +86,26 @@ export function inlineBudgetBytes(regime, env = process.env) {
 }
 
 /**
+ * Should this dispatch deliver the prompt over STDIN instead of an argv positional?
+ *
+ * TRUE only on the **win-cmd-shim** regime — where `cmd.exe /c <vendor>.CMD "<prompt>"`
+ * truncates a multi-line argv positional at the first newline — for a vendor whose CLI
+ * reads the prompt from stdin (`adapter.promptStdin === 'supported'`). Native-exe and
+ * POSIX argv are multi-line-safe, so stdin is NOT used there (smaller blast radius).
+ *   - default-ON vendors (codex, claude): on unless `HOPPER_<VENDOR>_STDIN=0`
+ *   - opt-in vendors (`promptStdinDefault:false`, e.g. copilot): only if `HOPPER_<VENDOR>_STDIN=1`
+ * @returns {boolean}
+ */
+export function useStdinPrompt(adapter, regime, env = process.env) {
+  if (regime !== 'cmd-shim') return false;
+  if (!adapter || adapter.promptStdin !== 'supported') return false;
+  const flag = env[`HOPPER_${String(adapter.name || '').toUpperCase()}_STDIN`];
+  if (flag === '0') return false;                       // explicit per-vendor opt-out
+  if (adapter.promptStdinDefault === false) return flag === '1';  // opt-in vendors
+  return true;                                          // default-ON, not opted out
+}
+
+/**
  * The small instruction that replaces a large prompt on the command line: it
  * points the vendor agent at the on-disk prompt file. Forceful wording (the
  * file IS the task) because this is a soft, behavioral delivery.
@@ -118,13 +138,37 @@ export function resolvePromptDelivery({
   adapter, composedPrompt, opts = {}, resolvedCmd, prependArgs = [],
   handoffsDir, taskId, isWindows = platform() === 'win32', env = process.env,
 }) {
-  const inlineArgs = adapter.args(composedPrompt, opts);
   const regime = commandLineRegime(resolvedCmd, prependArgs, { isWindows });
+
+  // STDIN delivery (win-cmd-shim fix): pipe the FULL prompt over stdin instead of an
+  // argv positional. A stdin pipe never touches cmd.exe's command-line parser, so it
+  // is immune to the newline truncation (and the 8191 cap). The adapter emits a stdin
+  // sentinel instead of the prompt (opts.promptViaStdin). The prompt is written to a
+  // 0600 file so the BACKGROUND runner can read+pipe it; the SYNC path pipes
+  // `stdinPrompt` in-process and ignores the file.
+  if (useStdinPrompt(adapter, regime, env)) {
+    const args = adapter.args(composedPrompt, { ...opts, promptViaStdin: true });
+    let promptFilePath = null;
+    if (handoffsDir && taskId) {
+      try {
+        validateTaskId(taskId);
+        const p = join(handoffsDir, `${taskId}-prompt.md`);
+        assertPromptPathSafe(p, handoffsDir);
+        mkdirSync(handoffsDir, { recursive: true });
+        writeFileSync(p, composedPrompt, { mode: 0o600 });
+        try { chmodSync(p, 0o600); } catch (_) { /* best-effort on Windows */ }
+        promptFilePath = p;
+      } catch (_) { promptFilePath = null; /* sync still works via stdinPrompt */ }
+    }
+    return { args, channel: 'stdin', stdinPrompt: composedPrompt, promptFilePath, inlined: false, regime, bytes: 0, budget: 0 };
+  }
+
+  const inlineArgs = adapter.args(composedPrompt, opts);
   const budget = inlineBudgetBytes(regime, env);
   const bytes = commandLineBytes([String(resolvedCmd || ''), ...prependArgs, ...inlineArgs]);
 
   if (bytes <= budget) {
-    return { args: inlineArgs, promptFilePath: null, inlined: true, regime, bytes, budget };
+    return { args: inlineArgs, channel: 'argv-inline', stdinPrompt: null, promptFilePath: null, inlined: true, regime, bytes, budget };
   }
 
   // Over budget → deliver via a pointer file. Any condition that makes the file

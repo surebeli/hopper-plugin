@@ -19,6 +19,7 @@ import {
   inlineBudgetBytes,
   buildPointerInstruction,
   resolvePromptDelivery,
+  useStdinPrompt,
   DEFAULT_INLINE_BUDGETS,
 } from '../../cli/src/prompt-delivery.js';
 import { codexAdapter } from '../../cli/src/vendors/codex.js';
@@ -164,38 +165,71 @@ test('resolvePromptDelivery: env override lowers the budget so a small prompt us
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// ── real codex adapter: gating composes with the prompt-last reorder + bypass flag ──
-test('REAL codex adapter: small prompt stays inline, prompt last, bypass flag present', () => {
+// ── stdin delivery decision + codex sentinel (win-cmd-shim fix) ──
+test('useStdinPrompt: only on cmd-shim for a stdin-capable, enabled vendor', () => {
+  const codex = { name: 'codex', promptStdin: 'supported', promptStdinDefault: true };
+  assert.equal(useStdinPrompt(codex, 'cmd-shim', {}), true, 'cmd-shim + supported + default-on');
+  assert.equal(useStdinPrompt(codex, 'native-exe', {}), false, 'native-exe argv is safe — no stdin');
+  assert.equal(useStdinPrompt(codex, 'posix', {}), false, 'posix argv is safe — no stdin');
+  assert.equal(useStdinPrompt(codex, 'cmd-shim', { HOPPER_CODEX_STDIN: '0' }), false, 'env opt-out wins');
+  assert.equal(useStdinPrompt({ name: 'mimo', promptStdin: 'unsupported' }, 'cmd-shim', {}), false, 'unsupported vendor stays argv');
+  const optIn = { name: 'copilot', promptStdin: 'supported', promptStdinDefault: false };
+  assert.equal(useStdinPrompt(optIn, 'cmd-shim', {}), false, 'opt-in vendor OFF by default');
+  assert.equal(useStdinPrompt(optIn, 'cmd-shim', { HOPPER_COPILOT_STDIN: '1' }), true, 'opt-in vendor ON with env=1');
+});
+
+test('codex args() emits the `-` stdin sentinel under promptViaStdin (and the prompt otherwise)', () => {
+  const stdinArgs = codexAdapter.args('THE PROMPT', { sandbox: 'read-only', promptViaStdin: true });
+  assert.equal(stdinArgs[stdinArgs.length - 1], '-', 'stdin mode → trailing `-` (codex exec … -)');
+  assert.ok(!stdinArgs.includes('THE PROMPT'), 'prompt is OFF argv in stdin mode');
+  const argvArgs = codexAdapter.args('THE PROMPT', { sandbox: 'read-only' });
+  assert.equal(argvArgs[argvArgs.length - 1], 'THE PROMPT', 'argv mode → prompt is the last positional');
+});
+
+// ── real codex adapter: win-cmd-shim routes the prompt to STDIN (the fix) ──
+test('REAL codex adapter: cmd-shim routes the FULL prompt to STDIN (off argv, `-` sentinel, bypass flag survives)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'pd-'));
   try {
+    const multiline = 'line one of the brief\nline two — the real task\nline three';
     const res = resolvePromptDelivery({
-      adapter: codexAdapter, composedPrompt: 'small task', opts: { sandbox: 'danger-full-access', cwd: 'F:/x' },
+      adapter: codexAdapter, composedPrompt: multiline, opts: { sandbox: 'danger-full-access', cwd: 'F:/x' },
       resolvedCmd: 'cmd.exe', prependArgs: ['/c', 'codex.cmd'],
-      handoffsDir: dir, taskId: 'T-CDX-SM', isWindows: true, env: {},
+      handoffsDir: dir, taskId: 'T-CDX-STDIN', isWindows: true, env: {},
     });
-    assert.equal(res.inlined, true);
-    assert.equal(res.args[res.args.length - 1], 'small task', 'prompt stays the last positional');
-    assert.ok(res.args.includes('--dangerously-bypass-approvals-and-sandbox'));
+    assert.equal(res.channel, 'stdin');
+    assert.equal(res.stdinPrompt, multiline, 'full multi-line prompt delivered via stdin (no newline truncation)');
+    assert.equal(res.args[res.args.length - 1], '-', 'codex exec … - reads the prompt from stdin');
+    assert.ok(!res.args.includes(multiline), 'prompt is OFF the command line');
+    assert.ok(res.args.includes('--dangerously-bypass-approvals-and-sandbox'), 'bypass flag still reaches codex');
+    assert.ok(res.promptFilePath && readFileSync(res.promptFilePath, 'utf-8') === multiline, 'prompt file written for the background runner to pipe');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('REAL codex adapter: huge prompt -> pointer file; bypass flag survives, prompt off argv', () => {
+// ── env opt-out keeps the argv inline/pointer path covered (for argv vendors / forced argv) ──
+test('REAL codex adapter: HOPPER_CODEX_STDIN=0 forces argv — small inline (prompt last); huge -> pointer file', () => {
   const root = mkdtempSync(join(tmpdir(), 'repo-'));
   const handoffsDir = join(root, '.hopper', 'handoffs'); // under the vendor cwd (root)
+  const off = { HOPPER_CODEX_STDIN: '0' };
   try {
-    const huge = 'PROMPT '.repeat(2000); // ~14000 bytes >> cmd-shim budget
-    const res = resolvePromptDelivery({
-      adapter: codexAdapter, composedPrompt: huge, opts: { sandbox: 'danger-full-access', cwd: root },
-      resolvedCmd: 'cmd.exe', prependArgs: ['/c', 'codex.cmd'],
-      handoffsDir, taskId: 'T-CDX-BIG', isWindows: true, env: {},
+    const small = resolvePromptDelivery({
+      adapter: codexAdapter, composedPrompt: 'small task', opts: { sandbox: 'danger-full-access', cwd: root },
+      resolvedCmd: 'cmd.exe', prependArgs: ['/c', 'codex.cmd'], handoffsDir, taskId: 'T-CDX-SM', isWindows: true, env: off,
     });
-    assert.equal(res.inlined, false);
-    assert.equal(readFileSync(res.promptFilePath, 'utf-8'), huge, 'prompt file holds the full brief');
-    assert.ok(!res.args.includes(huge), 'huge prompt must be OFF the command line');
-    assert.ok(res.args.includes('--dangerously-bypass-approvals-and-sandbox'), 'bypass flag still reaches codex');
-    assert.ok(res.args.some((a) => typeof a === 'string' && a.includes('T-CDX-BIG-prompt.md')), 'argv points at the prompt file');
-    const bytes = commandLineBytes(['cmd.exe', '/c', 'codex.cmd', ...res.args]);
-    assert.ok(bytes < 2000, 'pointer command line is tiny (' + bytes + 'B) — no truncation risk');
+    assert.equal(small.inlined, true);
+    assert.equal(small.channel, 'argv-inline');
+    assert.equal(small.args[small.args.length - 1], 'small task', 'prompt stays the last positional');
+    assert.ok(small.args.includes('--dangerously-bypass-approvals-and-sandbox'));
+
+    const huge = 'PROMPT '.repeat(2000); // ~14000 bytes >> cmd-shim budget
+    const big = resolvePromptDelivery({
+      adapter: codexAdapter, composedPrompt: huge, opts: { sandbox: 'danger-full-access', cwd: root },
+      resolvedCmd: 'cmd.exe', prependArgs: ['/c', 'codex.cmd'], handoffsDir, taskId: 'T-CDX-BIG', isWindows: true, env: off,
+    });
+    assert.equal(big.inlined, false);
+    assert.equal(readFileSync(big.promptFilePath, 'utf-8'), huge, 'prompt file holds the full brief');
+    assert.ok(!big.args.includes(huge), 'huge prompt must be OFF the command line');
+    assert.ok(big.args.includes('--dangerously-bypass-approvals-and-sandbox'), 'bypass flag still reaches codex');
+    assert.ok(big.args.some((a) => typeof a === 'string' && a.includes('T-CDX-BIG-prompt.md')), 'argv points at the prompt file');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

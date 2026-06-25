@@ -339,8 +339,9 @@ export async function executeWithAdapter({ resolved, adapter, adapterOpts = {}, 
   // and pass the vendor a small "read this file" pointer. Needs hopperDir to locate
   // handoffs/; without it (e.g. direct-injected E2E adapters) fall back to inline.
   let args;
+  let delivery = null;
   if (hopperDir) {
-    const delivery = resolvePromptDelivery({
+    delivery = resolvePromptDelivery({
       adapter, composedPrompt, opts: effectiveOpts,
       resolvedCmd: spawnCommand, prependArgs,
       handoffsDir: join(hopperDir, 'handoffs'), taskId: task.id,
@@ -356,7 +357,11 @@ export async function executeWithAdapter({ resolved, adapter, adapterOpts = {}, 
   }
   const spawnArgs = prependArgs.length > 0 ? [...prependArgs, ...args] : args;
 
-  const stdinInput = adapter.stdinMode === 'pipe' ? composedPrompt : null;
+  // STDIN delivery (win-cmd-shim): the delivery layer routes the full prompt to stdin
+  // (adapter emitted a sentinel in argv). Prefer it over the static stdinMode check.
+  const stdinInput = (delivery && delivery.channel === 'stdin' && delivery.stdinPrompt != null)
+    ? delivery.stdinPrompt
+    : (adapter.stdinMode === 'pipe' ? composedPrompt : null);
   // HOPPER-3: optional adapter env (e.g. codex CODEX_HOME auto-isolation).
   const adapterEnv = typeof adapter.env === 'function' ? adapter.env(effectiveOpts) : undefined;
   // 乙: idle + ceiling instead of a single total cap. The per-vendor

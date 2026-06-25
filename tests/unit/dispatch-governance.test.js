@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { resolveDispatch, resolveAdhocDispatch, planSwarm } from '../../cli/src/dispatch.js';
+import { EXECUTION_MODE_GUARDRAIL } from '../../cli/src/tasks.js';
 import { renderOutputMarkdown, writeOutput } from '../../cli/src/output.js';
 import { validateHostVendorSeparation } from '../../cli/src/validation.js';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
@@ -36,8 +37,8 @@ test('resolveDispatch injects the constitution when GOVERNANCE.md present', asyn
     writeFileSync(join(hopperDir, 'governance', 'core.md'), 'GOVERNANCE CONSTITUTION');
     writeFileSync(join(hopperDir, 'GOVERNANCE.md'), '- **Constitution**: .hopper/governance/core.md\n');
     const r = await resolveDispatch({ hopperDir, taskId: 'T-1' });
-    assert.ok(r.composedPrompt.startsWith('GOVERNANCE CONSTITUTION'),
-      `expected constitution prefix, got: ${r.composedPrompt.slice(0, 40)}`);
+    assert.ok(r.composedPrompt.startsWith(EXECUTION_MODE_GUARDRAIL), 'execution guardrail leads the handoff');
+    assert.match(r.composedPrompt, /GOVERNANCE CONSTITUTION/, 'constitution injected after the guardrail');
     assert.match(r.composedPrompt, /## Task spec/);
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
@@ -47,8 +48,8 @@ test('resolveDispatch composes without governance when GOVERNANCE.md absent', as
   try {
     const hopperDir = scaffoldMinimal(tmp);
     const r = await resolveDispatch({ hopperDir, taskId: 'T-1' });
-    assert.ok(r.composedPrompt.startsWith('# Frame'),
-      `expected frame prefix, got: ${r.composedPrompt.slice(0, 20)}`);
+    assert.ok(r.composedPrompt.startsWith(EXECUTION_MODE_GUARDRAIL), 'guardrail leads even without governance');
+    assert.match(r.composedPrompt, /# Frame/, 'frame composed after the guardrail');
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
 
@@ -81,7 +82,7 @@ test('resolveDispatch: vendorOverride (--vendor) wins over the AGENTS.md routing
     const overridden = await resolveDispatch({ hopperDir, taskId: 'T-1', vendorOverride: 'grok' });
     assert.equal(overridden.vendor, 'grok', '--vendor overrides the routed vendor');
     // governance + composition still key on the (overridden) vendor, not the default
-    assert.ok(overridden.composedPrompt.startsWith('# Frame'));
+    assert.ok(overridden.composedPrompt.startsWith(EXECUTION_MODE_GUARDRAIL) && overridden.composedPrompt.includes('# Frame'));
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
 

@@ -213,6 +213,13 @@ export const codexAdapter = {
   name: 'codex',
   command: 'codex',
   stdinMode: 'none',
+  // Prompt-delivery capability (Windows cmd.exe-shim multi-line truncation fix).
+  // `codex exec -` reads the full prompt from stdin (help + docs + repro confirmed),
+  // which survives the cmd.exe `.cmd` shim that truncates a multi-line argv positional.
+  // The delivery layer routes to stdin ONLY on the win-cmd-shim regime; argv elsewhere.
+  // Default ON (proven); env opt-out HOPPER_CODEX_STDIN=0.
+  promptStdin: 'supported',
+  promptStdinDefault: true,
 
   // Phase 6a static capability hint (no live vendor introspection — would
   // break single-spawn proof). Source: docs/research/.
@@ -315,7 +322,10 @@ export const codexAdapter = {
       // prompt* the only thing a truncation can eat — the safety flags always
       // reach codex. This also matches codex's own documented usage form,
       // `codex exec [FLAGS] "<prompt>"` (docs/research/async-execution/01-openai-hosts.md).
-      input,
+      // STDIN MODE: when the delivery layer pipes the prompt to stdin (win-cmd-shim,
+      // where a multi-line argv positional truncates at the first newline), emit the
+      // `-` sentinel so `codex exec … -` reads the FULL prompt from stdin instead.
+      ...(opts.promptViaStdin ? ['-'] : [input]),
     ];
   },
 

@@ -124,7 +124,7 @@ function fail(outputMdPath, message, context = {}) {
         message,
         duration_ms,
         exit_code: -1,
-        adapter_status: 'unknown-fail',
+        adapter_status: context.adapter_status || 'unknown-fail',
       });
     } catch (_) {
       // Progress writing is best-effort; final frontmatter is still authoritative.
@@ -190,6 +190,22 @@ async function main() {
     fail(outputMdPath, `Could not open log file ${logPath}: ${err.message}`, { taskId, hopperDir, adapterName });
   }
 
+  // STDIN prompt delivery (win-cmd-shim): read the 0600 prompt file UP FRONT so an
+  // unreadable file fails fast (no wasted vendor run). The runner — the vendor's alive
+  // parent — pipes these bytes to the vendor's stdin + end()s (EOF) after spawn. This is
+  // NOT the banned dispatcher-stdin pipe (the dispatcher already exited; the runner owns
+  // the pipe for the whole run). Bytes flow parent→OS-pipe→child untouched by cmd.exe.
+  const promptStdinFile = process.env.HOPPER_PROMPT_STDIN_FILE || null;
+  let promptStdinBuf = null;
+  if (promptStdinFile) {
+    try {
+      promptStdinBuf = readFileSync(promptStdinFile);
+    } catch (err) {
+      fail(outputMdPath, `prompt stdin file unreadable (${promptStdinFile}): ${err.message}`, { taskId, hopperDir, adapterName, status: 'prompt-delivery-fail', adapter_status: 'prompt-delivery-fail' });
+      return;
+    }
+  }
+
   // Per shared cli/src/path-resolve.js: in-process PATH + PATHEXT walk
   // (no subprocess). Real .exe → spawn directly; .cmd/.bat → wrap with
   // cmd.exe /c. POSIX returns command unchanged.
@@ -253,7 +269,10 @@ async function main() {
   // which works without detached. detached on POSIX puts vendor in new pgrp.
   const isWindows = process.platform === 'win32';
   const vendor = spawn(resolvedCmd, finalArgv, {
-    stdio: ['ignore', fdOut, fdErr],
+    // stdin: 'pipe' ONLY for stdin delivery (the runner writes the prompt); else
+    // 'ignore' (= /dev/null immediate EOF) so argv vendors — and agy, which HANGS on
+    // an open stdin pipe — are unaffected. stdout/stderr stay FILE fds (no deadlock).
+    stdio: [promptStdinFile ? 'pipe' : 'ignore', fdOut, fdErr],
     windowsHide: true,
     // Retro #3 fix: vendor runs in the repo root that owns .hopper/ (passed via
     // --cwd by spawnDetached), not the runner's own process.cwd(). Falls back to
@@ -268,6 +287,26 @@ async function main() {
   // Close our copies of the fds; vendor has its own.
   closeSync(fdOut);
   closeSync(fdErr);
+
+  // STDIN delivery — observable contract (NOT best-effort): write the full prompt,
+  // end() (EOF — load-bearing: codex reads stdin to completion, openai/codex#20919),
+  // and record any short-write / write error so the exit handler can mark the dispatch
+  // `prompt-delivery-fail` rather than silently treating a truncated/empty prompt as a
+  // real run. The `stdin.on('error')` swallows EPIPE (vendor died mid-write) but RECORDS
+  // it — it never crashes the runner, and it never hides the failure.
+  let stdinDeliveryError = null;
+  let stdinBytesWritten = 0;
+  if (promptStdinFile && vendor.stdin && promptStdinBuf) {
+    vendor.stdin.on('error', (e) => { if (!stdinDeliveryError) stdinDeliveryError = e; });
+    try {
+      vendor.stdin.write(promptStdinBuf, (err) => { if (err && !stdinDeliveryError) stdinDeliveryError = err; });
+      stdinBytesWritten = promptStdinBuf.length;
+      vendor.stdin.end();
+    } catch (e) {
+      stdinDeliveryError = e;
+      try { vendor.stdin.end(); } catch (_) { /* already closed */ }
+    }
+  }
 
   let timedOut = false;
   let timeoutReason = null;
@@ -350,6 +389,16 @@ async function main() {
     } catch (err) {
       adapterStatus = 'unknown-fail';
       adapterError = `parseResult threw: ${err.message}`;
+    }
+
+    // Observable stdin contract: if the prompt was not fully delivered to the vendor,
+    // the run is INVALID no matter what the vendor produced (it may have acted on a
+    // truncated/empty prompt). Override to prompt-delivery-fail so it is never recorded
+    // as success. (Codex review: never swallow a delivery failure.)
+    if (stdinDeliveryError) {
+      adapterStatus = 'prompt-delivery-fail';
+      adapterError = `prompt stdin delivery failed after ${stdinBytesWritten}B: ${stdinDeliveryError.message || stdinDeliveryError}. Vendor may have received a truncated/empty prompt.`;
+      adapterText = '';
     }
 
     // T1 (review finding #1): the BACKGROUND path must ALSO write the full-text

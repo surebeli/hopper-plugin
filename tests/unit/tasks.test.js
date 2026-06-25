@@ -3,7 +3,7 @@
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { verifyFrameAntiPersona, composePrompt, loadTaskFrame, listTaskTypes } from '../../cli/src/tasks.js';
+import { verifyFrameAntiPersona, composePrompt, loadTaskFrame, listTaskTypes, EXECUTION_MODE_GUARDRAIL } from '../../cli/src/tasks.js';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -127,15 +127,15 @@ test('listTaskTypes returns empty array if tasks dir missing', async () => {
   }
 });
 
-test('composePrompt without governance is byte-identical to legacy 2-arg form', () => {
+test('composePrompt leads with the execution guardrail, then frame + spec', () => {
   const frame = '# Frame\nDo X.';
   const spec = 'Task: build Y.';
   const out = composePrompt(frame, spec);
-  // Locked legacy shape: frame, ---, ## Task spec, spec, trailing newline.
-  assert.equal(out, '# Frame\nDo X.\n\n---\n\n## Task spec\n\nTask: build Y.\n');
+  // Locked shape: guardrail, ---, frame, ---, ## Task spec, spec, trailing newline.
+  assert.equal(out, `${EXECUTION_MODE_GUARDRAIL}\n\n---\n\n# Frame\nDo X.\n\n---\n\n## Task spec\n\nTask: build Y.\n`);
 });
 
-test('composePrompt with governance prepends constitution then overlay', () => {
+test('composePrompt with governance: guardrail, then constitution then overlay, then frame + spec', () => {
   const frame = '# Frame\nDo X.';
   const spec = 'Task: build Y.';
   const out = composePrompt(frame, spec, {
@@ -143,16 +143,27 @@ test('composePrompt with governance prepends constitution then overlay', () => {
   });
   assert.equal(
     out,
-    'CONSTITUTION TEXT\n\n---\n\nOVERLAY TEXT\n\n---\n\n# Frame\nDo X.\n\n---\n\n## Task spec\n\nTask: build Y.\n'
+    `${EXECUTION_MODE_GUARDRAIL}\n\n---\n\nCONSTITUTION TEXT\n\n---\n\nOVERLAY TEXT\n\n---\n\n# Frame\nDo X.\n\n---\n\n## Task spec\n\nTask: build Y.\n`
   );
 });
 
-test('composePrompt with constitution but empty overlay omits the overlay block', () => {
+test('composePrompt with constitution but empty overlay omits the overlay block (guardrail still leads)', () => {
   const out = composePrompt('F', 'S', { governance: { constitution: 'C', overlay: '' } });
-  assert.equal(out, 'C\n\n---\n\nF\n\n---\n\n## Task spec\n\nS\n');
+  assert.equal(out, `${EXECUTION_MODE_GUARDRAIL}\n\n---\n\nC\n\n---\n\nF\n\n---\n\n## Task spec\n\nS\n`);
 });
 
-test('composePrompt with governance null behaves as legacy', () => {
+test('composePrompt with governance null still leads with the guardrail', () => {
   const out = composePrompt('F', 'S', { governance: null });
-  assert.equal(out, 'F\n\n---\n\n## Task spec\n\nS\n');
+  assert.equal(out, `${EXECUTION_MODE_GUARDRAIL}\n\n---\n\nF\n\n---\n\n## Task spec\n\nS\n`);
+});
+
+test('EXECUTION_MODE_GUARDRAIL: leads the handoff and forbids orchestration / re-dispatch / clarifying questions', () => {
+  const g = EXECUTION_MODE_GUARDRAIL.toLowerCase();
+  assert.match(g, /do not re-?dispatch|delegate/, 'forbids re-dispatch/delegation');
+  assert.match(g, /skill\.md|orchestrat|superpowers/, 'forbids adopting local orchestration skills');
+  assert.match(g, /do not ask|clarifying question|no reply will come/, 'forbids clarifying questions');
+  assert.match(g, /execut/, 'pins the executor role');
+  // Must be the very first block (vendor reads top-down before wandering into local files).
+  const out = composePrompt('FRAME', 'SPEC', { governance: { constitution: 'C', overlay: 'O' } });
+  assert.ok(out.startsWith(EXECUTION_MODE_GUARDRAIL), 'guardrail must lead the composed handoff');
 });
