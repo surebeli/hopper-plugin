@@ -217,10 +217,21 @@ test('callchain: danger-full-access bypasses sandbox; HOPPER_CODEX_SANDBOX_BYPAS
   });
 });
 
-test('callchain: read-only keeps a real -s sandbox (no bypass)', () => {
-  const argv = codexAdapter.args('hi', { sandbox: 'read-only' });
-  assert.equal(argv[argv.indexOf('-s') + 1], 'read-only');
-  assert.ok(!argv.includes('--dangerously-bypass-approvals-and-sandbox'));
+test('callchain: codex has NO read-only scenario — read-only/workspace-write also bypass (Windows -s is broken)', () => {
+  // 2026-06 decision: every `-s` mode runs codex's sandbox harness, broken on Windows
+  // (CreateProcessWithLogonW 1326), so codex ALWAYS runs full-access via the bypass flag —
+  // read-only intent for review/research rides in the prompt frame, not the OS sandbox.
+  for (const mode of ['read-only', 'workspace-write']) {
+    const argv = codexAdapter.args('hi', { sandbox: mode });
+    assert.ok(argv.includes('--dangerously-bypass-approvals-and-sandbox'), `${mode} must bypass`);
+    assert.ok(!argv.includes('-s'), `${mode} must not emit -s`);
+  }
+  // Escape hatch (POSIX, where the sandbox spawns children fine): honor the requested -s mode.
+  withEnv('HOPPER_CODEX_SANDBOX_BYPASS', '0', () => {
+    const argv = codexAdapter.args('hi', { sandbox: 'read-only' });
+    assert.equal(argv[argv.indexOf('-s') + 1], 'read-only');
+    assert.ok(!argv.includes('--dangerously-bypass-approvals-and-sandbox'));
+  });
 });
 
 // ── ISSUE-codex-bypass-flag-missing-from-argv ──────────────────────────────
@@ -270,12 +281,16 @@ test('ISSUE-bypass-argv: full-access bypass adds --skip-git-repo-check (non-git 
   withEnv('HOPPER_CODEX_SKIP_GIT_CHECK', '0', () => {
     assert.ok(!codexAdapter.args('hi', { sandbox: 'danger-full-access' }).includes('--skip-git-repo-check'));
   });
-  // Non-bypass sandboxes keep codex's trust gate.
-  assert.ok(!codexAdapter.args('hi', { sandbox: 'read-only' }).includes('--skip-git-repo-check'));
-  assert.ok(!codexAdapter.args('hi', { sandbox: 'workspace-write' }).includes('--skip-git-repo-check'));
+  // codex now bypasses for ALL modes, so --skip-git-repo-check rides along for read-only/
+  // workspace-write too (they take the bypass path). Only the HOPPER_CODEX_SANDBOX_BYPASS=0
+  // escape hatch (a real -s sandbox) keeps codex's git trust gate.
+  assert.ok(codexAdapter.args('hi', { sandbox: 'read-only' }).includes('--skip-git-repo-check'));
+  withEnv('HOPPER_CODEX_SANDBOX_BYPASS', '0', () => {
+    assert.ok(!codexAdapter.args('hi', { sandbox: 'read-only' }).includes('--skip-git-repo-check'));
+  });
 });
 
-test('callchain: parseResult flags CreateProcessWithLogonW 1326 as permission-fail (not false success)', () => {
+test('callchain: parseResult flags CreateProcessWithLogonW 1326 as permission-fail when NO command succeeded (false success)', () => {
   const res = codexAdapter.parseResult({
     exitCode: 0,
     stdout: 'I reviewed the repo and everything looks good.',
@@ -284,6 +299,20 @@ test('callchain: parseResult flags CreateProcessWithLogonW 1326 as permission-fa
   });
   assert.equal(res.status, 'permission-fail');
   assert.match(res.error, /1326/);
+});
+
+test('callchain: parseResult does NOT flag 1326 when codex ran commands successfully (quoted/incidental 1326)', () => {
+  // ISSUE-codex-1326-false-positive: codex ran real commands (a `succeeded in <N>ms` marker)
+  // and merely READ/QUOTED a prior failed run's log that contained the 1326 string. That is a
+  // real success, not a sandbox wipeout — must not be downgraded to permission-fail.
+  const res = codexAdapter.parseResult({
+    exitCode: 0,
+    stdout: 'Ran `mimo --version` (succeeded in 1204ms) → 0.1.3. The prior log noted '
+      + '"CreateProcessWithLogonW failed: 1326" but that was the earlier read-only run.',
+    stderr: 'tokens used\n4096',
+    timedOut: false, durationMs: 5000,
+  });
+  assert.equal(res.status, 'success');
 });
 
 test('callchain: parseResult clean success still works (no 1326 in output)', () => {

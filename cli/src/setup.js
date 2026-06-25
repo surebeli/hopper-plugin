@@ -23,14 +23,23 @@ import { reconcileModels } from './model-normalize.js';
  * Does the adapter enforce the sandbox through argv (so hopper can downgrade a
  * dispatch to read-only), or does the vendor only honor its own native policy?
  * Derived by diffing the argv the adapter emits for full-access vs read-only.
- * @returns {'argv'|'native'|'?'}
+ * 'argv' = differs by mode (downgradable); 'full' = pins full-access always (codex,
+ * whose -s sandbox is broken on Windows; not downgradable); 'native' = no sandbox flag
+ * (vendor honors its own policy, e.g. kimi; not downgradable).
+ * @returns {'argv'|'full'|'native'|'?'}
  */
 export function sandboxControl(adapter) {
   try {
-    const full = adapter.args('x', { sandbox: 'danger-full-access' }).join('');
-    const ro = adapter.args('x', { sandbox: 'read-only' }).join('');
-    return full !== ro ? 'argv' : 'native';
-  } catch (_) { return '?'; }
+    const SEP = String.fromCharCode(1);
+    const full = adapter.args("x", { sandbox: "danger-full-access" }).join(SEP);
+    const ro = adapter.args("x", { sandbox: "read-only" }).join(SEP);
+    if (full !== ro) return "argv";   // argv differs by mode -> hopper can downgrade to read-only
+    // Identical argv for both modes: distinguish a vendor that PINS full-access (codex always
+    // emits the bypass flag because its -s sandbox is broken on Windows -> no read-only scenario,
+    // not downgradable) from one carrying no sandbox flag at all (native policy, e.g. kimi).
+    if (full.includes("--dangerously-bypass-approvals-and-sandbox")) return "full";
+    return "native";
+  } catch (_) { return "?"; }
 }
 
 /**

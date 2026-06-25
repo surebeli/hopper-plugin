@@ -168,6 +168,34 @@ test('resolveAdapterOptsForTask defaults to danger-full-access unless task text 
   assert.equal(resolveAdapterOptsForTask(readOnly, { sandbox: 'workspace-write' }).sandbox, 'workspace-write');
 });
 
+test('resolveAdapterOptsForTask: codex always full-access (overrides read-only text AND explicit -s)', () => {
+  const readOnlyCodex = {
+    vendor: 'codex',
+    task: { brief: 'read-only task: audit current state', taskType: 'spec-blindspot-hunt' },
+    taskSpec: '',
+  };
+  // bypass active (default): codex forced to full-access even with read-only text / explicit -s.
+  assert.equal(resolveAdapterOptsForTask(readOnlyCodex, {}).sandbox, 'danger-full-access');
+  assert.equal(resolveAdapterOptsForTask(readOnlyCodex, { sandbox: 'read-only' }).sandbox, 'danger-full-access');
+});
+
+test('resolveAdapterOptsForTask: HOPPER_CODEX_SANDBOX_BYPASS=0 restores normal read-only resolution for codex (POSIX escape hatch)', () => {
+  const readOnlyCodex = {
+    vendor: 'codex',
+    task: { brief: 'read-only task: audit current state', taskType: 'spec-blindspot-hunt' },
+    taskSpec: '',
+  };
+  const prev = process.env.HOPPER_CODEX_SANDBOX_BYPASS;
+  process.env.HOPPER_CODEX_SANDBOX_BYPASS = '0';
+  try {
+    // Escape hatch: codex falls through to the normal precedence → read-only text wins.
+    assert.equal(resolveAdapterOptsForTask(readOnlyCodex, {}).sandbox, 'read-only');
+  } finally {
+    if (prev === undefined) delete process.env.HOPPER_CODEX_SANDBOX_BYPASS;
+    else process.env.HOPPER_CODEX_SANDBOX_BYPASS = prev;
+  }
+});
+
 // ─── CLI end-to-end tests (via --resolve which doesn't spawn vendor) ──
 
 test('CLI rejects --model with no value', () => {
@@ -279,9 +307,10 @@ test('CLI auto-defaults sandbox to danger-full-access for writable tasks', () =>
 });
 
 test('CLI auto-downgrades sandbox to read-only when task text explicitly says read-only', () => {
-  const { root, hopperDir } = makeMinimalHopper('codex', { brief: 'read-only task: inspect only' });
+  // Non-codex vendor: read-only TEXT must auto-downgrade. (codex is exempt — see next test.)
+  const { root, hopperDir } = makeMinimalHopper('grok', { brief: 'read-only task: inspect only' });
   try {
-    const r = runCli(['T-SAME'], { hopperDir, env: { HOPPER_HOST_VENDOR: 'codex' } });
+    const r = runCli(['T-SAME'], { hopperDir, env: { HOPPER_HOST_VENDOR: 'grok' } });
     assert.equal(r.exitCode, 1);
     assert.match(r.stderr, /permission: sandbox=read-only \(auto\)/);
   } finally {
@@ -289,12 +318,42 @@ test('CLI auto-downgrades sandbox to read-only when task text explicitly says re
   }
 });
 
-test('CLI explicit --sandbox overrides task-text default', () => {
+test('CLI does NOT downgrade codex to read-only (codex has no read-only scenario; always full-access)', () => {
+  // codex's -s sandbox is broken on Windows (1326), so codex always runs full-access; the
+  // read-only intent rides in the prompt frame. Even read-only task text keeps full-access.
   const { root, hopperDir } = makeMinimalHopper('codex', { brief: 'read-only task: inspect only' });
   try {
-    const r = runCli(['T-SAME', '--sandbox', 'workspace-write'], { hopperDir, env: { HOPPER_HOST_VENDOR: 'codex' } });
+    const r = runCli(['T-SAME'], { hopperDir, env: { HOPPER_HOST_VENDOR: 'codex' } });
+    assert.equal(r.exitCode, 1);
+    assert.match(r.stderr, /permission: sandbox=danger-full-access \(auto\)/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI explicit --sandbox overrides task-text default', () => {
+  // Non-codex vendor: explicit --sandbox is honored. (codex always full-access — see below.)
+  const { root, hopperDir } = makeMinimalHopper('grok', { brief: 'read-only task: inspect only' });
+  try {
+    const r = runCli(['T-SAME', '--sandbox', 'workspace-write'], { hopperDir, env: { HOPPER_HOST_VENDOR: 'grok' } });
     assert.equal(r.exitCode, 1);
     assert.match(r.stderr, /permission: sandbox=workspace-write \(explicit\)/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI codex ignores even an explicit --sandbox read-only (always full-access; display matches run)', () => {
+  // codex cannot honor -s read-only on Windows; the resolved/displayed sandbox is forced to
+  // full-access so the operator is not told read-only while codex actually runs full-access.
+  const { root, hopperDir } = makeMinimalHopper('codex', { brief: 'audit the routing' });
+  try {
+    const r = runCli(['T-SAME', '--sandbox', 'read-only'], { hopperDir, env: { HOPPER_HOST_VENDOR: 'codex' } });
+    assert.equal(r.exitCode, 1);
+    // The authoritative resolved value (permission line) must be full-access, and must say WHY
+    // (not mislabel it "explicit"). The raw flag echo may still show the user's literal input.
+    assert.match(r.stderr, /permission: sandbox=danger-full-access \(codex: -s read-only unsupported here/);
+    assert.doesNotMatch(r.stderr, /permission: sandbox=read-only/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -260,16 +260,17 @@ export const codexAdapter = {
 
   args(input, opts) {
     const sandbox = opts.sandbox ?? 'danger-full-access';
-    // read-only / workspace-write keep a real sandbox via `-s`. danger-full-access
-    // (the implementation-dispatch default — already full write access by intent)
-    // uses --dangerously-bypass-approvals-and-sandbox instead: on Windows
-    // `-s danger-full-access` still runs the sandbox harness, whose
-    // CreateProcessWithLogonW fails (1326) on EVERY child process, so codex can
-    // run nothing (ISSUE-codex-callchain-windows / ISSUE-codex-windows-sandbox-1326).
-    // The bypass flag runs codex with no sandbox at all (verified working).
-    // Escape hatch: HOPPER_CODEX_SANDBOX_BYPASS=0 reverts to `-s danger-full-access`.
-    const bypassSandbox = sandbox === 'danger-full-access'
-      && process.env.HOPPER_CODEX_SANDBOX_BYPASS !== '0';
+    // codex has NO read-only scenario (2026-06 decision). Every `-s <mode>` (read-only /
+    // workspace-write / danger-full-access) runs codex's sandbox harness, whose
+    // CreateProcessWithLogonW fails (1326) on EVERY child process on Windows, so codex can
+    // run nothing (ISSUE-codex-callchain-windows / ISSUE-codex-windows-sandbox-1326). codex
+    // therefore ALWAYS runs full-access via --dangerously-bypass-approvals-and-sandbox (no
+    // OS sandbox at all — verified working); the read-only INTENT of a review/research
+    // dispatch is carried by the executor prompt frame, not the OS sandbox. The dispatch
+    // layer no longer auto-downgrades codex to read-only (see resolveAdapterOptsForTask).
+    // Escape hatch (POSIX, where the sandbox spawns children fine): HOPPER_CODEX_SANDBOX_BYPASS=0
+    // honors the requested `-s <mode>`.
+    const bypassSandbox = process.env.HOPPER_CODEX_SANDBOX_BYPASS !== '0';
     const sandboxArgs = bypassSandbox
       ? ['--dangerously-bypass-approvals-and-sandbox']
       : ['-s', sandbox];
@@ -380,13 +381,26 @@ export const codexAdapter = {
     // Windows sandbox false-success guard (ISSUE-codex-callchain-windows): codex
     // can exit 0 with confident-looking output while EVERY shell command it ran
     // failed with `CreateProcessWithLogonW failed: 1326` (its sandbox cannot spawn
-    // children on this host) — so the dispatched brief was never performed.
-    // Surface that as a failure instead of a false `success`.
-    if (/CreateProcessWithLogonW failed:\s*1326|windows sandbox: CreateProcess\w* failed/i.test(`${raw.stdout || ''}\n${raw.stderr || ''}`)) {
+    // children on this host) — so the dispatched brief was never performed. Surface
+    // that as a failure instead of a false `success`.
+    //
+    // BUT only when codex made NO successful progress. If codex ran ANY command
+    // successfully (a `succeeded in <N>ms` / `exited 0 in <N>ms` marker) it was NOT
+    // sandbox-blocked, and the 1326 string is either an exec it rerouted around OR —
+    // commonly — text codex READ or QUOTED from a file/log it was investigating.
+    // Failing those is a false-positive (ISSUE-codex-1326-false-positive: a complete
+    // research run that quoted a prior failed run's log was mislabeled permission-fail
+    // despite 70 successful commands). codex now always runs full-access (no -s
+    // sandbox), so a TOTAL 1326 wipeout should only occur on the HOPPER_CODEX_SANDBOX_BYPASS=0
+    // escape-hatch path; this gate keeps the guard as defense-in-depth for that case.
+    const combined = `${raw.stdout || ''}\n${raw.stderr || ''}`;
+    const sawSandbox1326 = /CreateProcessWithLogonW failed:\s*1326|windows sandbox: CreateProcess\w* failed/i.test(combined);
+    const ranAnyCommandOk = /\bsucceeded in \d+\s*ms\b|\bexited 0 in \d+\s*ms\b/i.test(combined);
+    if (sawSandbox1326 && !ranAnyCommandOk) {
       return {
         text: raw.stdout,
         status: 'permission-fail',
-        error: 'codex could not execute commands: Windows sandbox CreateProcessWithLogonW failed (1326). The dispatched brief was likely NOT performed (false success). The adapter bypasses the sandbox for danger-full-access by default; if you forced -s, run codex where its sandbox can spawn children.',
+        error: 'codex could not execute commands: Windows sandbox CreateProcessWithLogonW failed (1326) on every command (no command succeeded). The dispatched brief was likely NOT performed (false success). codex runs full-access (no sandbox) by default; if you forced HOPPER_CODEX_SANDBOX_BYPASS=0, run codex where its sandbox can spawn children.',
       };
     }
     if (raw.exitCode === 0 && raw.stdout) {

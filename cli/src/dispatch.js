@@ -233,7 +233,20 @@ export function resolveAdapterOptsForTask(resolved, adapterOpts = {}) {
   //   2. read-only task TEXT (brief/spec says read-only / 只读)
   //   3. read-only-by-default TASK-TYPE (review / research — must not edit the repo)
   //   4. global HOPPER_DEFAULT_SANDBOX, else the product default (danger-full-access)
-  if (!out.sandbox) {
+  // codex has NO read-only scenario when its sandbox bypass is active (the default): the
+  // `-s` harness is broken on Windows (CreateProcessWithLogonW 1326 kills every child — see
+  // codex.js), so codex ALWAYS runs full-access and the read-only INTENT of review/research
+  // rides in the executor prompt frame, not the OS sandbox. Force the resolved sandbox to
+  // full-access so the displayed value matches what the adapter actually runs — this overrides
+  // even an explicit --sandbox, which codex cannot honor here (showing read-only while running
+  // full-access would be a lie). The HOPPER_CODEX_SANDBOX_BYPASS=0 escape hatch (POSIX, where
+  // -s spawns children fine) falls through to the normal precedence below, so an escape-hatch
+  // user still gets a working read-only downgrade for review/research.
+  const codexAlwaysFullAccess = resolved?.vendor === 'codex'
+    && process.env.HOPPER_CODEX_SANDBOX_BYPASS !== '0';
+  if (codexAlwaysFullAccess) {
+    out.sandbox = 'danger-full-access';
+  } else if (!out.sandbox) {
     if (taskTextRequestsReadOnly(resolved)) out.sandbox = 'read-only';
     else if (taskType && READ_ONLY_DEFAULT_TASK_TYPES.includes(taskType)) out.sandbox = 'read-only';
     else out.sandbox = resolveDefaultSandbox();

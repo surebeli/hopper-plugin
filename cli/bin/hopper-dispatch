@@ -702,7 +702,15 @@ async function runDispatch(hopperDir, taskId, { write = false, force = false, ad
       : await resolveDispatch({ hopperDir, taskId, vendorOverride });
     const effectiveAdapterOpts = resolveAdapterOptsForTask(resolved, adapterOpts);
     if (effectiveAdapterOpts.sandbox) {
-      const source = adapterOpts.sandbox ? 'explicit' : 'auto';
+      // When the resolver overrides an EXPLICIT request (only codex does this: its -s sandbox
+      // is broken on Windows, so it's pinned to full-access), say so plainly instead of
+      // mislabeling the resolved value as "explicit" — the operator asked for X, got full-access.
+      let source;
+      if (adapterOpts.sandbox && adapterOpts.sandbox !== effectiveAdapterOpts.sandbox) {
+        source = `${resolved.vendor}: -s ${adapterOpts.sandbox} unsupported here → full-access`;
+      } else {
+        source = adapterOpts.sandbox ? 'explicit' : 'auto';
+      }
       console.error(`  permission: sandbox=${effectiveAdapterOpts.sandbox} (${source})`);
     }
 
@@ -1459,14 +1467,15 @@ async function runSetup({ only = null, deep = false } = {}) {
     const authCell = r.authOk ? (r.authSoftWarn ? 'warn' : 'ok') : (r.installed ? 'NO' : '—');
     console.log(
       `| ${cell(r.name, 9)} | ${cell(r.installed ? 'yes' : 'NO', 9)} | ${cell(authCell, 4)} | `
-      + `${cell(r.sandboxControl === 'argv' ? 'argv' : (r.sandboxControl === 'native' ? 'native' : '?'), 7)} | `
+      + `${cell(['argv', 'full', 'native'].includes(r.sandboxControl) ? r.sandboxControl : '?', 7)} | `
       + `${cell(r.webSearch, 7)} | ${cell(models, 6)} | ${cell(capsState, 10)} |`,
     );
   }
   console.log('');
   console.log('Legend: Auth=ok → verified via env var or credential file; warn → installed & assumed authed but');
   console.log('  not verifiable on disk (keychain/session-backed — still dispatchable, confirmed at run time); NO → not authed.');
-  console.log('  Sandbox=argv → hopper can force read-only/full-access via flags; native → vendor');
+  console.log('  Sandbox=argv → hopper can force read-only/full-access via flags; full → always');
+  console.log('  full-access, no read-only scenario (codex; not downgradable); native → vendor');
   console.log('  enforces its own policy (not argv-downgradable). WebSrch=yes → adapter plumbs a web-search');
   console.log('  toggle (needed for research tasks): yes=available headlessly; manual=vendor can');
   console.log('  search but needs env/config; no=unsupported. Models: run `--probe <vendor>` to populate; `--rules`');

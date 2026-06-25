@@ -18,14 +18,16 @@ test('setup: buildVendorReadiness returns one well-formed row per registered ven
     assert.equal(typeof r.name, 'string');
     assert.equal(typeof r.installed, 'boolean');
     assert.ok(['ok', true, false].includes(r.authOk) || typeof r.authOk === 'boolean');
-    assert.ok(['argv', 'native', '?'].includes(r.sandboxControl), `${r.name} sandboxControl`);
+    assert.ok(['argv', 'full', 'native', '?'].includes(r.sandboxControl), `${r.name} sandboxControl`);
     assert.ok(['yes', 'manual', 'no', '?'].includes(r.webSearch), `${r.name} webSearch`);
     assert.ok('models' in r && 'capsStaleAfter' in r);
   }
 });
 
-test('setup: sandboxControl is argv for codex, native for kimi (not argv-downgradable)', () => {
-  assert.equal(sandboxControl(getAdapter('codex')), 'argv');
+test('setup: sandboxControl is full for codex (always full-access), native for kimi (both not argv-downgradable)', () => {
+  // codex has no read-only scenario: its -s sandbox is broken on Windows so it always
+  // emits the bypass flag → 'full' (pins full-access). kimi carries no sandbox flag → 'native'.
+  assert.equal(sandboxControl(getAdapter('codex')), 'full');
   assert.equal(sandboxControl(getAdapter('kimi')), 'native');
 });
 

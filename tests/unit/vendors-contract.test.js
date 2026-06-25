@@ -107,10 +107,11 @@ test('codex adapter args() builds expected invocation', () => {
   assert.ok(argv.some((x) => x.includes('model_reasoning_effort="high"')));
   assert.ok(argv.includes('test prompt'));
 
-  // read-only / workspace-write keep a real sandbox via -s (no bypass).
+  // codex has no read-only scenario: its -s sandbox is broken on Windows (1326), so read-only
+  // also bypasses (full-access). The read-only INTENT rides in the prompt frame, not the OS sandbox.
   const ro = a.args('test prompt', { sandbox: 'read-only' });
-  assert.equal(ro[ro.indexOf('-s') + 1], 'read-only');
-  assert.ok(!ro.includes('--dangerously-bypass-approvals-and-sandbox'), 'read-only must not bypass the sandbox');
+  assert.ok(!ro.includes('-s'), 'codex emits no -s (always bypasses)');
+  assert.ok(ro.includes('--dangerously-bypass-approvals-and-sandbox'), 'codex read-only also bypasses');
 });
 
 test('kimi adapter args() uses Kimi Code 0.x headless form (no removed legacy flags)', () => {
