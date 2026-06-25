@@ -92,6 +92,29 @@ export function resolveDispatchTimeouts(adapterBaselineMs, opts = {}) {
 
 export { DEFAULT_IDLE_TIMEOUT_MS, CEILING_FLOOR_MS };
 
+/**
+ * Idle-detection helper for vendors that emit a periodic heartbeat to their log even when
+ * otherwise idle (e.g. mimo's `--print-logs` GET /session/status poll). Raw log-size growth
+ * never goes quiet for those, so the idle timer's "no growth = stuck" detector never fires and
+ * a delivered-but-non-exiting process (the mimo background-exit hang) waits out the full
+ * ceiling. Given a freshly-appended log chunk and a heartbeat matcher, returns true iff the
+ * chunk contains at least one NON-empty line that is NOT a heartbeat line (i.e. real progress).
+ * The runner resets the idle clock only on such substantive growth. Pure; exported for tests.
+ * @param {string} chunk         newly-appended log bytes (decoded)
+ * @param {RegExp} heartbeatRe   matches a heartbeat (noise) line; non-global
+ * @returns {boolean}
+ */
+export function chunkHasSubstantiveLine(chunk, heartbeatRe) {
+  if (!chunk) return false;
+  for (const line of chunk.split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t) continue;
+    if (heartbeatRe && heartbeatRe.test(t)) continue;
+    return true;
+  }
+  return false;
+}
+
 import { platform, tmpdir } from 'node:os';
 import { join } from 'node:path';
 

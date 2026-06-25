@@ -27,6 +27,16 @@ export const mimoAdapter = {
   promptStdin: 'supported',
   promptStdinDefault: true,
 
+  // Background-idle heartbeat filter (mimo background-exit hang). `mimo run --print-logs` emits
+  // a GET /session/status poll line to the log every ~400ms FOREVER — even after the answer is
+  // delivered — because mimo's session-status completion poller keeps the process alive with no
+  // terminal JSON event. That endless growth defeats the runner's raw-size idle detector, so a
+  // lingering mimo waits out the full 30-min ceiling. The runner uses this regex to measure
+  // SUBSTANTIVE growth instead (reset the idle clock only on non-heartbeat lines), reaping the
+  // process ~idleMs after real output stops. parseResult (below) then classifies a reap-after-
+  // completion as success with the already-delivered answer. Non-global (used with .test in a loop).
+  idleHeartbeatRe: /path=\/session\/status\b/,
+
   capabilities: {
     modelArg: {
       accepted: 'freeform',
@@ -94,7 +104,28 @@ export const mimoAdapter = {
 
   parseResult(raw) {
     if (raw.timedOut) {
-      return { text: raw.stdout, status: 'timeout', error: `mimo run timed out after ${raw.durationMs}ms` };
+      // mimo background-exit hang: mimo can deliver the FULL answer and then never exit (its
+      // session-status poller keeps the process alive with no terminal JSON event). The runner's
+      // heartbeat-aware idle detector reaps it (timeoutReason='idle') once SUBSTANTIVE output has
+      // been silent for idleMs. If the answer actually COMPLETED (a step_finish event + non-empty
+      // extracted text), that reap is graceful — classify it success with the delivered answer,
+      // NOT a failure. A genuine timeout (ceiling budget, or idle with no completed answer) stays
+      // a timeout. (timeoutReason is threaded by hopper-runner; absent on the sync path.)
+      const log = raw.logFileContent || raw.stdout || '';
+      const parsed = extractMimoJsonText(log);
+      // Only a TERMINAL step_finish (part.reason !== 'tool-calls' — i.e. the model actually
+      // stopped generating: 'stop'/'end_turn'/'length'/…) means the answer finished. A
+      // 'tool-calls' step_finish is just a mid-turn tool boundary, so gating on "any step_finish"
+      // would let a mid-task idle reap be mislabeled success with a PARTIAL answer (codex review).
+      const completed = mimoAnswerCompleted(log);
+      if (raw.timeoutReason === 'idle' && completed && parsed.text) {
+        return {
+          text: parsed.text,
+          status: 'success',
+          usage: parsed.totalTokens ? { totalTokens: parsed.totalTokens } : undefined,
+        };
+      }
+      return { text: parsed.text || raw.stdout, status: 'timeout', error: `mimo run timed out after ${raw.durationMs}ms` };
     }
     if (raw.exitCode === 127 || /not found|command not found/i.test(raw.stderr || '')) {
       return {
@@ -136,6 +167,30 @@ export const mimoAdapter = {
     };
   },
 };
+
+/**
+ * True iff the mimo JSON stream contains a TERMINAL step_finish — one whose `part.reason` is a
+ * generation-stop ('stop' / 'end_turn' / 'length' / 'completed' / …), NOT a 'tool-calls' step
+ * boundary (which only means "ran a tool, another turn is coming"). Distinguishes a completed
+ * answer from a mid-task idle reap, so parseResult classifies an idle reap as success ONLY when
+ * the answer actually finished. Exported for tests. Coupled to mimo's `--format json` event
+ * schema (reason at part.reason); revisit on mimo upgrades (see adapter staleAfter).
+ * @param {string} log  full mimo stdout/log
+ * @returns {boolean}
+ */
+export function mimoAnswerCompleted(log) {
+  if (!log) return false;
+  for (const line of String(log).split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t.includes('"step_finish"')) continue;
+    let ev;
+    try { ev = JSON.parse(t); } catch (_) { continue; }
+    if (!ev || ev.type !== 'step_finish') continue;
+    const reason = String(ev.part?.reason ?? ev.reason ?? '').toLowerCase();
+    if (reason !== 'tool-calls' && reason !== 'tool_calls' && reason !== 'tool_use') return true;
+  }
+  return false;
+}
 
 export function extractMimoJsonText(stdout) {
   const trimmed = (stdout || '').trim();

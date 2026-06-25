@@ -6,10 +6,36 @@
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { acquireVendorLock, runSubprocessOnce, makeUniqueLogPath } from '../../cli/src/subprocess.js';
+import { acquireVendorLock, runSubprocessOnce, makeUniqueLogPath, chunkHasSubstantiveLine } from '../../cli/src/subprocess.js';
 import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir, platform } from 'node:os';
 import { join } from 'node:path';
+
+// ── heartbeat-aware idle detection helper (mimo background-exit hang) ──
+test('chunkHasSubstantiveLine: a heartbeat-only chunk is NOT substantive', () => {
+  const re = /path=\/session\/status\b/;
+  const chunk = [
+    'INFO service=server method=GET path=/session/status request',
+    'INFO service=server status=completed path=/session/status request',
+    '',
+  ].join('\n');
+  assert.equal(chunkHasSubstantiveLine(chunk, re), false);
+});
+
+test('chunkHasSubstantiveLine: a json event among heartbeats IS substantive', () => {
+  const re = /path=\/session\/status\b/;
+  const chunk = [
+    'INFO service=server method=GET path=/session/status request',
+    '{"type":"text","part":{"text":"hi"}}',
+  ].join('\n');
+  assert.equal(chunkHasSubstantiveLine(chunk, re), true);
+});
+
+test('chunkHasSubstantiveLine: empty / whitespace-only chunk is not substantive', () => {
+  const re = /path=\/session\/status\b/;
+  assert.equal(chunkHasSubstantiveLine('', re), false);
+  assert.equal(chunkHasSubstantiveLine('   \n\t\n  ', re), false);
+});
 
 test('runSubprocessOnce captures stdout from a simple command', async () => {
   // Use node itself to echo

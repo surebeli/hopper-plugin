@@ -10,6 +10,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { listAdapters, getAdapter } from '../../cli/src/vendors/index.js';
+import { mimoAnswerCompleted } from '../../cli/src/vendors/mimo.js';
 
 const VENDORS = ['codex', 'kimi', 'opencode', 'copilot', 'agy', 'grok', 'mimo', 'claude'];
 
@@ -230,6 +231,83 @@ test('mimo adapter parseResult() reconstructs text and token usage from json eve
   assert.equal(result.status, 'success');
   assert.equal(result.text, 'HELLO_MIMO');
   assert.deepEqual(result.usage, { totalTokens: 1234 });
+});
+
+// mimo background-exit hang: an idle reap AFTER the answer completed must be success, not timeout.
+const MIMO_COMPLETED_LOG = [
+  'INFO  2026-06-25T10:24:04 service=server method=GET path=/session/status request',
+  JSON.stringify({ type: 'text', part: { type: 'text', text: 'ANSWER_' } }),
+  JSON.stringify({ type: 'text', part: { type: 'text', text: 'OK' } }),
+  JSON.stringify({ type: 'step_finish', part: { reason: 'stop', tokens: { total: 99 } } }),
+  'INFO  2026-06-25T10:24:05 service=server method=GET path=/session/status request',
+  'INFO  2026-06-25T10:24:06 service=server method=GET path=/session/status request',
+].join('\n');
+
+test('mimo parseResult: idle reap after completion (step_finish + text) is success, not timeout', () => {
+  const a = getAdapter('mimo');
+  const r = a.parseResult({
+    exitCode: -1, stdout: MIMO_COMPLETED_LOG, stderr: MIMO_COMPLETED_LOG, logFileContent: MIMO_COMPLETED_LOG,
+    timedOut: true, timeoutReason: 'idle', durationMs: 200000,
+  });
+  assert.equal(r.status, 'success');
+  assert.equal(r.text, 'ANSWER_OK');
+  assert.deepEqual(r.usage, { totalTokens: 99 });
+});
+
+test('mimo parseResult: a ceiling timeout stays a timeout even with a completed answer present', () => {
+  const a = getAdapter('mimo');
+  const r = a.parseResult({
+    exitCode: -1, stdout: MIMO_COMPLETED_LOG, stderr: MIMO_COMPLETED_LOG, logFileContent: MIMO_COMPLETED_LOG,
+    timedOut: true, timeoutReason: 'ceiling', durationMs: 1800000,
+  });
+  assert.equal(r.status, 'timeout');
+});
+
+test('mimo parseResult: idle reap with NO completed answer (no step_finish) stays a timeout', () => {
+  const a = getAdapter('mimo');
+  const log = [
+    JSON.stringify({ type: 'step_start', part: { type: 'step-start' } }),
+    JSON.stringify({ type: 'text', part: { type: 'text', text: 'thinking...' } }),
+    'INFO  service=server method=GET path=/session/status request',
+  ].join('\n');
+  const r = a.parseResult({
+    exitCode: -1, stdout: log, stderr: log, logFileContent: log,
+    timedOut: true, timeoutReason: 'idle', durationMs: 200000,
+  });
+  assert.equal(r.status, 'timeout');
+});
+
+test('mimo parseResult: idle reap after only a TOOL-CALLS step_finish (mid-task) stays a timeout, not a partial-answer success', () => {
+  // codex review MAJOR: a 'tool-calls' step_finish is a mid-turn tool boundary, NOT a finished
+  // answer. An idle reap here must NOT be classified success with the partial text so far.
+  const a = getAdapter('mimo');
+  const log = [
+    JSON.stringify({ type: 'text', part: { type: 'text', text: 'partial...' } }),
+    JSON.stringify({ type: 'step_finish', part: { reason: 'tool-calls', tokens: { total: 7 } } }),
+    'INFO  service=server method=GET path=/session/status request',
+    'INFO  service=server method=GET path=/session/status request',
+  ].join('\n');
+  const r = a.parseResult({
+    exitCode: -1, stdout: log, stderr: log, logFileContent: log,
+    timedOut: true, timeoutReason: 'idle', durationMs: 200000,
+  });
+  assert.equal(r.status, 'timeout');
+});
+
+test('mimoAnswerCompleted: true only on a terminal step_finish (reason!=tool-calls)', () => {
+  const tool = JSON.stringify({ type: 'step_finish', part: { reason: 'tool-calls' } });
+  const stop = JSON.stringify({ type: 'step_finish', part: { reason: 'stop' } });
+  assert.equal(mimoAnswerCompleted(`${tool}\n`), false, 'only a tool-calls step is not completion');
+  assert.equal(mimoAnswerCompleted(`${tool}\n${stop}\n`), true, 'a stop step is completion');
+  assert.equal(mimoAnswerCompleted(''), false);
+  assert.equal(mimoAnswerCompleted('INFO path=/session/status request'), false);
+});
+
+test('mimo declares an idleHeartbeatRe matching the /session/status poll but NOT json events', () => {
+  const a = getAdapter('mimo');
+  assert.ok(a.idleHeartbeatRe instanceof RegExp, 'mimo must declare idleHeartbeatRe');
+  assert.ok(a.idleHeartbeatRe.test('INFO 2026 service=server method=GET path=/session/status request'));
+  assert.ok(!a.idleHeartbeatRe.test('{"type":"step_finish","part":{}}'));
 });
 
 test('copilot adapter soft-warns (mentioning GH_TOKEN) only when NO auth source is detectable', () => {

@@ -11,12 +11,12 @@
 // Counter-tested in tests/integration/runner-single-spawn.test.js.
 
 import { spawn } from 'node:child_process';
-import { openSync, closeSync, readFileSync, existsSync, statSync } from 'node:fs';
+import { openSync, closeSync, readFileSync, readSync, existsSync, statSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import { readFrontmatter, writeFrontmatter } from '../src/background.js';
 import { appendProgressEvent } from '../src/progress.js';
 import { getAdapter } from '../src/vendors/index.js';
-import { acquireVendorLock, killProcessTree, resolveDispatchTimeouts } from '../src/subprocess.js';
+import { acquireVendorLock, killProcessTree, resolveDispatchTimeouts, chunkHasSubstantiveLine } from '../src/subprocess.js';
 import { resolveCommandOnPath, resolveCommandWithKnownPaths } from '../src/path-resolve.js';
 import { renderVendorOutputSection, writeRunnerSidecar } from '../src/output.js';
 
@@ -68,6 +68,9 @@ function terminalMessageFor(status, adapterStatus, providedMessage = null) {
 }
 
 function terminalPhaseFor(status, adapterStatus, timedOut) {
+  // A resolved success is never a timeout phase — covers the mimo idle reap-after-completion
+  // (timedOut=true but the answer was fully delivered, so parseResult returned success).
+  if (status === 'done') return 'done';
   if (timedOut || adapterStatus === 'timeout') return 'timeout';
   return status;
 }
@@ -340,13 +343,50 @@ async function main() {
   killTimer.unref();
   // idle poll: reset the silence clock whenever the log grows; kill after idleMs
   // of no growth. Poll cadence is a fraction of idleMs (clamped 1–5s).
+  //
+  // Heartbeat-aware variant: an adapter that emits an idle heartbeat to its log
+  // (adapter.idleHeartbeatRe — mimo's --print-logs /session/status poll) would keep the size
+  // growing forever and defeat the detector, so for those we reset the clock only on SUBSTANTIVE
+  // growth (a newly-appended non-heartbeat line). This reaps a mimo background process that
+  // delivered its answer but never exits (session-status hang); mimo.parseResult then classifies
+  // the idle reap as success and extracts the already-captured answer from the log.
+  const heartbeatRe = adapter && adapter.idleHeartbeatRe ? adapter.idleHeartbeatRe : null;
   let lastSize = -1;
+  let lastReadOffset = 0;          // heartbeat-aware path: bytes already scanned for substance
   let lastGrowAt = Date.now();
   const pollMs = Math.max(1000, Math.min(idleMs || 0, 5000));
   const idlePoll = idleMs > 0 ? setInterval(() => {
     let sz = 0;
     try { sz = existsSync(logPath) ? statSync(logPath).size : 0; } catch (_) {}
-    if (sz !== lastSize) { lastSize = sz; lastGrowAt = Date.now(); return; }
+    if (sz !== lastSize) {
+      lastSize = sz;
+      if (!heartbeatRe) { lastGrowAt = Date.now(); return; }
+      // Heartbeat-aware: reset only if the newly-appended bytes hold a non-heartbeat line.
+      if (sz > lastReadOffset) {
+        let chunk = null;
+        try {
+          const fd = openSync(logPath, 'r');
+          try {
+            const len = sz - lastReadOffset;
+            const buf = Buffer.allocUnsafe(len);
+            const n = readSync(fd, buf, 0, len, lastReadOffset);
+            chunk = buf.toString('utf8', 0, n);
+          } finally { closeSync(fd); }
+        } catch (_) { chunk = null; }
+        if (chunk === null) {
+          // Read failed this tick (I/O hiccup): be conservative — DON'T reap on a read error,
+          // and DON'T advance the offset, so the appended bytes are re-scanned next poll (no skip).
+          lastGrowAt = Date.now();
+          return;
+        }
+        lastReadOffset = sz;
+        if (chunkHasSubstantiveLine(chunk, heartbeatRe)) { lastGrowAt = Date.now(); return; }
+        // else: only the heartbeat grew → fall through to the idle check (do NOT reset).
+      } else {
+        // size shrank/rotated → resync offset and count it as activity once.
+        lastReadOffset = sz; lastGrowAt = Date.now(); return;
+      }
+    }
     if (Date.now() - lastGrowAt >= idleMs) { clearInterval(idlePoll); killVendor('idle'); }
   }, pollMs) : null;
   if (idlePoll && idlePoll.unref) idlePoll.unref();
@@ -385,6 +425,7 @@ async function main() {
         stdout: stdoutTail,
         stderr: stderrTail,
         timedOut,
+        timeoutReason,            // 'idle' | 'ceiling' | null — lets mimo classify an idle reap-after-completion as success
         durationMs: duration_ms,
         logFileContent,
       });
