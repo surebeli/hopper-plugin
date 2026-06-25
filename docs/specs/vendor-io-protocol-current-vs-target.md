@@ -111,6 +111,13 @@ Status tokens: `[ ]` TODO · `[~]` WIP · `[x]` DONE(date) · `[defer]` · `[blo
 3. **copilot** — confirm the stdin round-trip when quota returns, then flip default ON.
 
 ## Change / verification journal  (append as fixes land — the tracker's living section)
+
+> **Verification standard**: a live run must confirm CONTENT correctness IN and OUT, not just
+> the protocol/status. Method: a brief with markers on **multiple lines** (top + middle) whose
+> **last-line** instruction requires echoing the earlier-line markers in a multi-line answer.
+> Then assert (IN) the composed prompt FILE contains guardrail+frame+all markers, and (OUT) the
+> captured output reproduces every marker — proving the full multi-line prompt arrived (not
+> truncated at line 1) AND the complete answer was captured.
 | date | vendor | OS | change | status | verified by / evidence |
 |---|---|---|---|---|---|
 | 2026-06-25 | codex | Windows | diagnosed cmd.exe newline truncation; stdin delivery proven via repro | pre-fix (root-caused) | minimal spawn repro (full multi-line via `codex exec -` / stdin) |
@@ -119,6 +126,7 @@ Status tokens: `[ ]` TODO · `[~]` WIP · `[x]` DONE(date) · `[defer]` · `[blo
 | 2026-06-25 | (layer) | Windows | P0: delivery layer (`useStdinPrompt`) + runner stdin-from-file + observable contract (`prompt-delivery-fail`); dispatcher ban retained | `[x]` shipped | unit (prompt-delivery) + full gate green |
 | 2026-06-25 | codex | Windows | P1: `promptStdin:'supported'`, `args() → -` sentinel; sync + background route prompt over stdin | `→stdin ✅` | **live**: multi-line sync → `HOPPER_STDIN_FIX_OK`; background → `HOPPER_BG_STDIN_OK` (status done, full prompt, no hijack) |
 | 2026-06-25 | claude | Windows | P2: `promptStdin:'supported'`, `args()` drops positional after `-p`; sync + background over stdin | `→stdin ✅` | **live**: sync → `HOPPER_CLAUDE_STDIN_OK`; background → `HOPPER_CLAUDE_BG_OK` (status done) |
+| 2026-06-25 | codex + claude | Windows | CONTENT-integrity verification (not just protocol) | ✅ in+out | prompt FILE held guardrail+frame+top/mid markers (5455B); both vendors echoed `IN_HEAD_7Q3`+`IN_MID_9X2`+`OUT_TAIL_5K8` — full multi-line prompt IN, complete multi-line answer OUT |
 | _next_ | _vendor_ | _OS_ | _what changed_ | _→stdin ✅ / LIMIT / …_ | _PR / test / live run_ |
 
 ## Separate, related (flagged by Codex — not part of delivery)
