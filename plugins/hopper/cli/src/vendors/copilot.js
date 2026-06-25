@@ -28,6 +28,14 @@ export const copilotAdapter = {
   name: 'copilot',
   command: 'copilot',
   stdinMode: 'none',
+  // Prompt-delivery capability (win-cmd-shim multi-line truncation fix). Bare `copilot`
+  // (no -p) reads the prompt from stdin — DELIVERY-verified on 1.0.65 (the piped prompt was
+  // consumed and reached inference) but the OUT round-trip is currently quota-blocked, so
+  // this stays OPT-IN: default OFF, enable with HOPPER_COPILOT_STDIN=1. Flip the default ON
+  // only after a content-asserting round-trip passes on the min supported build (#3186 hang
+  // risk on older builds). The delivery layer routes to stdin ONLY on win-cmd-shim.
+  promptStdin: 'supported',
+  promptStdinDefault: false,
 
   // Phase 6a static capability hint.
   capabilities: {
@@ -58,8 +66,11 @@ export const copilotAdapter = {
 
   args(input, opts) {
     const sandbox = opts.sandbox ?? 'danger-full-access';
+    const viaStdin = opts.promptViaStdin === true;
     return [
-      '-p', input,
+      // STDIN MODE (opt-in, win-cmd-shim): drop -p + the positional so bare `copilot`
+      // reads the FULL prompt from stdin — bypassing the cmd.exe argv newline truncation.
+      ...(viaStdin ? [] : ['-p', input]),
       // Phase 6c follow-up (T-AUDIT-PH6C-copilot sub-agent escape investigation):
       // Without --allow-all-tools, copilot CLI's non-interactive permission
       // model blocks ALL write attempts (file edits, shell, Python, Node — every
@@ -71,7 +82,9 @@ export const copilotAdapter = {
       // implementation dispatches can use shell/file-edit tools and write their
       // own output. Explicit read-only tasks omit this grant and rely on
       // Copilot's native permission model.
-      ...(sandbox === 'danger-full-access' ? ['--allow-all-tools', '--allow-all-paths'] : []),
+      // stdin (no -p) needs --allow-all-tools for non-interactive mode (copilot docs);
+      // otherwise gate on the danger-full-access sandbox as before.
+      ...((sandbox === 'danger-full-access' || viaStdin) ? ['--allow-all-tools', '--allow-all-paths'] : []),
       // Optional --model when explicitly chosen
       ...(opts.model ? ['--model', opts.model] : []),
       // Web search: copilot's web_search is a bundled GitHub-MCP tool. Under

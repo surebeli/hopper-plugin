@@ -27,7 +27,7 @@ each can be independently verified.
 |---|---|---|---|
 | **codex** | cmd-shim · argv(BROKEN) → **stdin** `codex exec [flags] -` · **→stdin ✅ 2026-06-25 (sync + background, live)** | execve · argv → argv · SAFE (untested) | execve · argv → argv · SAFE (untested) |
 | **claude** | cmd-shim · argv(BROKEN) → **stdin** `claude -p …` (drop positional) · **→stdin ✅ 2026-06-25 (sync + background, live)** | execve · argv → argv · SAFE (untested) | execve · argv → argv · SAFE (untested) |
-| **copilot** | cmd-shim · argv(BROKEN) → argv (default) / stdin via `HOPPER_COPILOT_STDIN=1` · **OPT-IN / LIMIT** | execve · argv → argv · SAFE (untested) | execve · argv → argv · SAFE (untested) |
+| **copilot** | cmd-shim · argv(BROKEN, default) / **stdin opt-in** (bare `copilot`, `HOPPER_COPILOT_STDIN=1`) · **OPT-IN ✅ mechanism (IN verified: prompt file written, stdin consumed; OUT quota-blocked)** | execve · argv → argv · SAFE (untested) | execve · argv → argv · SAFE (untested) |
 | **mimo** | cmd-shim · argv(BROKEN) → **stdin** `mimo run` (no positional; MiMoCode 0.1.3+ reads stdin) · **→stdin ✅ 2026-06-25 (sync content-verified; bg delivers full content but pre-existing mimo backend-hang on process exit)** | execve · argv → argv · SAFE (untested) | execve · argv → argv · SAFE (untested) |
 | **kimi** | native `.exe` here (SAFE) / npm `.cmd` = cmd-shim(BROKEN, LIMIT) · argv → argv · **SAFE / regime-detected** | execve · argv → argv · SAFE (untested) | execve · argv → argv · SAFE (untested) |
 | **opencode** | native (Bun) here (SAFE) / npm `.cmd` = cmd-shim(LIMIT) · argv → argv · **SAFE / regime-detected** | execve · argv → argv · SAFE (untested) | execve · argv → argv · SAFE (untested) |
@@ -88,9 +88,10 @@ Status tokens: `[ ]` TODO · `[~]` WIP · `[x]` DONE(date) · `[defer]` · `[blo
 - [x] claude `promptStdin:'supported'`; `args()` drops the positional after `-p` on the stdin channel.
 - [x] Unit: claude `-p` drops positional under promptViaStdin. **Live:** sync → `HOPPER_CLAUDE_STDIN_OK`; background → `HOPPER_CLAUDE_BG_OK` (status done). Env hatch `HOPPER_CLAUDE_STDIN=0`.
 
-**P3 — copilot (opt-in, default OFF)** — `[blocked: quota]`
-- [ ] copilot `promptStdin:'supported'`, `enabled=false`; opt-in `HOPPER_COPILOT_STDIN=1` → bare `copilot` (no `-p`); add version gating + timeout coverage.
-- [ ] Flip default ON only after a content-asserting round-trip passes on the min supported build.
+**P3 — copilot (opt-in, default OFF)** — `[~] mechanism ready; OUT verification blocked on quota`
+- [x] copilot `promptStdin:'supported'`, `promptStdinDefault:false`; `args()` drops `-p`+positional under stdin mode + adds `--allow-all-tools` (non-interactive). Enable with `HOPPER_COPILOT_STDIN=1`.
+- [x] Unit: stdin drops `-p`+positional; opt-in gating (default OFF, ON with env). **Integration**: opt-in dispatch wrote the full prompt file + selected the stdin channel (IN verified); copilot consumed it → `permission-fail` (quota), so OUT round-trip unverified.
+- [ ] Flip default ON only after a content-asserting OUT round-trip passes on the min supported build (needs copilot quota).
 
 **P4 — mimo → stdin** — `[x] 2026-06-25 (RESOLVED via stdin — MiMoCode 0.1.3+ reads stdin; shim-bypass no longer needed)`
 - [x] mimo `promptStdin:'supported'` (>=0.1.3); `args()` drops the positional message under stdin mode (`mimo run` reads stdin). Default ON; `HOPPER_MIMO_STDIN=0` opt-out.

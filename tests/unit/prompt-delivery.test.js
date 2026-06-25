@@ -25,6 +25,7 @@ import {
 import { codexAdapter } from '../../cli/src/vendors/codex.js';
 import { claudeAdapter } from '../../cli/src/vendors/claude.js';
 import { mimoAdapter } from '../../cli/src/vendors/mimo.js';
+import { copilotAdapter } from '../../cli/src/vendors/copilot.js';
 import { listAdapters, getAdapter } from '../../cli/src/vendors/index.js';
 
 // A minimal real fake adapter (no mock framework): prompt is the last positional.
@@ -226,6 +227,17 @@ test('mimo args() drops the positional message under promptViaStdin (mimo run re
   assert.equal(stdinArgs[1] !== 'THE PROMPT' && stdinArgs[1].startsWith('--'), true, '`run` is immediately followed by a flag, not a message positional');
   const argvArgs = mimoAdapter.args('THE PROMPT', { sandbox: 'read-only' });
   assert.equal(argvArgs[1], 'THE PROMPT', 'argv mode → message is the positional after run');
+});
+
+test('copilot args(): default keeps -p+prompt; opt-in stdin drops both + adds --allow-all-tools', () => {
+  const argvArgs = copilotAdapter.args('THE PROMPT', { sandbox: 'read-only' });
+  assert.deepEqual(argvArgs.slice(0, 2), ['-p', 'THE PROMPT'], 'default: -p + prompt positional (argv)');
+  const stdinArgs = copilotAdapter.args('THE PROMPT', { sandbox: 'read-only', promptViaStdin: true });
+  assert.ok(!stdinArgs.includes('-p') && !stdinArgs.includes('THE PROMPT'), 'stdin: bare copilot (no -p, no positional)');
+  assert.ok(stdinArgs.includes('--allow-all-tools'), 'stdin: --allow-all-tools for non-interactive');
+  // opt-in gating: copilot is default OFF (promptStdinDefault:false), ON only with env=1.
+  assert.equal(useStdinPrompt(copilotAdapter, 'cmd-shim', {}), false, 'copilot stdin default OFF');
+  assert.equal(useStdinPrompt(copilotAdapter, 'cmd-shim', { HOPPER_COPILOT_STDIN: '1' }), true, 'copilot stdin ON with opt-in');
 });
 
 // ── real codex adapter: win-cmd-shim routes the prompt to STDIN (the fix) ──
