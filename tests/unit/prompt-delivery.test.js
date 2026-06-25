@@ -24,6 +24,7 @@ import {
 } from '../../cli/src/prompt-delivery.js';
 import { codexAdapter } from '../../cli/src/vendors/codex.js';
 import { claudeAdapter } from '../../cli/src/vendors/claude.js';
+import { mimoAdapter } from '../../cli/src/vendors/mimo.js';
 import { listAdapters, getAdapter } from '../../cli/src/vendors/index.js';
 
 // A minimal real fake adapter (no mock framework): prompt is the last positional.
@@ -181,9 +182,9 @@ test('useStdinPrompt: only on cmd-shim for a stdin-capable, enabled vendor', () 
 });
 
 test('P5 invariant: only stdin-capable vendors route to stdin on cmd-shim; agy NEVER (hang guard); native/posix never', () => {
-  // Default-ON stdin vendors today (copilot is opt-in → default OFF; mimo/kimi/opencode/
-  // grok/agy = argv). Locks the channel matrix against accidental drift.
-  const STDIN_ON_CMDSHIM = new Set(['codex', 'claude']);
+  // Default-ON stdin vendors today (copilot is opt-in → default OFF; kimi/opencode/
+  // grok/agy = argv). mimo 0.1.3+ reads stdin. Locks the channel matrix against drift.
+  const STDIN_ON_CMDSHIM = new Set(['codex', 'claude', 'mimo']);
   for (const name of listAdapters()) {
     const a = getAdapter(name);
     const routed = useStdinPrompt(a, 'cmd-shim', {}); // default env (no opt-in/opt-out)
@@ -216,6 +217,15 @@ test('claude args() drops the positional under promptViaStdin (keeps -p; reads p
   assert.equal(stdinArgs[i + 1], '--output-format', '`-p` is immediately followed by a flag, not a prompt positional');
   const argvArgs = claudeAdapter.args('THE PROMPT', { sandbox: 'read-only' });
   assert.equal(argvArgs[argvArgs.indexOf('-p') + 1], 'THE PROMPT', 'argv mode → prompt follows -p');
+});
+
+test('mimo args() drops the positional message under promptViaStdin (mimo run reads stdin)', () => {
+  const stdinArgs = mimoAdapter.args('THE PROMPT', { sandbox: 'read-only', promptViaStdin: true });
+  assert.equal(stdinArgs[0], 'run');
+  assert.ok(!stdinArgs.includes('THE PROMPT'), 'prompt is OFF argv (read from stdin) in stdin mode');
+  assert.equal(stdinArgs[1] !== 'THE PROMPT' && stdinArgs[1].startsWith('--'), true, '`run` is immediately followed by a flag, not a message positional');
+  const argvArgs = mimoAdapter.args('THE PROMPT', { sandbox: 'read-only' });
+  assert.equal(argvArgs[1], 'THE PROMPT', 'argv mode → message is the positional after run');
 });
 
 // ── real codex adapter: win-cmd-shim routes the prompt to STDIN (the fix) ──

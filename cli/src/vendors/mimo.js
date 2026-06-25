@@ -19,6 +19,13 @@ export const mimoAdapter = {
   name: 'mimo',
   command: 'mimo',
   stdinMode: 'none',
+  // Prompt-delivery capability (win-cmd-shim multi-line truncation fix). MiMoCode 0.1.3+
+  // reads the prompt from stdin when `mimo run` is given NO positional message
+  // (content-verified: a line-2 marker echoed back through the mimo.cmd shim). The
+  // delivery layer routes to stdin ONLY on win-cmd-shim; argv elsewhere. Default ON;
+  // env opt-out HOPPER_MIMO_STDIN=0. (Requires MiMoCode >= 0.1.3 for the stdin form.)
+  promptStdin: 'supported',
+  promptStdinDefault: true,
 
   capabilities: {
     modelArg: {
@@ -47,7 +54,9 @@ export const mimoAdapter = {
     const agent = sandbox === 'read-only' ? 'plan' : 'build';
     const argv = [
       'run',
-      input,
+      // STDIN MODE (win-cmd-shim): omit the positional so `mimo run` (no message) reads
+      // the FULL prompt from stdin — bypassing the cmd.exe argv newline truncation.
+      ...(opts.promptViaStdin ? [] : [input]),
       ...(opts.cwd ? ['--dir', opts.cwd] : []),
       ...(opts.model ? ['--model', opts.model] : []),
       ...(opts.conversationId ? ['--session', opts.conversationId] : []),

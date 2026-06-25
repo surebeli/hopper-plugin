@@ -28,7 +28,7 @@ each can be independently verified.
 | **codex** | cmd-shim · argv(BROKEN) → **stdin** `codex exec [flags] -` · **→stdin ✅ 2026-06-25 (sync + background, live)** | execve · argv → argv · SAFE (untested) | execve · argv → argv · SAFE (untested) |
 | **claude** | cmd-shim · argv(BROKEN) → **stdin** `claude -p …` (drop positional) · **→stdin ✅ 2026-06-25 (sync + background, live)** | execve · argv → argv · SAFE (untested) | execve · argv → argv · SAFE (untested) |
 | **copilot** | cmd-shim · argv(BROKEN) → argv (default) / stdin via `HOPPER_COPILOT_STDIN=1` · **OPT-IN / LIMIT** | execve · argv → argv · SAFE (untested) | execve · argv → argv · SAFE (untested) |
-| **mimo** | cmd-shim · argv(BROKEN) → shim-bypass OR documented-limit · **DECIDE** | execve · argv → argv · SAFE (untested) | execve · argv → argv · SAFE (untested) |
+| **mimo** | cmd-shim · argv(BROKEN) → **stdin** `mimo run` (no positional; MiMoCode 0.1.3+ reads stdin) · **→stdin ✅ 2026-06-25 (sync content-verified; bg delivers full content but pre-existing mimo backend-hang on process exit)** | execve · argv → argv · SAFE (untested) | execve · argv → argv · SAFE (untested) |
 | **kimi** | native `.exe` here (SAFE) / npm `.cmd` = cmd-shim(BROKEN, LIMIT) · argv → argv · **SAFE / regime-detected** | execve · argv → argv · SAFE (untested) | execve · argv → argv · SAFE (untested) |
 | **opencode** | native (Bun) here (SAFE) / npm `.cmd` = cmd-shim(LIMIT) · argv → argv · **SAFE / regime-detected** | execve · argv → argv · SAFE (untested) | execve · argv → argv · SAFE (untested) |
 | **grok** | native `.exe` (no shim) · argv → argv · **SAFE** (open stdin pipe HANGS — keep argv) | execve · argv → argv · SAFE (untested) | execve · argv → argv · SAFE (untested) |
@@ -92,9 +92,9 @@ Status tokens: `[ ]` TODO · `[~]` WIP · `[x]` DONE(date) · `[defer]` · `[blo
 - [ ] copilot `promptStdin:'supported'`, `enabled=false`; opt-in `HOPPER_COPILOT_STDIN=1` → bare `copilot` (no `-p`); add version gating + timeout coverage.
 - [ ] Flip default ON only after a content-asserting round-trip passes on the min supported build.
 
-**P4 — mimo (DECISION)** — `[defer]`
-- [ ] Default now: keep argv + **document the Windows-cmd-shim multi-line limitation** (multi-line briefs may truncate on an npm-`.cmd` mimo install).
-- [ ] Follow-up: deterministic **shim-bypass** (`node …/bin/mimo` → native regime → argv multi-line safe).
+**P4 — mimo → stdin** — `[x] 2026-06-25 (RESOLVED via stdin — MiMoCode 0.1.3+ reads stdin; shim-bypass no longer needed)`
+- [x] mimo `promptStdin:'supported'` (>=0.1.3); `args()` drops the positional message under stdin mode (`mimo run` reads stdin). Default ON; `HOPPER_MIMO_STDIN=0` opt-out.
+- [x] Unit: mimo drops positional under promptViaStdin. **Live:** sync content-verified (full prompt IN + all markers echoed OUT, status success). Background delivers the full prompt + answer (markers in log) but mimo's server process does not exit → **pre-existing mimo backend-hang** (documented since a0c4eff; runner idle/ceiling timeout + `--stop` reap it; answer retrievable via `--result --full`). _Separate follow-up: investigate mimo background process exit._
 
 **P5 — native-exe vendors (grok / agy / kimi / opencode): no-op + guards** — `[x] 2026-06-25`
 - [x] No delivery change (native-exe argv multi-line safe). Invariant guard test: only codex+claude route to stdin on cmd-shim; **agy never** (open-pipe hang); native-exe/posix never route to stdin. Locked against drift.
@@ -127,6 +127,8 @@ Status tokens: `[ ]` TODO · `[~]` WIP · `[x]` DONE(date) · `[defer]` · `[blo
 | 2026-06-25 | codex | Windows | P1: `promptStdin:'supported'`, `args() → -` sentinel; sync + background route prompt over stdin | `→stdin ✅` | **live**: multi-line sync → `HOPPER_STDIN_FIX_OK`; background → `HOPPER_BG_STDIN_OK` (status done, full prompt, no hijack) |
 | 2026-06-25 | claude | Windows | P2: `promptStdin:'supported'`, `args()` drops positional after `-p`; sync + background over stdin | `→stdin ✅` | **live**: sync → `HOPPER_CLAUDE_STDIN_OK`; background → `HOPPER_CLAUDE_BG_OK` (status done) |
 | 2026-06-25 | codex + claude | Windows | CONTENT-integrity verification (not just protocol) | ✅ in+out | prompt FILE held guardrail+frame+top/mid markers (5455B); both vendors echoed `IN_HEAD_7Q3`+`IN_MID_9X2`+`OUT_TAIL_5K8` — full multi-line prompt IN, complete multi-line answer OUT |
+| 2026-06-25 | mimo | Windows | P4 RESOLVED: MiMoCode 0.1.3+ reads stdin → `promptStdin:'supported'`, `args()` drops positional; was the cmd-shim hard case | `→stdin ✅` (sync) | **live**: sync content-verified (markers `IN_HEAD_7Q3`+`IN_MID_9X2`+`OUT_TAIL_5K8` echoed, status success); bg delivers full content but pre-existing mimo backend-hang on exit |
+| 2026-06-25 | copilot | Windows | probe on 1.0.65: bare `copilot` consumes stdin + reaches inference, but **quota-blocked** — OUT round-trip unverifiable | `OPT-IN` (default OFF) | live probe exit 1 "no quota" (delivery consumed, not content-verified) |
 | _next_ | _vendor_ | _OS_ | _what changed_ | _→stdin ✅ / LIMIT / …_ | _PR / test / live run_ |
 
 ## Separate, related (flagged by Codex — not part of delivery)
