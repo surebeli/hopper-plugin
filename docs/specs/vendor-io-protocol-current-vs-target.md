@@ -26,7 +26,7 @@ each can be independently verified.
 | vendor | Windows | macOS | Linux |
 |---|---|---|---|
 | **codex** | cmd-shim · argv(BROKEN) → **stdin** `codex exec [flags] -` · **→stdin ✅ 2026-06-25 (sync + background, live)** | execve · argv → argv · SAFE (untested) | execve · argv → argv · SAFE (untested) |
-| **claude** | cmd-shim · argv(BROKEN) → **stdin** `claude -p …` (drop positional) · **→stdin (pending)** | execve · argv → argv · SAFE (untested) | execve · argv → argv · SAFE (untested) |
+| **claude** | cmd-shim · argv(BROKEN) → **stdin** `claude -p …` (drop positional) · **→stdin ✅ 2026-06-25 (sync + background, live)** | execve · argv → argv · SAFE (untested) | execve · argv → argv · SAFE (untested) |
 | **copilot** | cmd-shim · argv(BROKEN) → argv (default) / stdin via `HOPPER_COPILOT_STDIN=1` · **OPT-IN / LIMIT** | execve · argv → argv · SAFE (untested) | execve · argv → argv · SAFE (untested) |
 | **mimo** | cmd-shim · argv(BROKEN) → shim-bypass OR documented-limit · **DECIDE** | execve · argv → argv · SAFE (untested) | execve · argv → argv · SAFE (untested) |
 | **kimi** | native `.exe` here (SAFE) / npm `.cmd` = cmd-shim(BROKEN, LIMIT) · argv → argv · **SAFE / regime-detected** | execve · argv → argv · SAFE (untested) | execve · argv → argv · SAFE (untested) |
@@ -84,9 +84,9 @@ Status tokens: `[ ]` TODO · `[~]` WIP · `[x]` DONE(date) · `[defer]` · `[blo
 - [x] Unit: `useStdinPrompt` matrix; codex `-` sentinel; cmd-shim→stdin + `HOPPER_CODEX_STDIN=0`→argv inline/pointer. **Live:** sync + background multi-line dispatch → full prompt, exact token returned, no hijack. _(TODO: promote the cmd.exe repro to an automated integration test.)_
 - [x] Env escape hatch `HOPPER_CODEX_STDIN=0`.
 
-**P2 — claude → stdin (live-confirmed)** — `[ ]`
-- [ ] claude `promptStdin:'supported'`; `args()` drops the positional after `-p` on the stdin channel.
-- [ ] Tests + integration round-trip; env hatch.
+**P2 — claude → stdin** — `[x] 2026-06-25 (sync + background, live-verified)`
+- [x] claude `promptStdin:'supported'`; `args()` drops the positional after `-p` on the stdin channel.
+- [x] Unit: claude `-p` drops positional under promptViaStdin. **Live:** sync → `HOPPER_CLAUDE_STDIN_OK`; background → `HOPPER_CLAUDE_BG_OK` (status done). Env hatch `HOPPER_CLAUDE_STDIN=0`.
 
 **P3 — copilot (opt-in, default OFF)** — `[blocked: quota]`
 - [ ] copilot `promptStdin:'supported'`, `enabled=false`; opt-in `HOPPER_COPILOT_STDIN=1` → bare `copilot` (no `-p`); add version gating + timeout coverage.
@@ -117,6 +117,7 @@ Status tokens: `[ ]` TODO · `[~]` WIP · `[x]` DONE(date) · `[defer]` · `[blo
 | 2026-06-25 | copilot | Windows | stdin consumed prompt + reached inference; round-trip quota-blocked | pre-fix (unproven) | live probe (exit 1 = "no quota") |
 | 2026-06-25 | (layer) | Windows | P0: delivery layer (`useStdinPrompt`) + runner stdin-from-file + observable contract (`prompt-delivery-fail`); dispatcher ban retained | `[x]` shipped | unit (prompt-delivery) + full gate green |
 | 2026-06-25 | codex | Windows | P1: `promptStdin:'supported'`, `args() → -` sentinel; sync + background route prompt over stdin | `→stdin ✅` | **live**: multi-line sync → `HOPPER_STDIN_FIX_OK`; background → `HOPPER_BG_STDIN_OK` (status done, full prompt, no hijack) |
+| 2026-06-25 | claude | Windows | P2: `promptStdin:'supported'`, `args()` drops positional after `-p`; sync + background over stdin | `→stdin ✅` | **live**: sync → `HOPPER_CLAUDE_STDIN_OK`; background → `HOPPER_CLAUDE_BG_OK` (status done) |
 | _next_ | _vendor_ | _OS_ | _what changed_ | _→stdin ✅ / LIMIT / …_ | _PR / test / live run_ |
 
 ## Separate, related (flagged by Codex — not part of delivery)

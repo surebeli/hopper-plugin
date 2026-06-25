@@ -37,6 +37,12 @@ export const claudeAdapter = {
   name: 'claude',
   command: 'claude',
   stdinMode: 'none',
+  // Prompt-delivery capability (win-cmd-shim multi-line truncation fix). `claude -p`
+  // with NO positional reads the prompt from stdin (live-confirmed through claude.cmd:
+  // token honored, exit 0). The delivery layer routes to stdin ONLY on win-cmd-shim;
+  // argv elsewhere. Default ON; env opt-out HOPPER_CLAUDE_STDIN=0.
+  promptStdin: 'supported',
+  promptStdinDefault: true,
 
   // Phase 6a static capability hint (no live vendor introspection — would break
   // the single-spawn proof). Source: code.claude.com/docs/en/cli-reference.
@@ -93,7 +99,10 @@ export const claudeAdapter = {
     // OAuth-login users; enable with HOPPER_CLAUDE_BARE=1.
     if (process.env.HOPPER_CLAUDE_BARE === '1') argv.push('--bare');
     argv.push(
-      '-p', input,
+      // STDIN MODE (win-cmd-shim): drop the positional so `claude -p` (no prompt arg)
+      // reads the FULL prompt from stdin — bypassing the cmd.exe argv newline truncation.
+      '-p',
+      ...(opts.promptViaStdin ? [] : [input]),
       // Single trailing JSON object: { type, subtype, is_error, result, session_id,
       // total_cost_usd, usage, ... } — parseResult reads `.result`.
       '--output-format', 'json',

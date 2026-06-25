@@ -23,6 +23,7 @@ import {
   DEFAULT_INLINE_BUDGETS,
 } from '../../cli/src/prompt-delivery.js';
 import { codexAdapter } from '../../cli/src/vendors/codex.js';
+import { claudeAdapter } from '../../cli/src/vendors/claude.js';
 
 // A minimal real fake adapter (no mock framework): prompt is the last positional.
 const fakeAdapter = { name: 'fake', command: 'fake', args: (input) => ['run', '--flag', input] };
@@ -184,6 +185,16 @@ test('codex args() emits the `-` stdin sentinel under promptViaStdin (and the pr
   assert.ok(!stdinArgs.includes('THE PROMPT'), 'prompt is OFF argv in stdin mode');
   const argvArgs = codexAdapter.args('THE PROMPT', { sandbox: 'read-only' });
   assert.equal(argvArgs[argvArgs.length - 1], 'THE PROMPT', 'argv mode → prompt is the last positional');
+});
+
+test('claude args() drops the positional under promptViaStdin (keeps -p; reads prompt from stdin)', () => {
+  const stdinArgs = claudeAdapter.args('THE PROMPT', { sandbox: 'read-only', promptViaStdin: true });
+  assert.ok(stdinArgs.includes('-p'), 'keeps -p (print/headless)');
+  assert.ok(!stdinArgs.includes('THE PROMPT'), 'prompt is OFF argv in stdin mode');
+  const i = stdinArgs.indexOf('-p');
+  assert.equal(stdinArgs[i + 1], '--output-format', '`-p` is immediately followed by a flag, not a prompt positional');
+  const argvArgs = claudeAdapter.args('THE PROMPT', { sandbox: 'read-only' });
+  assert.equal(argvArgs[argvArgs.indexOf('-p') + 1], 'THE PROMPT', 'argv mode → prompt follows -p');
 });
 
 // ── real codex adapter: win-cmd-shim routes the prompt to STDIN (the fix) ──
