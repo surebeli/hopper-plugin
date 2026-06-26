@@ -22,6 +22,17 @@ export const agyAdapter = {
   name: 'agy',
   command: 'agy',
   stdinMode: 'none',
+  // Dispatch gate — agy is DISABLED by default (2026-06-26). agy 1.0.12 `--print` renders the
+  // answer only in its interactive TUI; under a non-TTY stdout (every hopper dispatch) it emits
+  // nothing capturable (not stdout/stderr, not --log-file, not the brain store), so a dispatch
+  // can never return an answer. Blocking it prevents silent empty/failed runs. A real fix needs a
+  // PTY, which is excluded for agy (it hangs on an open stdin pipe). Re-enable explicitly with
+  // HOPPER_ENABLE_AGY=1 once an upstream fix or a sanctioned capture path lands. See
+  // docs/specs/vendor-io-protocol-current-vs-target.md (agy OUTPUT LIMIT).
+  dispatchDisabled: {
+    reason: 'agy 1.0.12 `--print` emits no capturable answer on a non-TTY stdout (its answer renders only in the interactive TUI), so a hopper dispatch cannot return a result. Disabled pending an upstream fix or a sanctioned PTY-free capture path.',
+    enableEnv: 'HOPPER_ENABLE_AGY',
+  },
   // Phase 6c F2: agy installer on Windows does NOT add its bin to PATH.
   // Probe and dispatch both correctly report "not found" without these
   // fallbacks. When PATH lookup fails, the runner consults this list to

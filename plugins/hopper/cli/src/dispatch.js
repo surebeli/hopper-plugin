@@ -271,6 +271,29 @@ export function resolveAdapterOptsForTask(resolved, adapterOpts = {}) {
 }
 
 /**
+ * Dispatch gate: refuse to dispatch to a vendor whose adapter declares `dispatchDisabled`
+ * unless the caller has explicitly opted in via that adapter's `enableEnv` (=== '1'). This is
+ * the single chokepoint enforced by BOTH the sync and background dispatch paths (and swarm,
+ * which fans out through the background path), so a disabled vendor cannot be reached by any
+ * route — `--vendor`, AGENTS.md routing, adhoc, or panel. Non-dispatch surfaces (doctor /
+ * --vendors / --resolve) do NOT call this, so a disabled vendor is still listed + introspectable.
+ * Throws a clear, actionable Error when blocked; returns silently otherwise.
+ * @param {string} vendor
+ * @param {Record<string,string|undefined>} [env]
+ */
+export function assertVendorDispatchable(vendor, env = process.env) {
+  let adapter;
+  try { adapter = getAdapter(vendor); } catch (_) { return; } // unknown vendor handled elsewhere
+  const gate = adapter && adapter.dispatchDisabled;
+  if (!gate) return;
+  if (env[gate.enableEnv] === '1') return; // explicit opt-in
+  throw new Error(
+    `Dispatch to vendor '${vendor}' is DISABLED: ${gate.reason} `
+    + `If you understand the limitation and still want to dispatch, set ${gate.enableEnv}=1.`,
+  );
+}
+
+/**
  * Execute dispatch end-to-end: resolve + adapter preflight + subprocess spawn + parse.
  *
  * Per spec §3 #4 (no harness reaction core): ONE adapter call = ONE subprocess
@@ -308,6 +331,10 @@ export async function executeDispatch({ hopperDir, taskId, adapterOpts = {} }) {
  */
 export async function executeWithAdapter({ resolved, adapter, adapterOpts = {}, cwd = null, hopperDir = null }) {
   const { task, vendor, composedPrompt } = resolved;
+  // Dispatch gate — the canonical sync spawn chokepoint (covers the CLI sync path AND any other
+  // caller, e.g. executeDispatch). A vendor disabled by capability (agy headless-output) is
+  // blocked here unless explicitly opted in. Throws before any subprocess is spawned.
+  assertVendorDispatchable(vendor);
   const dispatchAdapterOpts = resolveAdapterOptsForTask(resolved, adapterOpts);
 
   // envPreflight — if not ok, fail FAST without spawning subprocess

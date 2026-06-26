@@ -5,7 +5,7 @@
 // Per spec §3 #4 (no harness reaction core): ONE invocation = ONE action = ONE exit.
 // No retry, no fallback, no state across invocations.
 
-import { resolveDispatch, resolveAdhocDispatch, planSwarm, getStatus, executeWithAdapter, resolveAdapterOptsForTask } from '../src/dispatch.js';
+import { resolveDispatch, resolveAdhocDispatch, planSwarm, getStatus, executeWithAdapter, resolveAdapterOptsForTask, assertVendorDispatchable } from '../src/dispatch.js';
 import { listTaskTypes } from '../src/tasks.js';
 import { listAdapters, getAdapter, installCheckForAdapter, capabilitiesForAdapter, probeVendor } from '../src/vendors/index.js';
 import { readCache, readCacheWithDiagnostics, getVendorCache, setVendorCache, isStale, staleness } from '../src/cache.js';
@@ -46,7 +46,7 @@ import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
-const VERSION = '0.24.0';
+const VERSION = '0.25.0';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -208,7 +208,13 @@ async function main() {
   // --swarm is absent — `--swarm … --vendors a,b,c` falls through to the swarm handler.
   if (args.includes('--vendors') && !args.includes('--swarm')) {
     console.log(`hopper-dispatch v${VERSION} — registered vendor adapters:`);
-    for (const v of listAdapters()) console.log(`  - ${v}`);
+    for (const v of listAdapters()) {
+      const gate = getAdapter(v)?.dispatchDisabled;
+      const flag = gate
+        ? (process.env[gate.enableEnv] === '1' ? ` (disabled by default — enabled via ${gate.enableEnv}=1)` : ` — ⚠️ DISABLED (set ${gate.enableEnv}=1 to override)`)
+        : '';
+      console.log(`  - ${v}${flag}`);
+    }
     return;
   }
   if (args.includes('--rules')) {
@@ -716,6 +722,8 @@ async function runDispatch(hopperDir, taskId, { write = false, force = false, ad
 
     const hostVendor = process.env.HOPPER_HOST_VENDOR;
     validateHostVendorSeparation(hostVendor, resolved.vendor);
+    // Dispatch gate for a capability-disabled vendor (agy headless-output) is enforced at the
+    // shared spawn chokepoint executeWithAdapter() below; nothing extra needed on the sync path.
 
     // Soft-warn: --model passed but X not in cached list. Non-blocking. Single-
     // spawn invariant unaffected (resolveDispatch is in-process; cache read is FS).
@@ -834,6 +842,14 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {}, vend
   const hostVendor = process.env.HOPPER_HOST_VENDOR;
   try {
     validateHostVendorSeparation(hostVendor, resolved.vendor);
+  } catch (err) {
+    bail(`Error: ${err.message}`, 1);
+  }
+
+  // Dispatch gate: a vendor disabled by capability (e.g. agy headless-output unsupported) is
+  // blocked here unless explicitly opted in (covers background + swarm panelists).
+  try {
+    assertVendorDispatchable(resolved.vendor);
   } catch (err) {
     bail(`Error: ${err.message}`, 1);
   }

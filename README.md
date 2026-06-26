@@ -62,7 +62,15 @@ Not every CLI exposes both knobs. What each vendor honors:
 | opencode | `--model <provider/model>` | opt-in | effort via `--variant`; enable with `HOPPER_OPENCODE_VARIANT=<v>` (per-model, off by default). |
 | kimi | `-m` | — | `kimi -p` has no per-call effort flag. |
 | claude | `--model` | — | `claude -p` has no effort flag. |
-| agy | — | — | no `--model`; effort handled by internal subagents. |
+| agy | — | — | ⚠️ **DISABLED by default** — see below. |
+
+> **agy is temporarily unsupported (disabled by default, 2026-06-26).** agy 1.0.12 `--print` renders
+> the model's answer only in its interactive TUI; under a non-TTY stdout (every hopper dispatch) it
+> emits nothing capturable, so a dispatch can never return an answer. hopper therefore **refuses to
+> dispatch to agy** with a clear error. A real fix needs a PTY, which is excluded for agy (it hangs
+> on an open stdin pipe). If you understand the limitation and still want to try, set
+> `HOPPER_ENABLE_AGY=1`. This note will be removed once an upstream fix or a sanctioned capture path
+> lands — see `docs/specs/vendor-io-protocol-current-vs-target.md`.
 
 That table is a snapshot. The **authoritative, never-drifts** version is generated from
 the adapters themselves — use these to check the live truth for your machine/account:

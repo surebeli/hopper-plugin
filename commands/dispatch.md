@@ -26,7 +26,7 @@ This command runs inside a Claude Code session and invokes the host-agnostic `ho
    - Value flag: `--model <name>` (consumes next token) — `<name>` must match `^[A-Za-z][A-Za-z0-9._/:()[\] -]{0,99}$` (the space/bracket/paren are for display-label aliases like `opus[1m]` or `Gemini 3.5 Flash (High)`; quote the value in your shell)
    - Value flag: `--reasoning <level>` (consumes next token) — `<level>` must be exactly one of `minimal`, `low`, `medium`, `high`, `xhigh`
    - Value flag: `--sandbox <mode>` (consumes next token) — `<mode>` must be exactly one of `read-only`, `workspace-write`, `danger-full-access`
-   - Value flag: `--vendor <name>` (consumes next token) — `<name>` must be a lowercase registered vendor: `codex`, `kimi`, `opencode`, `copilot`, `agy`, `grok`, `mimo`, `claude` (overrides the routed vendor; host≠vendor still enforced)
+   - Value flag: `--vendor <name>` (consumes next token) — `<name>` must be a lowercase registered vendor: `codex`, `kimi`, `opencode`, `copilot`, `agy`, `grok`, `mimo`, `claude` (overrides the routed vendor; host≠vendor still enforced). **`agy` is DISABLED by default** (headless output unsupported on 1.0.12) — dispatching to it errors unless `HOPPER_ENABLE_AGY=1` is set.
    - Reject anything else.
 4. If validation fails: STOP. Print the offending input verbatim and ask the user to correct it. Do **not** invoke Bash with rejected input.
 

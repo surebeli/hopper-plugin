@@ -25,6 +25,7 @@ import {
 import {
   resolveAdapterOptsForTask,
   taskTextRequestsReadOnly,
+  assertVendorDispatchable,
 } from '../../cli/src/dispatch.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -152,6 +153,31 @@ test('taskTextRequestsReadOnly detects explicit read-only task text only', () =>
     task: { brief: 'implementation task' },
     taskSpec: '**T-SAME**\nThis is not read-only; modify files.',
   }), false);
+});
+
+test('assertVendorDispatchable: blocks a dispatch-disabled vendor (agy) without opt-in', () => {
+  assert.throws(() => assertVendorDispatchable('agy', {}), /DISABLED[\s\S]*HOPPER_ENABLE_AGY/);
+});
+
+test('assertVendorDispatchable: explicit HOPPER_ENABLE_AGY=1 allows agy through', () => {
+  assert.doesNotThrow(() => assertVendorDispatchable('agy', { HOPPER_ENABLE_AGY: '1' }));
+});
+
+test('assertVendorDispatchable: a normal vendor (grok) is always dispatchable; unknown vendor is a no-op', () => {
+  assert.doesNotThrow(() => assertVendorDispatchable('grok', {}));
+  assert.doesNotThrow(() => assertVendorDispatchable('does-not-exist', {}));
+});
+
+test('CLI blocks a dispatch to agy with the opt-in instruction (covers AGENTS.md routing)', () => {
+  const { root, hopperDir } = makeMinimalHopper('agy', { brief: 'inspect' });
+  try {
+    const r = runCli(['T-SAME'], { hopperDir, env: { HOPPER_HOST_VENDOR: 'codex' } });
+    assert.equal(r.exitCode, 1);
+    assert.match(r.stderr, /Dispatch to vendor 'agy' is DISABLED/);
+    assert.match(r.stderr, /HOPPER_ENABLE_AGY=1/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('resolveAdapterOptsForTask defaults to danger-full-access unless task text says read-only', () => {
