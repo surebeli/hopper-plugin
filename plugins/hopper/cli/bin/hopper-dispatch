@@ -13,7 +13,7 @@ import { writeOutput } from '../src/output.js';
 import { scaffoldHopper, scaffoldGovernance } from '../src/scaffold.js';
 import { renderRulesMarkdown } from '../src/rules.js';
 import { compatCheckForAdapter } from '../src/vendor-compat.js';
-import { buildVendorReadiness, summarizeReadiness, formatModelDrift } from '../src/setup.js';
+import { buildVendorReadiness, summarizeReadiness, formatModelDrift, buildRuntimeReport, buildNextSteps } from '../src/setup.js';
 import { modelKeysMatch } from '../src/model-normalize.js';
 import {
   validateTaskId,
@@ -47,7 +47,7 @@ import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
-const VERSION = '0.27.0';
+const VERSION = '0.28.0';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -1546,11 +1546,35 @@ async function runWatch(hopperDir, taskId) {
 async function runSetup({ only = null, deep = false } = {}) {
   const rows = await buildVendorReadiness({ only, deep });
   const sum = summarizeReadiness(rows);
-  const yn = (b) => (b ? 'yes' : 'no');
   const cell = (s, w) => String(s == null ? '—' : s).slice(0, w).padEnd(w);
 
-  console.log(`hopper-dispatch v${VERSION} — vendor readiness (${sum.ready}/${sum.total} ready)`);
+  // ── Runtime / prerequisites (is the host itself viable?) ──────────────────
+  const rt = buildRuntimeReport({ version: VERSION });
+  const mark = (ok) => (ok ? '✓' : '✗');
+  const hopperDir = findHopperDir();
+  console.log(`hopper-dispatch v${VERSION} — setup & readiness`);
   console.log('');
+  console.log('Runtime');
+  console.log(`  Node             ${rt.nodeVersion} ${mark(rt.nodeOk)}${rt.nodeOk ? '' : `  (hopper needs Node >= ${rt.minNodeMajor})`}`);
+  console.log(`  Platform         ${rt.platform} ${rt.arch}`);
+  console.log(`  hopper-dispatch  v${VERSION} ✓`);
+  console.log(`  Workspace        ${hopperDir ? `${hopperDir} ✓` : 'none in cwd — run --init-tasks to scaffold .hopper/'}`);
+  console.log('');
+
+  // ── Verdict ───────────────────────────────────────────────────────────────
+  const disabledNote = sum.disabled.length ? `, ${sum.disabled.length} disabled by design (${sum.disabled.join(', ')})` : '';
+  if (!rt.nodeOk) {
+    console.log(`⚠ Runtime: Node ${rt.nodeVersion} is below the required v${rt.minNodeMajor} — upgrade Node before dispatching.`);
+  } else if (sum.usable === sum.total) {
+    console.log(`✓ Ready to dispatch — ${sum.usable}/${sum.total} vendors usable.`);
+  } else if (sum.usable > 0) {
+    console.log(`✓ Ready to dispatch with ${sum.usable}/${sum.total} vendors usable${disabledNote}.`);
+  } else {
+    console.log(`⚠ No vendors usable yet — see Next steps below.`);
+  }
+  console.log('');
+
+  console.log(`Vendors (${sum.ready}/${sum.total} installed+authed)`);
   console.log('| Vendor    | Installed | Auth | Sandbox | WebSrch | Models | Caps stale |');
   console.log('|-----------|-----------|------|---------|---------|--------|------------|');
   for (const r of rows) {
@@ -1603,8 +1627,18 @@ async function runSetup({ only = null, deep = false } = {}) {
       console.log(`  ${r.name.padEnd(9)} ${verdict}${detail ? ` — ${detail}` : ''}`);
     }
     console.log('  (DRIFT is advisory: add NEW models to the adapter knownGood, or drop STALE ones. --deep also refreshed the probe cache.)');
+  }
+
+  // ── Next steps (concrete, ordered) ─────────────────────────────────────────
+  const steps = buildNextSteps(rows, sum, { hopperDir });
+  if (steps.length) {
+    console.log('\nNext steps');
+    for (const s of steps) console.log(`  • ${s}`);
   } else {
-    console.log('\nTip: `--setup --deep` adds per-vendor flag-drift + live model-catalog reconciliation (spawns `<vendor> --help` and the model-enumeration probe once each).');
+    console.log('\nNothing to do — all installed vendors are authed and ready. Dispatch with `hopper-dispatch <task-id>`.');
+  }
+  if (!deep) {
+    console.log('\nTip: `--setup --deep` adds per-vendor flag-drift + live model-catalog reconciliation (spawns `<vendor> --help` + a model probe once each).');
   }
 }
 

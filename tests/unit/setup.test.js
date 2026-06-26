@@ -3,7 +3,7 @@
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { buildVendorReadiness, summarizeReadiness, sandboxControl, webSearchSupport, formatModelDrift } from '../../cli/src/setup.js';
+import { buildVendorReadiness, summarizeReadiness, sandboxControl, webSearchSupport, formatModelDrift, buildRuntimeReport, buildNextSteps, MIN_NODE_MAJOR } from '../../cli/src/setup.js';
 import { reconcileModels } from '../../cli/src/model-normalize.js';
 import { listAdapters, getAdapter } from '../../cli/src/vendors/index.js';
 import { getVendorCache, setVendorCache } from '../../cli/src/cache.js';
@@ -22,6 +22,43 @@ test('setup: buildVendorReadiness returns one well-formed row per registered ven
     assert.ok(['yes', 'manual', 'no', '?'].includes(r.webSearch), `${r.name} webSearch`);
     assert.ok('models' in r && 'capsStaleAfter' in r);
   }
+});
+
+test('buildRuntimeReport: flags Node below the supported minimum', () => {
+  assert.equal(buildRuntimeReport({ nodeVersion: 'v22.5.0' }).nodeOk, true);
+  const old = buildRuntimeReport({ nodeVersion: 'v16.20.0' });
+  assert.equal(old.nodeOk, false);
+  assert.equal(old.nodeMajor, 16);
+  assert.equal(old.minNodeMajor, MIN_NODE_MAJOR);
+});
+
+test('summarizeReadiness: usable excludes dispatch-disabled vendors; ready does not', () => {
+  const rows = [
+    { name: 'codex', installed: true, authOk: true, capsStale: false, dispatchDisabled: null },
+    { name: 'agy', installed: true, authOk: true, capsStale: false, dispatchDisabled: { reason: 'x', enableEnv: 'HOPPER_ENABLE_AGY' } },
+  ];
+  const sum = summarizeReadiness(rows);
+  assert.equal(sum.ready, 2);   // both installed + authed
+  assert.equal(sum.usable, 1);  // agy excluded (disabled by capability)
+  assert.deepEqual(sum.disabled, ['agy']);
+});
+
+test('buildNextSteps: surfaces install / probe / disabled / workspace actions', () => {
+  const rows = [
+    { name: 'codex', installed: true, authOk: true, capsStale: false, models: ['m'], dispatchDisabled: null },
+    { name: 'kimi', installed: true, authOk: true, capsStale: false, models: [], dispatchDisabled: null }, // un-probed
+    { name: 'agy', installed: true, authOk: true, capsStale: false, models: ['m'], dispatchDisabled: { reason: 'r', enableEnv: 'HOPPER_ENABLE_AGY' } },
+    { name: 'grok', installed: false, authOk: false, capsStale: false, models: null, dispatchDisabled: null },
+  ];
+  const sum = summarizeReadiness(rows);
+  const text = buildNextSteps(rows, sum, { hopperDir: '/x/.hopper' }).join('\n');
+  assert.match(text, /Install missing vendor CLI\(s\): grok/);
+  assert.match(text, /Populate model caches/);          // kimi has no cached models
+  assert.match(text, /HOPPER_ENABLE_AGY=1/);             // agy disabled
+  assert.doesNotMatch(text, /agy 1\b/);                  // no mangled-version truncation (regression)
+
+  // missing workspace surfaces --init-tasks
+  assert.match(buildNextSteps([], summarizeReadiness([]), { hopperDir: null }).join('\n'), /--init-tasks/);
 });
 
 test('setup: sandboxControl is full for codex (always full-access), native for kimi (both not argv-downgradable)', () => {

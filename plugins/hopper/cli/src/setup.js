@@ -102,6 +102,11 @@ export async function buildVendorReadiness({ deep = false, only = null, now = ne
       capsStale: staleAfter ? now > new Date(staleAfter) : false,
       sandboxControl: adapter ? sandboxControl(adapter) : '?',
       webSearch: adapter ? webSearchSupport(adapter) : '?',
+      // Dispatch gate (e.g. agy headless-output unsupported) — disabled vendors are listed +
+      // introspectable here but blocked from dispatch unless their enableEnv is set.
+      dispatchDisabled: adapter && adapter.dispatchDisabled
+        ? { reason: adapter.dispatchDisabled.reason, enableEnv: adapter.dispatchDisabled.enableEnv }
+        : null,
       error,
       compat: null,
     };
@@ -187,6 +192,55 @@ export function summarizeReadiness(rows) {
   const notInstalled = rows.filter((r) => !r.installed).map((r) => r.name);
   const authMissing = rows.filter((r) => r.installed && !r.authOk).map((r) => r.name);
   const capsStale = rows.filter((r) => r.capsStale).map((r) => r.name);
+  const disabled = rows.filter((r) => r.dispatchDisabled).map((r) => r.name);
   const ready = rows.filter((r) => r.installed && r.authOk).length;
-  return { ready, total: rows.length, notInstalled, authMissing, capsStale };
+  // "Usable now" = installed + authed + not gated off by capability (the agy case).
+  const usable = rows.filter((r) => r.installed && r.authOk && !r.dispatchDisabled).length;
+  return { ready, usable, total: rows.length, notInstalled, authMissing, capsStale, disabled };
+}
+
+// Minimum Node major hopper supports (package.json engines.node ">=18").
+export const MIN_NODE_MAJOR = 18;
+
+/**
+ * Runtime/prerequisite report — the "is the host itself viable" check (Node version, platform,
+ * CLI version), mirroring what a good vendor `setup` shows before the per-vendor table. Pure;
+ * injectable for tests.
+ * @returns {{ nodeVersion, nodeMajor, nodeOk, minNodeMajor, platform, arch, version }}
+ */
+export function buildRuntimeReport({
+  nodeVersion = process.version, platform = process.platform, arch = process.arch, version = null,
+} = {}) {
+  const nodeMajor = Number.parseInt(String(nodeVersion).replace(/^v/, '').split('.')[0], 10);
+  const nodeOk = Number.isFinite(nodeMajor) && nodeMajor >= MIN_NODE_MAJOR;
+  return { nodeVersion, nodeMajor, nodeOk, minNodeMajor: MIN_NODE_MAJOR, platform, arch, version };
+}
+
+/**
+ * Concrete, ordered next-steps derived from the readiness rows + summary — the actionable tail
+ * a setup command should leave the user with (install, authenticate, probe, enable, scaffold).
+ * Pure; returns an array of one-line strings (empty when nothing to do).
+ */
+export function buildNextSteps(rows, sum, { hopperDir = null } = {}) {
+  const steps = [];
+  if (!hopperDir) {
+    steps.push('Not inside a hopper workspace — run `hopper-dispatch --init-tasks` to scaffold `.hopper/` here.');
+  }
+  if (sum.notInstalled.length) {
+    steps.push(`Install missing vendor CLI(s): ${sum.notInstalled.join(', ')} — \`hopper-dispatch --check ${sum.notInstalled[0]}\` shows the install command.`);
+  }
+  if (sum.authMissing.length) {
+    steps.push(`Authenticate: ${sum.authMissing.join(', ')} — \`hopper-dispatch --check ${sum.authMissing[0]}\` shows the fix.`);
+  }
+  const unprobed = rows.filter((r) => r.installed && (!r.models || r.models.length === 0)).map((r) => r.name);
+  if (unprobed.length) {
+    steps.push(`Populate model caches (optional, enables \`--model\` validation): \`hopper-dispatch --probe\` — un-probed: ${unprobed.join(', ')}.`);
+  }
+  if (sum.capsStale.length) {
+    steps.push(`Re-verify STALE capability metadata for ${sum.capsStale.join(', ')}: \`hopper-dispatch --setup --deep\`.`);
+  }
+  for (const r of rows.filter((x) => x.dispatchDisabled)) {
+    steps.push(`${r.name} is DISABLED for dispatch — enable with ${r.dispatchDisabled.enableEnv}=1 if needed (\`--vendors\` shows why).`);
+  }
+  return steps;
 }
