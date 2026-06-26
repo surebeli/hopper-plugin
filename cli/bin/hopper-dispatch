@@ -37,6 +37,7 @@ import {
   hoursSince,
   resolveVendorCwd,
 } from '../src/background.js';
+import { runArchive, findArchivedOutputMd } from '../src/archive.js';
 import { readProgressEvents } from '../src/progress.js';
 import { notify } from '../src/notify.js';
 import { resolveCommandWithKnownPaths } from '../src/path-resolve.js';
@@ -46,7 +47,7 @@ import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
-const VERSION = '0.26.0';
+const VERSION = '0.27.0';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -71,6 +72,10 @@ function printUsage() {
   console.log('  hopper-dispatch --result <task-id> [--full]     Print completed task result (verdict body + log tail); --full prints the complete sidecar text (for long review/research output)');
   console.log('  hopper-dispatch --jobs                          List all in-progress background jobs');
   console.log('  hopper-dispatch --reap                          Re-classify stale (>24h or dead-PID) jobs as orphaned');
+  console.log('  hopper-dispatch --archive [--older-than <days>] [--keep <N>] [--only-status <s,..>] [--dry-run]');
+  console.log('                                                  Move TERMINAL task artifacts from handoffs/ → .hopper/archive/<date>/.');
+  console.log('                                                  Never touches pending/in-progress or live-runner tasks. --result falls');
+  console.log('                                                  back to the archive. --dry-run previews. Recommended: --older-than 7.');
   console.log('  hopper-dispatch --stop <task-id>                Stop a running background job (kill tree; status=cancelled)');
   console.log('  hopper-dispatch --resolve <id>                  Resolve dispatch without spawning');
   console.log('  hopper-dispatch --adhoc --task-type <t> --brief "<text>" [--vendor <v>] [--id <id>] [--background]   One-off dispatch (no queue.md row); brief IS the spec');
@@ -410,6 +415,31 @@ async function main() {
     runReap(hopperDir);
     return;
   }
+  if (args.includes('--archive')) {
+    // A flag PRESENT but missing its value is an error (don't silently fall back to "archive all").
+    // Numeric flags accept negatives so downstream validation can reject them (e.g. --keep -1).
+    const numFlag = (flag) => {
+      const i = args.indexOf(flag);
+      if (i === -1) return undefined;
+      const v = args[i + 1];
+      if (v === undefined || !/^-?\d+$/.test(v)) { console.error(`Error: ${flag} requires a numeric value.`); process.exit(2); }
+      return v;
+    };
+    const strFlag = (flag) => {
+      const i = args.indexOf(flag);
+      if (i === -1) return undefined;
+      const v = args[i + 1];
+      if (v === undefined || v.startsWith('-')) { console.error(`Error: ${flag} requires a value.`); process.exit(2); }
+      return v;
+    };
+    runArchiveCommand(hopperDir, {
+      olderThanDays: numFlag('--older-than'),
+      keep: numFlag('--keep'),
+      statuses: strFlag('--only-status'),
+      dryRun: args.includes('--dry-run'),
+    });
+    return;
+  }
   const stopIdx = args.indexOf('--stop');
   if (stopIdx !== -1) {
     const taskId = args[stopIdx + 1];
@@ -546,7 +576,7 @@ async function main() {
  */
 function parseDispatchArgs(args) {
   const META_FLAGS = new Set(['--help', '-h', '--version', '-v', '--smoke', '--status',
-    '--task-types', '--vendors', '--rules', '--resolve', '--watch', '--progress', '--watch-events', '--replay', '--jobs', '--reap', '--stop',
+    '--task-types', '--vendors', '--rules', '--resolve', '--watch', '--progress', '--watch-events', '--replay', '--jobs', '--reap', '--stop', '--archive',
     '--check', '--capabilities', '--probe', '--models', '--setup', '--doctor', '--init-tasks', '--init-governance']);
   const VALUE_FLAGS = new Set(ALLOWED_DISPATCH_VALUE_FLAGS);
   const BARE_FLAGS = new Set(ALLOWED_DISPATCH_FLAGS);
@@ -978,6 +1008,34 @@ function runReap(hopperDir) {
   for (const id of reaped) console.log(`  - ${id}`);
 }
 
+// Archive terminal-task artifacts out of handoffs/ into .hopper/archive/<date>/.
+// Selection (the "when") is expressed via flags; the move (the "how") is in src/archive.js.
+function runArchiveCommand(hopperDir, raw) {
+  const olderThanDays = raw.olderThanDays != null ? Number(raw.olderThanDays) : null;
+  const keep = raw.keep != null ? Number(raw.keep) : 0;
+  if (olderThanDays != null && (!Number.isFinite(olderThanDays) || olderThanDays < 0)) {
+    console.error('Error: --older-than requires a non-negative number of days.'); process.exit(2);
+  }
+  if (!Number.isInteger(keep) || keep < 0) {
+    console.error('Error: --keep requires a non-negative integer.'); process.exit(2);
+  }
+  const statuses = raw.statuses ? raw.statuses.split(',').map((s) => s.trim()).filter(Boolean) : null;
+  const dateLabel = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (CLI process — Date is fine)
+  const res = runArchive(hopperDir, { olderThanDays, keep, statuses, dryRun: Boolean(raw.dryRun), dateLabel });
+
+  console.log(`hopper-dispatch v${VERSION} — archive${res.dryRun ? ' (dry-run)' : ''}`);
+  console.log(`  ${res.dryRun ? 'Would archive' : 'Archived'}: ${res.archivedCount} task(s), ${res.fileCount} file(s)`
+    + `${res.archivedCount ? ` → ${res.destDir}` : ''}`);
+  for (const m of res.moved) console.log(`    - ${m.taskId} [${m.status}] (${m.files.length} files)${m.partial ? ' ⚠ PARTIAL — some artifacts could not be moved (left in handoffs/)' : ''}`);
+  if (res.partialCount) console.log(`  ⚠ ${res.partialCount} task(s) archived partially — re-run --archive to retry the stranded files.`);
+  const counts = {};
+  for (const s of res.skipped) counts[s.reason] = (counts[s.reason] || 0) + 1;
+  const reasons = Object.entries(counts).sort().map(([r, n]) => `${n} ${r}`).join(', ');
+  if (reasons) console.log(`  Skipped: ${reasons} (in-progress / live-runner / non-terminal are never archived)`);
+  if (res.dryRun) console.log('  Dry-run: nothing moved. Re-run without --dry-run to archive.');
+  else if (res.archivedCount) console.log('  Results remain retrievable: `--result <id>` falls back to the archive.');
+}
+
 // HOPPER-4: scaffold a fresh .hopper/ workspace in targetDir.
 function runInitTasks(targetDir, { force = false } = {}) {
   let result;
@@ -1278,10 +1336,17 @@ function runResult(hopperDir, taskId, { full = false } = {}) {
   try { validateTaskId(taskId); }
   catch (err) { console.error(`Error: ${err.message}`); process.exit(2); }
 
-  const outputMdPath = join(hopperDir, 'handoffs', `${taskId}-output.md`);
+  let outputMdPath = join(hopperDir, 'handoffs', `${taskId}-output.md`);
   if (!existsSync(outputMdPath)) {
-    console.error(`Error: no output file at ${outputMdPath}. Has this task been dispatched?`);
-    process.exit(1);
+    // Fall back to the archive — an archived task's result is still retrievable.
+    const archived = findArchivedOutputMd(hopperDir, taskId);
+    if (archived) {
+      outputMdPath = archived;
+      console.error(`(reading from archive: ${archived})`);
+    } else {
+      console.error(`Error: no output file at ${outputMdPath} (and none in .hopper/archive/). Has this task been dispatched?`);
+      process.exit(1);
+    }
   }
 
   let fm;

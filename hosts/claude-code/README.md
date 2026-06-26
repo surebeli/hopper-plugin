@@ -119,6 +119,13 @@ notification per historical task in `handoffs/` (which spammed the chat on start
 when a project had accumulated completed tasks). Use `--once` to emit the first event
 then exit, or `--replay` to deliberately emit the existing backlog too.
 
+**Keeping `handoffs/` lean (archival):** baselining stops the monitor from *replaying*
+the backlog; `hopper-dispatch --archive` *removes* it. It moves finished task artifacts
+to `.hopper/archive/<date>/` (results stay retrievable — `--result` falls back to the
+archive), never touching pending / in-progress / live-runner tasks. Recommended cadence and
+the full when/how policy: `docs/specs/handoff-archival.md`. Quick start:
+`hopper-dispatch --archive --older-than 7 --dry-run`.
+
 If Claude Code starts in a directory that is not a hopper workspace, the monitor
 quietly exits without notifications. Set `HOPPER_DIR=/path/to/.hopper` when you
 want the monitor to follow a different workspace.
