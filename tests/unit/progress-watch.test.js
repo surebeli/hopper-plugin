@@ -276,6 +276,47 @@ test('single --watch-events subscriber does not duplicate one terminal event', a
   }
 });
 
+test('--watch-events baselines a pre-existing terminal backlog (no replay) but still emits NEW transitions', async () => {
+  // Regression: a (re)started monitor must NOT re-fire the whole handoffs/ backlog each session
+  // (the spam the Claude Code monitor produced). Tasks already terminal at start are baselined.
+  const { tmp, hopperDir } = setup();
+  let watcher;
+  try {
+    writeTask(hopperDir, 'T-OLD-1'); markTerminal(hopperDir, 'T-OLD-1', 'done', 1);
+    writeTask(hopperDir, 'T-OLD-2'); markTerminal(hopperDir, 'T-OLD-2', 'failed', 3);
+
+    watcher = spawnWatchEvents(hopperDir, ['--watch-events']);
+    await delay(1200);
+    assert.equal(watcher.lines.length, 0, `backlog must not be replayed; got: ${watcher.lines.join('\n')}`);
+
+    // A NEW terminal transition after the watcher started MUST still emit (the watcher's real job).
+    writeTask(hopperDir, 'T-NEW'); markTerminal(hopperDir, 'T-NEW', 'done', 1);
+    const line = await waitFor(() => watcher.lines[0], 'new terminal line');
+    assert.equal(JSON.parse(line).task_id, 'T-NEW');
+    assert.equal(watcher.lines.length, 1);
+  } finally {
+    if (watcher) stop(watcher.child);
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('--watch-events --replay DOES emit the pre-existing terminal backlog (opt-in to the old behavior)', async () => {
+  const { tmp, hopperDir } = setup();
+  let watcher;
+  try {
+    writeTask(hopperDir, 'T-OLD-A'); markTerminal(hopperDir, 'T-OLD-A', 'done', 1);
+    writeTask(hopperDir, 'T-OLD-B'); markTerminal(hopperDir, 'T-OLD-B', 'failed', 2);
+
+    watcher = spawnWatchEvents(hopperDir, ['--watch-events', '--replay']);
+    await waitFor(() => watcher.lines.length >= 2, 'replayed backlog');
+    const ids = watcher.lines.map((l) => JSON.parse(l).task_id).sort();
+    assert.deepEqual(ids, ['T-OLD-A', 'T-OLD-B']);
+  } finally {
+    if (watcher) stop(watcher.child);
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('--watch-events --once exits after first terminal event from atomic frontmatter write', async () => {
   const { tmp, hopperDir } = setup();
   const taskId = 'T-WATCH-ONCE';

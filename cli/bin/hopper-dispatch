@@ -46,7 +46,7 @@ import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
-const VERSION = '0.25.0';
+const VERSION = '0.26.0';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -64,7 +64,10 @@ function printUsage() {
   console.log('  hopper-dispatch <task-id> --sandbox <mode>      Override vendor permission (read-only|workspace-write|danger-full-access)');
   console.log('  hopper-dispatch --watch <task-id>               Tail-follow a background job until exit');
   console.log('  hopper-dispatch --progress <task-id>            Show background task phase + recent progress events');
-  console.log('  hopper-dispatch --watch-events [--once]         Emit terminal task events as stdout JSONL');
+  console.log('  hopper-dispatch --watch-events [--once] [--replay]  Stream NEW terminal task events as JSONL. The existing handoffs/');
+  console.log('                                                  backlog is baselined (NOT replayed) so a (re)started watcher does not');
+  console.log('                                                  re-fire history. --once: emit the first event then exit. --replay: also');
+  console.log('                                                  emit the existing terminal backlog on start (the pre-fix behavior).');
   console.log('  hopper-dispatch --result <task-id> [--full]     Print completed task result (verdict body + log tail); --full prints the complete sidecar text (for long review/research output)');
   console.log('  hopper-dispatch --jobs                          List all in-progress background jobs');
   console.log('  hopper-dispatch --reap                          Re-classify stale (>24h or dead-PID) jobs as orphaned');
@@ -418,7 +421,7 @@ async function main() {
     return;
   }
   if (args.includes('--watch-events')) {
-    runWatchEvents(hopperDir, { once: args.includes('--once') });
+    runWatchEvents(hopperDir, { once: args.includes('--once'), replay: args.includes('--replay') });
     return;
   }
   const watchIdx = args.indexOf('--watch');
@@ -543,7 +546,7 @@ async function main() {
  */
 function parseDispatchArgs(args) {
   const META_FLAGS = new Set(['--help', '-h', '--version', '-v', '--smoke', '--status',
-    '--task-types', '--vendors', '--rules', '--resolve', '--watch', '--progress', '--watch-events', '--jobs', '--reap', '--stop',
+    '--task-types', '--vendors', '--rules', '--resolve', '--watch', '--progress', '--watch-events', '--replay', '--jobs', '--reap', '--stop',
     '--check', '--capabilities', '--probe', '--models', '--setup', '--doctor', '--init-tasks', '--init-governance']);
   const VALUE_FLAGS = new Set(ALLOWED_DISPATCH_VALUE_FLAGS);
   const BARE_FLAGS = new Set(ALLOWED_DISPATCH_FLAGS);
@@ -1159,6 +1162,7 @@ export function runWatchEvents(
   hopperDir,
   {
     once = false,
+    replay = false,
     notifyFn = notify,
     writeLine = (line) => console.log(line),
     exitFn = (code) => process.exit(code),
@@ -1180,7 +1184,7 @@ export function runWatchEvents(
     if (code !== null) exitFn(code);
   }
 
-  function maybeEmit(outputMdPath) {
+  function maybeEmit(outputMdPath, { silent = false } = {}) {
     if (stopped || !existsSync(outputMdPath)) return;
 
     let fm;
@@ -1198,6 +1202,9 @@ export function runWatchEvents(
     if (previousSeq !== undefined && previousSeq >= seq) return;
 
     lastSeenSeq.set(taskId, seq);
+    // Baseline-prime: record the seq so a future change is detected as new, but do NOT emit/notify
+    // for a task that was ALREADY terminal when the watcher started (prevents backlog replay).
+    if (silent) return;
     const payload = terminalPayload(handoffDir, outputMdPath, fm);
     writeLine(JSON.stringify(payload));
     notifyFn({
@@ -1208,23 +1215,29 @@ export function runWatchEvents(
     if (once) cleanup(0);
   }
 
-  function watchOutput(outputMdPath) {
+  function watchOutput(outputMdPath, { prime = false } = {}) {
     if (watched.has(outputMdPath)) return;
     watched.add(outputMdPath);
     watchFile(outputMdPath, { interval: WATCH_EVENTS_INTERVAL_MS }, (curr, prev) => {
       if (curr.mtimeMs === prev.mtimeMs && curr.size === prev.size) return;
-      maybeEmit(outputMdPath);
+      maybeEmit(outputMdPath); // a CHANGE after we began watching is always a NEW transition → emit
     });
-    maybeEmit(outputMdPath);
+    maybeEmit(outputMdPath, { silent: prime }); // initial pass: baseline-only when priming
   }
 
-  function scanOutputs() {
+  function scanOutputs({ prime = false } = {}) {
     for (const outputMdPath of listOutputMarkdownFiles(handoffDir)) {
-      watchOutput(outputMdPath);
+      watchOutput(outputMdPath, { prime });
     }
   }
 
-  scanOutputs();
+  // Streaming monitor (no --once): PRIME the baseline — record the tasks that are ALREADY terminal
+  // when the watcher starts WITHOUT emitting them, so it reports only NEW terminal transitions and
+  // never replays the whole handoffs/ backlog on every (re)start (which spammed one notification
+  // per historical task each session). --once (current snapshot) and --replay (opt back into the old
+  // emit-all behavior) keep emitting existing terminals. Matches the documented intent below: a
+  // persistent monitor observes tasks that reach terminal AFTER it starts.
+  scanOutputs({ prime: !once && !replay });
   scanTimer = setInterval(scanOutputs, WATCH_EVENTS_INTERVAL_MS);
   if (once) {
     // `--once` must be able to exit: don't let the scan interval keep the loop

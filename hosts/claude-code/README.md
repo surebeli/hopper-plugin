@@ -112,6 +112,13 @@ Claude Code delivers those stdout lines to the interactive session as monitor
 notifications. The monitor is active only in Claude Code hosts where the
 Monitor tool is available.
 
+**Backlog baselining (default):** on each (re)start the watcher records the tasks
+that are ALREADY terminal as a silent baseline and emits ONLY tasks that reach a
+terminal state AFTER it starts. This stops a fresh session from re-firing one
+notification per historical task in `handoffs/` (which spammed the chat on startup
+when a project had accumulated completed tasks). Use `--once` to emit the first event
+then exit, or `--replay` to deliberately emit the existing backlog too.
+
 If Claude Code starts in a directory that is not a hopper workspace, the monitor
 quietly exits without notifications. Set `HOPPER_DIR=/path/to/.hopper` when you
 want the monitor to follow a different workspace.
