@@ -83,8 +83,34 @@ function emitScalar(v) {
 }
 
 /**
+ * Sync the background output.md H1 heading to the frontmatter status. The heading
+ * is written ONCE at dispatch as `# <id> — <adapter> (background, in-progress)`
+ * (see runBackgroundDispatch); every terminal writer only APPENDS to `_body`, so
+ * the H1 would otherwise stay "in-progress" forever on a done/failed/cancelled/
+ * orphaned task — misleading anyone who opens the .md directly or views it in the
+ * dashboard, even though the frontmatter + `--result` are already correct.
+ *
+ * Rewrites ONLY that exact hopper-generated H1 marker (a `#` line whose text ends
+ * in `(background, <state>)`); appended `##` sections and vendor body text are
+ * never touched (they carry no `(background, ` comma-marker). Idempotent, and a
+ * no-op when status is falsy / still `in-progress` or the marker is absent (so it
+ * is safe on the creation + per-progress writes, which all keep status
+ * in-progress, and on any non-background frontmatter file). Pure — exported for
+ * unit testing.
+ *
+ * @param {string} body
+ * @param {string|undefined|null} status
+ * @returns {string}
+ */
+export function syncBackgroundHeading(body, status) {
+  if (!status || status === 'in-progress') return body;
+  return String(body).replace(/^(#[^\n]*\(background, )[^)\n]*(\))/m, `$1${status}$2`);
+}
+
+/**
  * Write frontmatter back atomically via unique tmp-file + rename. Preserves
- * _body verbatim. Drops keys whose values are undefined.
+ * _body verbatim (aside from syncing the background H1 heading to a terminal
+ * status — see syncBackgroundHeading). Drops keys whose values are undefined.
  *
  * Per codex Phase 5 audit P1 #4: previously used `path + '.tmp'` which
  * allowed concurrent writers to clobber each other's tmp file. Now uses
@@ -95,12 +121,13 @@ function emitScalar(v) {
  */
 export function writeFrontmatter(path, fm) {
   const { _body = '', ...rest } = fm;
+  const body = syncBackgroundHeading(_body, rest.status);
   const lines = [];
   for (const [k, v] of Object.entries(rest)) {
     if (v === undefined) continue;
     lines.push(`${k}: ${emitScalar(v)}`);
   }
-  const out = `---\n${lines.join('\n')}\n---\n${_body}`;
+  const out = `---\n${lines.join('\n')}\n---\n${body}`;
   const tmp = `${path}.tmp.${process.pid}.${Date.now()}`;
   writeFileSync(tmp, out, 'utf-8');
   renameSync(tmp, path);

@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import {
-  readFrontmatter, writeFrontmatter,
+  readFrontmatter, writeFrontmatter, syncBackgroundHeading,
   isAlive, hoursSince,
   preflightDispatch, listInProgressJobs, reapStaleJobs,
   ORPHAN_CEILING_HOURS,
@@ -160,6 +160,63 @@ test('writeFrontmatter no leftover tmp file', () => {
     writeFrontmatter(path, { task_id: 'T-1', _body: '' });
     assert.ok(existsSync(path));
     assert.ok(!existsSync(path + '.tmp'));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ─── syncBackgroundHeading (H1 tracks terminal status) ────────────────
+
+const H1 = '\n# T-1 — kimi (background, in-progress)\n\nOutput streaming to `T-1-output.log`. Status updates here.\n';
+
+test('syncBackgroundHeading rewrites the H1 marker to a terminal status', () => {
+  const out = syncBackgroundHeading(H1, 'done');
+  assert.match(out, /# T-1 — kimi \(background, done\)/);
+  assert.doesNotMatch(out, /in-progress/);
+});
+
+test('syncBackgroundHeading handles every terminal status', () => {
+  for (const s of ['done', 'failed', 'cancelled', 'orphaned', 'timeout']) {
+    assert.match(syncBackgroundHeading(H1, s), new RegExp(`\\(background, ${s}\\)`));
+  }
+});
+
+test('syncBackgroundHeading is a no-op for in-progress / falsy status', () => {
+  assert.equal(syncBackgroundHeading(H1, 'in-progress'), H1);
+  assert.equal(syncBackgroundHeading(H1, undefined), H1);
+  assert.equal(syncBackgroundHeading(H1, null), H1);
+  assert.equal(syncBackgroundHeading(H1, ''), H1);
+});
+
+test('syncBackgroundHeading is idempotent', () => {
+  const once = syncBackgroundHeading(H1, 'done');
+  assert.equal(syncBackgroundHeading(once, 'done'), once);
+});
+
+test('syncBackgroundHeading only touches the H1 marker, not appended sections or vendor text', () => {
+  // Appended terminal sections + vendor text that mentions "(background completion)"
+  // and even a literal "in-progress" word must survive untouched.
+  const body = H1 +
+    '\n## Vendor output (parsed)\n\n```\nthe migration is in-progress upstream\n```\n' +
+    '\n## Status (background completion)\n- queue_status: done\n';
+  const out = syncBackgroundHeading(body, 'done');
+  assert.match(out, /# T-1 — kimi \(background, done\)/);       // H1 flipped
+  assert.match(out, /the migration is in-progress upstream/);   // vendor text intact
+  assert.match(out, /## Status \(background completion\)/);     // h2 heading intact
+});
+
+test('writeFrontmatter syncs the H1 heading when a terminal status is written', () => {
+  const { tmp } = makeTmpHopper();
+  try {
+    const path = join(tmp, 'T-1-output.md');
+    // Create as in-progress, then flip to done via a terminal-style append.
+    writeFrontmatter(path, { task_id: 'T-1', status: 'in-progress', _body: H1 });
+    const created = readFrontmatter(path);
+    assert.match(created._body, /\(background, in-progress\)/);
+    writeFrontmatter(path, { ...created, status: 'done', _body: created._body + '\n## Status\n- done\n' });
+    const done = readFrontmatter(path);
+    assert.match(done._body, /\(background, done\)/);
+    assert.doesNotMatch(done._body, /\(background, in-progress\)/);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
