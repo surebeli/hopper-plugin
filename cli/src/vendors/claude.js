@@ -44,6 +44,18 @@ export const claudeAdapter = {
   promptStdin: 'supported',
   promptStdinDefault: true,
 
+  // Idle-watchdog hint (ISSUE-grok-claude-buffered-output-idle-falsekill): claude
+  // `-p --output-format json` (passed in args() below) is END-BUFFERED — the
+  // vendor writes stdout ONCE at completion, not incrementally (see the
+  // `streaming` capability note and parseResult's "single trailing result
+  // object" comment further down). hopper-runner's background idle poll resets
+  // only on log-FILE-size growth, so for a fully-buffered vendor that never
+  // grows the log until exit, idle degenerates into an unconditional kill
+  // ~idleMs after spawn. This flag tells the runner to skip arming that poll
+  // entirely for claude (the absolute ceiling timeout still applies as the
+  // safety net).
+  bufferedOutput: true,
+
   // Phase 6a static capability hint (no live vendor introspection — would break
   // the single-spawn proof). Source: code.claude.com/docs/en/cli-reference.
   capabilities: {

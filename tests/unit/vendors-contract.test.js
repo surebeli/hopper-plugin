@@ -310,6 +310,21 @@ test('mimo declares an idleHeartbeatRe matching the /session/status poll but NOT
   assert.ok(!a.idleHeartbeatRe.test('{"type":"step_finish","part":{}}'));
 });
 
+// ISSUE-grok-claude-buffered-output-idle-falsekill: grok/claude `--output-format
+// json` write stdout ONCE at completion, so hopper-runner's log-growth idle poll
+// must never be armed for them (mirrors the idleHeartbeatRe hook above — a
+// different adapter-declared hint consumed by the same runner idle-detector).
+test('grok and claude declare bufferedOutput:true (end-buffered --output-format json)', () => {
+  assert.equal(getAdapter('grok').bufferedOutput, true, 'grok must declare bufferedOutput');
+  assert.equal(getAdapter('claude').bufferedOutput, true, 'claude must declare bufferedOutput');
+});
+
+test('other adapters do NOT declare bufferedOutput (streaming/incremental vendors keep the idle poll armed)', () => {
+  for (const name of ['codex', 'kimi', 'opencode', 'copilot', 'agy', 'mimo']) {
+    assert.notEqual(getAdapter(name).bufferedOutput, true, `${name} must NOT declare bufferedOutput`);
+  }
+});
+
 test('copilot adapter soft-warns (mentioning GH_TOKEN) only when NO auth source is detectable', () => {
   // copilot can auth via an env token, the gh CLI cache, OR its own ~/.copilot login
   // profile. With NONE of those present it SOFT-WARNS (ok:true + a note naming the

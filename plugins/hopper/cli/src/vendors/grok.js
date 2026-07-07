@@ -40,6 +40,18 @@ export const grokAdapter = {
   command: 'grok',
   stdinMode: 'none',
 
+  // Idle-watchdog hint (ISSUE-grok-claude-buffered-output-idle-falsekill): grok
+  // `--output-format json` (passed in args() below) is END-BUFFERED — the vendor
+  // writes stdout ONCE at completion, not incrementally (see the `streaming`
+  // capability note and parseResult's "single trailing JSON object" comment
+  // further down).
+  // hopper-runner's background idle poll resets only on log-FILE-size growth, so
+  // for a fully-buffered vendor that never grows the log until exit, idle
+  // degenerates into an unconditional kill ~idleMs after spawn. This flag tells
+  // the runner to skip arming that poll entirely for grok (the absolute ceiling
+  // timeout still applies as the safety net).
+  bufferedOutput: true,
+
   capabilities: {
     modelArg: {
       accepted: 'freeform',

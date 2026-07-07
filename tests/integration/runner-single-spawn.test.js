@@ -27,7 +27,7 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, chmodSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSync, rmSync, chmodSync } from 'node:fs';
 import { tmpdir, platform } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -342,6 +342,199 @@ test('hopper-runner appends exactly one timeout terminal progress event', async 
     assert.equal(events[0].adapter_status, 'timeout');
     assert.equal(events[0].timed_out, true);
     assert.equal(events[0].message, 'Task timed out.');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ─── Idle watchdog vs. end-buffered vendor output (ISSUE-grok-claude-buffered-output-idle-falsekill) ──
+//
+// Root cause: grok/claude spawn with `--output-format json`, which BUFFERS all
+// output and writes stdout exactly ONCE, at process exit (cli/src/vendors/grok.js
+// args()/parseResult() comments; cli/src/vendors/claude.js args()/parseResult()
+// comments). The idle watchdog above (idlePoll setInterval) resets its silence
+// clock ONLY on log-FILE-size growth (statSync polling of the shared vendor
+// log) — for a vendor that never grows the log until it is already done, idle
+// degenerates into an unconditional kill ~idleMs after spawn. Real kills were
+// observed at 185053ms / 605213ms for idleMs=180000 / 600000 — one ~5s poll
+// tick past idleMs, every time.
+//
+// Fix: grok/claude adapters now declare `bufferedOutput: true`; hopper-runner
+// skips arming the idle poll entirely when the resolved adapter sets that flag,
+// leaving only the absolute ceiling timeout as the safety net (mirrors the
+// existing `idleHeartbeatRe` adapter-declared-hook precedent for mimo, above).
+//
+// Test A proves the FAILURE MODE this fix corrects (using an adapter that does
+// NOT declare bufferedOutput). Test B proves the FIX (using the real grok
+// adapter, which now declares bufferedOutput: true). Placed beside the timeout
+// test above (closest-matching existing suite/helper shape) rather than in a
+// separate file, so the integration run's concurrent-file count stays the same.
+
+/**
+ * Spawn hopper-runner against a PATH-shimmed fake vendor binary that mimics an
+ * END-BUFFERED CLI (grok/claude's `--output-format json` shape): it stays
+ * completely silent for `silentMs`, then writes ONE final blob to stdout and
+ * exits 0. Silence before that point produces ZERO log growth, exactly like
+ * the real vendors.
+ */
+async function runRunnerWithBufferedStub({ taskId, hopperDir, adapterName, command, silentMs, answerText, extraEnv = {} }) {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-buffered-'));
+  try {
+    const shimDir = join(tmp, 'shim');
+    mkdirSync(shimDir);
+
+    // The stub NEVER writes/exits before `silentMs` — no interim flush, no
+    // partial line, matching a truly end-buffered vendor.
+    const fakeScript = join(tmp, 'fake-vendor.js');
+    writeFileSync(fakeScript, `
+      setTimeout(() => {
+        process.stdout.write(${JSON.stringify(answerText)});
+        process.exit(0);
+      }, ${silentMs});
+    `, 'utf-8');
+
+    const shimPath = join(shimDir, command);
+    writeFileSync(shimPath, `#!/usr/bin/env bash\nexec node "${fakeScript}" "$@"\n`, 'utf-8');
+    chmodSync(shimPath, 0o755);
+
+    const outputMdPath = join(hopperDir, 'handoffs', `${taskId}-output.md`);
+    const logPath = outputMdPath.replace(/\.md$/, '.log');
+    writeFrontmatter(outputMdPath, {
+      task_id: taskId,
+      adapter: adapterName,
+      status: 'in-progress',
+      pid: null,
+      start_time: new Date().toISOString(),
+      end_time: null,
+      exit_code: null,
+      duration_ms: null,
+      mode: 'background',
+      log: `./${taskId}-output.log`,
+      _body: '',
+    });
+
+    const childEnv = {
+      ...process.env,
+      ...extraEnv,
+      PATH: shimDir + ':' + (process.env.PATH || ''),
+      HOPPER_RUNNER_INVOKED: '1',
+    };
+
+    const result = await new Promise((resolveP, rejectP) => {
+      const child = spawn(process.execPath, [
+        RUNNER_PATH,
+        '--task-id', taskId,
+        '--hopper-dir', hopperDir,
+        '--adapter', adapterName,
+        '--output-md', outputMdPath,
+        '--log', logPath,
+        '--',
+        // Argv content is irrelevant — the shim ignores it and always runs
+        // fakeScript, but keep it plausible for diagnostics.
+        '-p', 'test prompt', '--output-format', 'json',
+      ], {
+        env: childEnv,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let stderr = '';
+      child.stderr.on('data', (c) => { stderr += c.toString(); });
+      const timer = setTimeout(() => { child.kill('SIGKILL'); rejectP(new Error('runner timeout')); }, 15000);
+      child.on('exit', (code, signal) => { clearTimeout(timer); resolveP({ code, signal, stderr }); });
+      child.on('error', (err) => { clearTimeout(timer); rejectP(err); });
+    });
+
+    return { outputMdPath, logPath, result };
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+test('Test A (repro): NO bufferedOutput — end-buffered stub is falsely idle-killed before it can ever write', { skip: platform() === 'win32' ? 'PATH-shim .cmd not executable on Windows; covered by Test B + hopper-runner code inspection' : false }, async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-idle-repro-'));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    mkdirSync(join(hopperDir, 'handoffs'), { recursive: true });
+
+    // 'opencode' is a real registered adapter that does NOT declare
+    // bufferedOutput (nor idleHeartbeatRe) — the pre-fix shape shared by
+    // grok/claude before this fix. silentMs=60000 guarantees the stub's
+    // scheduled write+exit never fires inside this test's window, so the ONLY
+    // thing that can end this process is the runner's own idle-kill.
+    const { outputMdPath, logPath, result } = await runRunnerWithBufferedStub({
+      taskId: 'T-idle-repro',
+      hopperDir,
+      adapterName: 'opencode',
+      command: 'opencode',
+      silentMs: 60000,
+      answerText: JSON.stringify({ text: 'never delivered — killed first' }),
+      extraEnv: { HOPPER_IDLE_TIMEOUT_MS: '500' },
+    });
+
+    assert.notEqual(result.code, 0, 'an idle-killed run must not exit 0');
+
+    const fm = readFrontmatter(outputMdPath);
+    assert.equal(fm.status, 'failed', 'idle kill must be classified failed');
+    assert.equal(fm.phase, 'timeout');
+    assert.equal(fm.timed_out, true);
+    // Only HOPPER_IDLE_TIMEOUT_MS was overridden — ceilingMs stays at its normal
+    // >=30min floor (resolveDispatchTimeouts / CEILING_FLOOR_MS). A kill this
+    // fast (well under this test's 15s harness cap) can ONLY be the idle poll;
+    // the ceiling timer literally cannot fire for another ~1800s. That is what
+    // unambiguously proves the *idle-timeout* reason (hopper-runner does not
+    // surface the internal 'idle'|'ceiling' string anywhere externally).
+    assert.ok(fm.duration_ms < 10000, `expected a fast idle kill, got duration_ms=${fm.duration_ms}`);
+
+    // The decisive assertion: the vendor was killed before it ever got a chance
+    // to write its single trailing blob (scheduled for silentMs=60000, far
+    // beyond the idle kill) — so the raw log the runner opened for it is still
+    // exactly 0 bytes, exactly like the real grok/claude false-kill.
+    assert.ok(existsSync(logPath), 'log file must exist (opened by the runner for the vendor fds)');
+    assert.equal(statSync(logPath).size, 0, 'pre-kill log must be 0 bytes — the end-buffered vendor never got to write');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('Test B (fix): bufferedOutput:true (real grok adapter) — idle poll is never armed, so the same stub shape completes naturally and is parsed as success', { skip: platform() === 'win32' ? 'PATH-shim .cmd not executable on Windows' : false }, async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-idle-fix-'));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    mkdirSync(join(hopperDir, 'handoffs'), { recursive: true });
+
+    // Same stub SHAPE as Test A (silent, then a single trailing write + exit 0)
+    // — but silentMs=2500 is now LARGER than idleMs=500 below, so under the
+    // PRE-FIX behavior this run would ALSO have been idle-killed before its
+    // natural exit (same failure as Test A). Dispatched through the REAL grok
+    // adapter (declares bufferedOutput: true after this fix), exercising the
+    // actual production capability flag rather than a test double. The answer
+    // shape satisfies grok's real parseResult(): a bare {text, stopReason} JSON
+    // object (see cli/src/vendors/grok.js extractGrokText()).
+    const { outputMdPath, logPath, result } = await runRunnerWithBufferedStub({
+      taskId: 'T-idle-fix',
+      hopperDir,
+      adapterName: 'grok',
+      command: 'grok',
+      silentMs: 2500,
+      answerText: JSON.stringify({ text: 'GROK_BUFFERED_ANSWER', stopReason: 'stop' }),
+      extraEnv: { HOPPER_IDLE_TIMEOUT_MS: '500' },
+    });
+
+    assert.equal(result.code, 0, 'a natural success must exit 0');
+    assert.match(result.stderr, /idle watchdog disabled \(bufferedOutput vendor\)/,
+      'runner must emit the diagnosable status line for a bufferedOutput adapter');
+
+    const fm = readFrontmatter(outputMdPath);
+    assert.equal(fm.status, 'done', 'bufferedOutput vendor must complete naturally, not be idle-killed');
+    assert.equal(fm.adapter_status, 'success');
+    assert.notEqual(fm.timed_out, true);
+    assert.ok(fm.duration_ms >= 2500, `must have run to its natural ~2500ms completion, got duration_ms=${fm.duration_ms}`);
+
+    // Output was actually PARSED (not just "didn't crash"): grok's parseResult
+    // extracts .text from the trailing JSON object, and the runner embeds the
+    // parsed answer into output.md's "Vendor output (parsed)" section.
+    const md = readFileSync(outputMdPath, 'utf-8');
+    assert.match(md, /GROK_BUFFERED_ANSWER/, 'the parsed vendor answer must be embedded in output.md');
+    assert.ok(statSync(logPath).size > 0, 'the raw log DOES eventually hold the single trailing write (post-completion)');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
