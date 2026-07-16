@@ -469,12 +469,22 @@ hopper-dispatch --models opencode          # one vendor only
 
 If you pass `--model X` and X is not in the cached list for the resolved vendor, `runDispatch` prints a non-blocking warning + suggests `--probe <vendor>` to refresh. Stale cache (>14 days) also prints a note. Both are advisory — dispatch proceeds either way (vendor may have added a model not yet in cache).
 
+### `hopper-dispatch --check-model <vendor> <model>` — assertion pre-check
+
+The soft-warn above never blocks — a bad model name's first hard signal was previously a live vendor 400 at dispatch. `--check-model` is the assertion-style alternative: same static `knownGood` + probe-cache sources (zero-spawn, no cache write), but a three-tier verdict with a distinct exit code per tier so a caller can actually gate on it:
+
+- `verified` (exit 0) — on the adapter's knownGood/V-verified list.
+- `catalog-only` (exit 2) — in the probed catalog but not yet promoted to knownGood; catalog inclusion is the vendor's own listing command, not proof the installed CLI version accepts it at dispatch (a bundled catalog can list a model an older CLI still rejects with 400 — see `cli/src/vendors/codex.js`'s `gpt-5.6-*` note).
+- `not-found` (exit 1) — neither list has it. Degrades to a knownGood-only check (with an explicit note) when the vendor has never been probed.
+
+`--model X --reasoning Y` typo'd into one string (`gpt-5.5-xhigh`) gets its own `effort-spliced` verdict (exit 1) instead of a generic not-found. `--json` emits `{vendor, model, normalized, verdict, verified_list, catalog, hint}` for scripting. See `cli/src/model-check.js`.
+
 ### Carve-out from single-spawn invariant (spec §3 #4)
 
 Spec §3 #4 mandates ONE dispatch = ONE subprocess. Probe explicitly carves itself out:
 
-- `--check` and `--capabilities` stay **zero-spawn** (covered by `tests/unit/discovery.test.js` + `tests/unit/vendor-probe.test.js`)
-- `vendor-probe/*.js` modules are **lazy-imported** by `vendors/index.js` only when `probeVendor()` is called; never loaded for `--check`/`--capabilities`
+- `--check`, `--capabilities`, and `--check-model` stay **zero-spawn** (covered by `tests/unit/discovery.test.js` + `tests/unit/vendor-probe.test.js` + `tests/unit/model-check.test.js`)
+- `vendor-probe/*.js` modules are **lazy-imported** by `vendors/index.js` only when `probeVendor()` is called; never loaded for `--check`/`--capabilities`/`--check-model`
 - Test enforces `cli/src/vendors/index.js` uses dynamic `await import('../vendor-probe/...')` to prevent accidental eager wiring
 
 This keeps the dispatch hot path identical to v0.4 spawn-budget while giving Phase 6b a budgeted diagnostic surface.

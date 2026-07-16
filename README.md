@@ -33,6 +33,11 @@ A background dispatch writes `output.md`, `output.log`, and `progress.log`. The 
 string. `gpt-5.5-xhigh` is wrong: that glues a model (`gpt-5.5`) to an effort
 (`xhigh`), and the vendor rejects it as an unknown model. Set them independently:
 
+Not sure a model name is real before you spend a dispatch on it? `--check-model` is a
+zero-spawn assertion: `hopper-dispatch --check-model codex gpt-5.5-xhigh` catches the
+glued-together mistake above by name (dedicated `effort-spliced` verdict, exit 1) instead
+of letting it reach the vendor as a 400.
+
 ```bash
 # effort only — model stays the vendor's account default
 hopper-dispatch T-PROG-AUDIT --background --reasoning xhigh
@@ -79,6 +84,7 @@ the adapters themselves — use these to check the live truth for your machine/a
 hopper-dispatch --rules                 # full matrix (also written to .hopper/DISPATCH.md)
 hopper-dispatch --capabilities codex    # one vendor's model/effort/perms contract
 hopper-dispatch --probe codex           # your account's live model catalog
+hopper-dispatch --check-model codex gpt-5.5   # assert one model before dispatch: verified (0) | catalog-only (2) | not-found (1)
 ```
 
 Tuning via environment variables:

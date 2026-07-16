@@ -13,6 +13,7 @@ This command surfaces the per-vendor cached model list — what each vendor adap
    - One argument: filters to a single vendor.
 2. Surfaces the output verbatim (vendor · introspection level · cached models · reasoning levels · staleness).
 3. If the cache is empty or stale, recommends `/hopper:probe [<vendor>]` to refresh.
+4. Once a specific `<model>` is picked, the pre-dispatch precheck is `hopper-dispatch --check-model <vendor> <model>` — a zero-spawn assertion (verified/catalog-only/not-found; distinct exit codes; `--json` for machine-readable output), not this listing command.
 
 ## Argument validation (BEFORE Bash)
 

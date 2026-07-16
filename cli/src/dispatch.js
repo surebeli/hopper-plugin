@@ -15,6 +15,7 @@ import { parseAgentsFile, resolveVendor } from './agents.js';
 import { resolveGovernance } from './governance.js';
 import { getAdapter } from './vendors/index.js';
 import { normalizeModel } from './model-normalize.js';
+import { parseEffortPolicyCell, parseModelRuleCell, resolveVerifiedLatest, computeEffortClamp, MODEL_SENTINELS } from './policy.js';
 import { resolveCommandWithKnownPaths } from './path-resolve.js';
 import { runSubprocessOnce, resolveDispatchTimeouts } from './subprocess.js';
 import { resolveVendorCwd } from './background.js';
@@ -29,6 +30,11 @@ import { join } from 'node:path';
 
 const READ_ONLY_TASK_RE = /\b(?:read[-_\s]?only|readonly)\b|只读/i;
 const NEGATED_READ_ONLY_RE = /\b(?:not|non|is\s+not|isn't)\s+(?:read[-_\s]?only|readonly)\b|(?:不是|非)\s*只读/i;
+
+/** Raw Effort policy / Model rule cells for a task-type, or the unbound-shaped default. */
+function policyForTaskType(agentsData, taskType) {
+  return (agentsData && agentsData.policies && agentsData.policies[taskType]) || { effortPolicy: '', modelRule: '' };
+}
 
 /**
  * Resolve a task for dispatch (Phase 1 stops here; Phase 2 calls vendor adapter).
@@ -71,7 +77,11 @@ export async function resolveDispatch({ hopperDir, taskId, vendorOverride = null
   const governance = await resolveGovernance({ hopperDir, vendor, task });
   const composedPrompt = composePrompt(frame, taskSpec, { governance });
 
-  return { task, frame, vendor, composedPrompt, taskSpec };
+  // Batch 2: raw Effort policy / Model rule cells for this task-type, consumed by
+  // resolveAdapterOptsForTask's --reasoning / --model fallback chains below.
+  const policy = policyForTaskType(agentsData, task.taskType);
+
+  return { task, frame, vendor, composedPrompt, taskSpec, policy };
 }
 
 /**
@@ -109,7 +119,8 @@ export async function resolveAdhocDispatch({ hopperDir, taskType, brief, id, ven
   const taskSpec = brief;
   const governance = await resolveGovernance({ hopperDir, vendor, task });
   const composedPrompt = composePrompt(frame, taskSpec, { governance });
-  return { task, frame, vendor, composedPrompt, taskSpec };
+  const policy = policyForTaskType(agentsData, taskType);
+  return { task, frame, vendor, composedPrompt, taskSpec, policy };
 }
 
 /**
@@ -219,13 +230,51 @@ export function taskTextRequestsReadOnly(resolved) {
 export function resolveAdapterOptsForTask(resolved, adapterOpts = {}) {
   const out = { ...adapterOpts };
   const taskType = resolved?.task?.taskType;
-  // V4: normalize a user-specified model to the vendor's canonical name (fuzzy-match against
-  // knownGood; advisory — passthrough if no confident match). Single chokepoint — every
-  // dispatch path (sync / background / adhoc / swarm) flows through resolveAdapterOptsForTask.
+  // Batch 2: notices surfaced by the fallback chains below (policy-cell resolution,
+  // sentinel resolution, effort clamp visibility) — collected here and read by the
+  // CLI print layer as `effectiveAdapterOpts.policyNotices` immediately after this
+  // call. Deliberately attached NON-ENUMERABLE so it is invisible to JSON.stringify
+  // (background.js forwards adapterOpts to the runner via an env-JSON blob) and to
+  // any `{ ...effectiveAdapterOpts, ... }` spread (background/sync build effectiveOpts
+  // that way) — this is print-time metadata, not a real adapter option.
+  const notices = [];
+  Object.defineProperty(out, 'policyNotices', { value: notices, enumerable: false, configurable: true });
+
+  // ── --model fallback chain (batch 2): flag > AGENTS.md Model rule cell > vendor CLI default ──
+  // V4 normalizes a user-specified model to the vendor's canonical name (fuzzy-match
+  // against knownGood; advisory — passthrough if no confident match). Single
+  // chokepoint — every dispatch path (sync / background / adhoc / swarm) flows
+  // through resolveAdapterOptsForTask.
+  if (!out.model && resolved?.policy?.modelRule) {
+    const parsedRule = parseModelRuleCell(resolved.policy.modelRule);
+    if (parsedRule.status === 'ok') {
+      out.model = parsedRule.sentinel; // resolved to a real name below (sentinel-or-normalize)
+      notices.push(`model resolved from AGENTS.md Model rule (task-type '${taskType}'): ${parsedRule.sentinel}`);
+    } else if (parsedRule.status === 'unparseable') {
+      notices.push(`Model rule cell for task-type '${taskType}' references an unrecognized sentinel ('${String(resolved.policy.modelRule).trim()}') — ignoring; vendor CLI default will be used.`);
+    }
+    // status 'unbound' (empty / OOB `(bind per project)`) is silent — same convention
+    // as an unbound Default-vendor cell; falls through to the vendor's own default.
+  }
   if (out.model && resolved?.vendor) {
     try {
       const kg = getAdapter(resolved.vendor)?.capabilities?.modelArg?.knownGood || [];
-      out.model = normalizeModel(resolved.vendor, out.model, kg);
+      if (MODEL_SENTINELS.includes(out.model)) {
+        // req #3: `verified-latest` (the only sentinel today) resolves to knownGood[0] —
+        // convention documented on codex.js's knownGood array. The RESOLVED REAL NAME
+        // (not the sentinel literal) is what reaches argv + output.md frontmatter, because
+        // out.model is overwritten here, upstream of every consumer of this opts object.
+        const resolvedName = resolveVerifiedLatest(kg);
+        if (resolvedName) {
+          notices.push(`model sentinel '${out.model}' → ${resolvedName} (${resolved.vendor} knownGood[0])`);
+          out.model = resolvedName;
+        } else {
+          notices.push(`model sentinel '${out.model}' has no resolvable knownGood[0] for vendor '${resolved.vendor}' — omitting --model (vendor CLI default).`);
+          out.model = undefined;
+        }
+      } else {
+        out.model = normalizeModel(resolved.vendor, out.model, kg);
+      }
     } catch (_) { /* normalization is advisory; keep the original on any error */ }
   }
   // Permission default (precedence, most specific first):
@@ -257,15 +306,40 @@ export function resolveAdapterOptsForTask(resolved, adapterOpts = {}) {
   if (out.webSearch == null && taskType && WEB_SEARCH_TASK_TYPES.includes(taskType)) {
     out.webSearch = true;
   }
-  // Reasoning/effort default: max out unless the caller passed --reasoning. Only
-  // codex/grok/mimo consume it (kimi/opencode/copilot/agy/claude ignore it
-  // harmlessly). This is safe BY DESIGN together with the idle-timeout primitive:
-  // a slower max-effort run is not killed for being slow, only for going silent.
-  // Env-tunable via HOPPER_DEFAULT_REASONING. Injected at the DISPATCH layer (not
-  // in each adapter), so adapters' own opt-in defaults — and their unit tests —
-  // are unaffected.
+  // ── --reasoning fallback chain (batch 2): flag > AGENTS.md Effort policy cell >
+  // HOPPER_DEFAULT_REASONING > xhigh. Only codex/grok/mimo/copilot consume it
+  // (kimi/opencode/agy/claude ignore it harmlessly — see their empty
+  // reasoningArg.knownGood). This is safe BY DESIGN together with the idle-timeout
+  // primitive: a slower max-effort run is not killed for being slow, only for going
+  // silent. Injected at the DISPATCH layer (not in each adapter), so adapters' own
+  // opt-in defaults — and their unit tests — are unaffected.
   if (out.reasoning == null) {
-    out.reasoning = resolveDefaultReasoning();
+    let fromPolicy = null;
+    if (resolved?.policy?.effortPolicy) {
+      const parsedEffort = parseEffortPolicyCell(resolved.policy.effortPolicy, resolved?.vendor);
+      if (parsedEffort.status === 'ok') {
+        fromPolicy = parsedEffort.value;
+        notices.push(`effort resolved from AGENTS.md Effort policy (task-type '${taskType}'): ${fromPolicy}`);
+      } else if (parsedEffort.status === 'unparseable') {
+        notices.push(`Effort policy cell for task-type '${taskType}' is unparseable ('${String(resolved.policy.effortPolicy).trim()}') — falling back to HOPPER_DEFAULT_REASONING/xhigh.`);
+      }
+      // 'unbound' (empty / OOB / table doesn't name this vendor) is silent — falls
+      // through to the next level, same convention as an unbound Default-vendor cell.
+    }
+    out.reasoning = fromPolicy || resolveDefaultReasoning();
+  }
+  // Clamp visibility (req #2): a vendor that cannot accept the resolved level
+  // (whichever chain step it came from — flag, policy, or default) used to remap it
+  // SILENTLY inside the adapter (grok/copilot: xhigh->high, minimal->low). Surface
+  // that as an explicit notice instead. computeEffortClamp is a no-op (null notice)
+  // for vendors that don't clamp at all (in-range, or reasoningArg.knownGood is empty
+  // — kimi/opencode/agy/claude, which ignore --reasoning entirely).
+  if (out.reasoning && resolved?.vendor) {
+    try {
+      const reasoningKg = getAdapter(resolved.vendor)?.capabilities?.reasoningArg?.knownGood || [];
+      const clamp = computeEffortClamp(resolved.vendor, out.reasoning, reasoningKg);
+      if (clamp.notice) notices.push(clamp.notice);
+    } catch (_) { /* clamp visibility is advisory; never block dispatch */ }
   }
   return out;
 }

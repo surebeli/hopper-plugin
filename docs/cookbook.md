@@ -277,7 +277,7 @@ Keep each review as a separate task ID. hopper-plugin does not fan out a single 
 
 ### Steps
 
-Three pre-flight checks before dispatching — each is read-only and spawns no vendor:
+Four pre-flight checks before dispatching — each is read-only and spawns no vendor:
 
 ```bash
 # 1. Will the task resolve? (found in queue.md + vendor from AGENTS.md + composed prompt length)
@@ -288,6 +288,10 @@ hopper-dispatch --check codex
 
 # 3. Confirm you are in the right project (vendor will run in the repo root that owns .hopper/).
 hopper-dispatch --status
+
+# 4. Passing an explicit --model? Assert it BEFORE spending a real dispatch on it —
+#    verified (exit 0) | catalog-only (exit 2, listed but unverified) | not-found (exit 1).
+hopper-dispatch --check-model codex gpt-5.5
 ```
 
 For a background dispatch already in flight, get woken on completion instead of polling:
@@ -301,7 +305,7 @@ Claude Code users get this automatically: the bundled monitor (`monitors/monitor
 
 ### Notes
 
-- `--resolve` / `--check` / `--status` / `--capabilities` / `--models` are all **zero-spawn** read-only commands. Use them freely to confirm routing *before* committing a real dispatch — this is the `--dry-run` workflow.
+- `--resolve` / `--check` / `--status` / `--capabilities` / `--models` / `--check-model` are all **zero-spawn** read-only commands. Use them freely to confirm routing *before* committing a real dispatch — this is the `--dry-run` workflow.
 - The dispatched vendor is anchored to the repo root that owns `.hopper/` (retro #3 fix). You never need to `cd` into the plugin's CLI directory; run from your project or set `HOPPER_DIR=/path/to/project/.hopper`.
 - Real dispatch defaults to `--sandbox danger-full-access` for the vendor so implementation tasks can modify files. Hopper automatically uses `read-only` only when the queue brief or detailed task spec explicitly says `read-only` / `只读`; pass `--sandbox <mode>` to override for a single dispatch.
 - **Vendor needs to read a path OUTSIDE the repo** (external test evidence, a sibling repo)? The vendor's own sandbox enforces this — e.g. opencode's `external_directory` permission defaults to `ask` and is denied in headless mode. Two ways to handle it without disabling the vendor's permission model:

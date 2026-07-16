@@ -14,6 +14,7 @@ Show Hopper's cached vendor model inventory. This is read-only and does not spaw
 3. Run `hopper-dispatch --models` or `hopper-dispatch --models <vendor>`.
 4. Surface the raw output, then briefly call out stale or missing cache entries.
 5. If cache is empty or stale, suggest `hopper-dispatch --probe [vendor]` as the explicit refresh path.
+6. Once the user has picked a specific `<model>`, the precheck before dispatching it is `hopper-dispatch --check-model <vendor> <model>` — a zero-spawn assertion (verified/catalog-only/not-found, distinct exit codes) rather than this listing command.
 
 ## Safety
 

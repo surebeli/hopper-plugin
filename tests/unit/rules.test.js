@@ -67,7 +67,14 @@ test('scaffold AGENTS.md carries the constitution pointer AND still parses', () 
   const agentsFile = buildScaffoldFiles().find((f) => f.rel === 'AGENTS.md');
   assert.match(agentsFile.content, /\.hopper\/DISPATCH\.md/);
   assert.match(agentsFile.content, /GENERATED from the hopper adapters/);
-  // The added prose must not break the vendor-routing parser.
+  // The added prose must not break the vendor-routing parser: the table parses
+  // cleanly into an EMPTY preferences map (every row ships unbound by design —
+  // vendor defaults are a project decision, not a plugin default) rather than
+  // resolving to a hardcoded vendor.
   const agents = parseAgentsContent(agentsFile.content);
-  assert.equal(resolveVendor({ taskType: 'code-impl', vendor: null }, agents), 'kimi');
+  assert.equal(agents.preferences['code-impl'], undefined);
+  assert.throws(
+    () => resolveVendor({ taskType: 'code-impl', vendor: null, id: 'T-TEST' }, agents),
+    /No vendor binding for task-type 'code-impl'\. Bind a vendor in \.hopper\/AGENTS\.md/,
+  );
 });

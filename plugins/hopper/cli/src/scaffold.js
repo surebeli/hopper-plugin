@@ -202,16 +202,46 @@ never route a task to the same CLI that is dispatching it.
 
 ## Task-type → vendor default preference
 
-| Task-type | Default vendor | Why |
-|---|---|---|
-| \`spec-write\` | codex | High reasoning suits spec authoring |
-| \`code-impl\` | kimi | Cheap tier handles bulk implementation |
-| \`code-review-adversarial\` | grok | Independent third-party perspective |
-| \`code-review-acceptance\` | codex | Acceptance-criteria verification |
-| \`sidecar-polish\` | kimi | Fast, cheap hygiene/cleanup pass |
-| \`spec-blindspot-hunt\` | opencode | Alternative perspective for unknown-unknowns |
-| \`prd-research\` | codex | Web-search-backed product-requirement research (read-only by default) |
-| \`market-research\` | codex | Web-search-backed market/competitor research (read-only by default) |
+Vendor binding is a **project decision**, not a plugin default — this plugin ships no
+opinion on which CLI is "the high-reasoning one" or "the cheap one" because your vendor
+pool (which CLIs are installed/authenticated here) will not match the authoring machine's.
+Fill in the \`Default vendor\` column yourself, using vendors from the \`Active Agent
+Instances\` table above. Use \`Recommended profile\` (an abstract capability tier, no
+vendor names) plus \`hopper-dispatch --setup\` (its Sandbox/WebSrch columns) or
+\`hopper-dispatch --capabilities <vendor>\` to see which of your vendors actually match
+a given profile. A row left as \`(bind per project)\` — parenthesized, same convention
+as an out-of-band note — is parsed as unbound; dispatch throws a clear error naming
+the task-type until you bind it.
+
+\`Effort policy\` and \`Model rule\` are machine-parsed (batch 2) — dispatch reads them
+when \`--reasoning\` / \`--model\` is omitted, and \`hopper-dispatch --setup\` lints them
+(see its "Task-type policy" section). Same OOB convention: a parenthesized cell is unbound.
+
+- **Effort policy** — either a single token (\`medium\`) applied regardless of which
+  vendor ends up bound, or a per-vendor table (\`codex:xhigh, grok:high\`) so different
+  vendors get different effort for the same task-type. Fallback chain at dispatch:
+  \`--reasoning\` flag > this cell > \`HOPPER_DEFAULT_REASONING\` > \`xhigh\`. A value the
+  bound vendor's reasoning enum doesn't support is NOT an error — it dispatches and gets
+  clamped (hopper prints \`effort X → clamped to Y (<vendor> max/min)\` so the clamp is
+  never silent), but \`--setup\` flags it ahead of time so you can fix the policy instead.
+- **Model rule** — a SENTINEL name, not a literal model id. \`verified-latest\` (the only
+  one hopper defines today) resolves to the bound vendor's adapter
+  \`capabilities.modelArg.knownGood[0]\` at dispatch time — i.e. "whatever this vendor's
+  adapter currently calls its preferred verified model", so the AGENTS.md table never
+  hard-codes a vendor-specific model string. Fallback chain: \`--model\` flag > this cell
+  > vendor CLI default (omit \`--model\` entirely). The resolved REAL model name (not the
+  sentinel literal) is what reaches argv and \`output.md\` frontmatter.
+
+| Task-type | Default vendor | Recommended profile | Effort policy | Model rule |
+|---|---|---|---|---|
+| \`spec-write\` | (bind per project) | high-reasoning | (bind per project) | verified-latest |
+| \`code-impl\` | (bind per project) | edit-capable sandbox; mid-tier reasoning acceptable | (bind per project) | verified-latest |
+| \`code-review-adversarial\` | (bind per project) | high-reasoning; read-only sandbox REQUIRED | codex:xhigh, grok:high | verified-latest |
+| \`code-review-acceptance\` | (bind per project) | high-reasoning; read-only sandbox REQUIRED | codex:xhigh, grok:high | verified-latest |
+| \`sidecar-polish\` | (bind per project) | low-cost, fast, edit-capable sandbox (declare review-only vs edit-allowed up front) | (bind per project) | verified-latest |
+| \`spec-blindspot-hunt\` | (bind per project) | high-reasoning; prefer a vendor heterogeneous to the authoring one | (bind per project) | verified-latest |
+| \`prd-research\` | (bind per project) | web-search REQUIRED; medium-high reasoning | medium | verified-latest |
+| \`market-research\` | (bind per project) | web-search REQUIRED; medium-high reasoning | medium | verified-latest |
 
 ---
 
@@ -279,6 +309,21 @@ function taskFrame(type) {
     'market-research': 'Research a market / competitor / trend question using web search — synthesize a sourced, structured brief (sizing, players, trends, risks). Research only — no code, no edits.',
   }[type] || 'Describe the task-type purpose here.';
 
+  // Abstract capability tier, NOT a vendor name — mirrors the AGENTS.md
+  // "Recommended profile" column so the two stay in lockstep. Vendor binding
+  // is a per-project decision (see .hopper/AGENTS.md task-vendor-preference
+  // table); this only says what CAPABILITY the bound vendor should have.
+  const profile = {
+    'spec-write': 'high-reasoning',
+    'code-impl': 'edit-capable sandbox; mid-tier reasoning acceptable',
+    'code-review-adversarial': 'high-reasoning; read-only sandbox REQUIRED',
+    'code-review-acceptance': 'high-reasoning; read-only sandbox REQUIRED',
+    'sidecar-polish': 'low-cost, fast, edit-capable sandbox (declare review-only vs edit-allowed up front)',
+    'spec-blindspot-hunt': 'high-reasoning; prefer a vendor heterogeneous to the authoring one',
+    'prd-research': 'web-search REQUIRED; medium-high reasoning',
+    'market-research': 'web-search REQUIRED; medium-high reasoning',
+  }[type] || 'no recommendation — bind per project';
+
   const verdict = type.startsWith('code-review')
     ? 'PASS | PASS_WITH_NOTE | REWORK | FAIL'
     : 'PASS | PASS_WITH_CHANGES | REWORK';
@@ -311,6 +356,11 @@ The output should contain, in this order:
 - **Next recommendation**: what should happen next
 
 ## Notes
+
+**Recommended execution profile**: ${profile} — an abstract capability tier, not
+a vendor name. Bind an actual vendor to this task-type in \`.hopper/AGENTS.md\`'s
+task-vendor-preference table; match the profile to a vendor via \`hopper-dispatch
+--setup\` (Sandbox/WebSrch columns) or \`hopper-dispatch --capabilities <vendor>\`.
 
 This frame describes the SHAPE of the work and the expected output, not an
 identity to adopt. The vendor CLI brings its own behavior; the frame only states

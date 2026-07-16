@@ -35,11 +35,12 @@ When working inside the source repository, `node .\cli\bin\hopper-dispatch <args
 - Watch terminal events: `hopper-dispatch --watch-events`
 - Probe vendor capabilities: `hopper-dispatch --probe <vendor>`
 - Read cached models: `hopper-dispatch --models <vendor>`
+- Assert a model before dispatching: `hopper-dispatch --check-model <vendor> <model>` (verified/catalog-only/not-found; add `--json` for machine-readable output)
 - List vendors: `hopper-dispatch --vendors`
 - Vendor readiness (doctor): `hopper-dispatch --setup` (alias `--doctor`; add `--deep` for flag + model-catalog drift)
 - Smoke check: `hopper-dispatch --smoke`
 
-Diagnostics that read only the adapter registry — `--vendors`, `--rules`, `--setup`/`--doctor`, `--capabilities`, `--probe`, `--models`, `--smoke` — do NOT need a `.hopper/` directory and run from anywhere. The project-context steps above apply to dispatch/status/result/progress, which operate on `.hopper/`.
+Diagnostics that read only the adapter registry — `--vendors`, `--rules`, `--setup`/`--doctor`, `--capabilities`, `--check-model`, `--probe`, `--models`, `--smoke` — do NOT need a `.hopper/` directory and run from anywhere. The project-context steps above apply to dispatch/status/result/progress, which operate on `.hopper/`.
 
 ## Safety Rules
 

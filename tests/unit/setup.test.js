@@ -148,7 +148,10 @@ test('V3 deep: a genuinely-live (introspection:full) catalog reconciles against 
 
 test('V3 deep: codex driftExpected suppresses Pro-only/internal noise; OK until a genuinely-new model appears', async () => {
   // Real codex knownGood + driftExpected, with a live catalog mirroring the bundled list.
-  const liveBundled = ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.2', 'codex-auto-review'];
+  // gpt-5.6-sol/terra/luna: V-verified 2026-07-17 addition to knownGood (codex.js) — the
+  // bundled catalog now ships them too, so the fixture must include them or they'd
+  // false-flag as missingFromLive (STALE).
+  const liveBundled = ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.2', 'codex-auto-review'];
   const okProbe = async () => ({ introspection_supported: 'full', models: liveBundled, models_source: 'codex debug models --bundled' });
   const ok = await buildVendorReadiness({ only: 'codex', deep: true, persist: false, probeFn: okProbe });
   assert.equal(ok[0].modelReconcile.applicable, true);

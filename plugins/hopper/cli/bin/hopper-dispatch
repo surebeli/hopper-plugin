@@ -13,8 +13,9 @@ import { writeOutput } from '../src/output.js';
 import { scaffoldHopper, scaffoldGovernance } from '../src/scaffold.js';
 import { renderRulesMarkdown } from '../src/rules.js';
 import { compatCheckForAdapter } from '../src/vendor-compat.js';
-import { buildVendorReadiness, summarizeReadiness, formatModelDrift, buildRuntimeReport, buildNextSteps } from '../src/setup.js';
+import { buildVendorReadiness, summarizeReadiness, formatModelDrift, buildRuntimeReport, buildNextSteps, buildTaskTypePolicyReport } from '../src/setup.js';
 import { modelKeysMatch } from '../src/model-normalize.js';
+import { evaluateModelCheck } from '../src/model-check.js';
 import {
   validateTaskId,
   validateDispatchFlags,
@@ -47,7 +48,7 @@ import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
-const VERSION = '0.30.0';
+const VERSION = '0.31.0';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -89,6 +90,7 @@ function printUsage() {
   console.log('  hopper-dispatch --rules                          Print the GENERATED dispatch-rules matrix (> .hopper/DISPATCH.md)');
   console.log('  hopper-dispatch --check [<vendor>]              Show install + auth status (all, or single vendor)');
   console.log('  hopper-dispatch --capabilities <vendor>         Show static model/reasoning/feature support + cached data if probed');
+  console.log('  hopper-dispatch --check-model <vendor> <model> [--json]  Assert model availability pre-dispatch (zero-spawn): verified (exit 0) | catalog-only (exit 2) | not-found (exit 1)');
   console.log('  hopper-dispatch --probe [<vendor>]              Run vendor introspection, write cache to ~/.hopper/cache/');
   console.log('  hopper-dispatch --models [<vendor>]             Show cached model list per vendor (run --probe first)');
   console.log('  hopper-dispatch --setup [<vendor>] [--deep]     Vendor readiness: installed/auth/models/sandbox/web-search (--doctor alias)');
@@ -191,6 +193,24 @@ async function main() {
       process.exit(1);
     }
     runCapabilities(target);
+    return;
+  }
+  const checkModelIdx = args.indexOf('--check-model');
+  if (checkModelIdx !== -1) {
+    const vendor = args[checkModelIdx + 1];
+    const model = args[checkModelIdx + 2];
+    const asJson = args.includes('--json');
+    if (!vendor || vendor.startsWith('-') || !model || model.startsWith('-')) {
+      console.error('Error: --check-model requires two positional args: <vendor> <model>.');
+      console.error('Usage: hopper-dispatch --check-model <vendor> <model> [--json]');
+      console.error(`Available vendors: ${listAdapters().join(', ')}`);
+      process.exit(1);
+    }
+    if (!listAdapters().includes(vendor)) {
+      console.error(`Error: unknown vendor '${vendor}'. Known: ${listAdapters().join(', ')}`);
+      process.exit(1);
+    }
+    runCheckModel(vendor, model, { json: asJson });
     return;
   }
 
@@ -577,7 +597,7 @@ async function main() {
 function parseDispatchArgs(args) {
   const META_FLAGS = new Set(['--help', '-h', '--version', '-v', '--smoke', '--status',
     '--task-types', '--vendors', '--rules', '--resolve', '--watch', '--progress', '--watch-events', '--replay', '--jobs', '--reap', '--stop', '--archive',
-    '--check', '--capabilities', '--probe', '--models', '--setup', '--doctor', '--init-tasks', '--init-governance']);
+    '--check', '--capabilities', '--check-model', '--probe', '--models', '--setup', '--doctor', '--init-tasks', '--init-governance']);
   const VALUE_FLAGS = new Set(ALLOWED_DISPATCH_VALUE_FLAGS);
   const BARE_FLAGS = new Set(ALLOWED_DISPATCH_FLAGS);
 
@@ -752,6 +772,11 @@ async function runDispatch(hopperDir, taskId, { write = false, force = false, ad
       }
       console.error(`  permission: sandbox=${effectiveAdapterOpts.sandbox} (${source})`);
     }
+    // Batch 2: policy-chain notices — model-rule/effort-policy resolution + sentinel
+    // resolution + effort clamp visibility. Never blocks dispatch (advisory only).
+    for (const notice of effectiveAdapterOpts.policyNotices || []) {
+      console.error(`  notice: ${notice}`);
+    }
 
     const hostVendor = process.env.HOPPER_HOST_VENDOR;
     validateHostVendorSeparation(hostVendor, resolved.vendor);
@@ -814,7 +839,13 @@ async function runDispatch(hopperDir, taskId, { write = false, force = false, ad
 
     if (write) {
       try {
-        const written = await writeOutput({ hopperDir, dispatchResult: result, force, model: adapterOpts.model });
+        // req #3: the frontmatter `model` field must be the RESOLVED real name (V4-
+        // normalized and/or sentinel-resolved), not the raw --model flag literal —
+        // e.g. `--model verified-latest` must record the concrete model it resolved
+        // to, not the sentinel string. effectiveAdapterOpts.model is that resolved
+        // value (background dispatch already used the equivalent effectiveOpts here;
+        // this was the one path still threading the pre-resolution raw flag through).
+        const written = await writeOutput({ hopperDir, dispatchResult: result, force, model: effectiveAdapterOpts.model });
         console.log('');
         console.log('=== OUTPUT.MD WRITTEN ===');
         console.log(`Wrote: ${written.path}${written.overwritten ? ' (overwritten)' : ''}`);
@@ -859,6 +890,12 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {}, vend
     bail(`Error: ${err.message}`, 1);
   }
   const effectiveAdapterOpts = resolveAdapterOptsForTask(resolved, adapterOpts);
+
+  // Batch 2: policy-chain notices (model-rule/effort-policy resolution, sentinel
+  // resolution, effort clamp visibility) — same source as the sync path.
+  for (const notice of effectiveAdapterOpts.policyNotices || []) {
+    console.error(`  notice: ${notice}`);
+  }
 
   // P3a-fix: soft-warn also fires on --background path. Same warnIfModelUnknown
   // helper as sync dispatch; advisory only, never blocks.
@@ -1629,6 +1666,37 @@ async function runSetup({ only = null, deep = false } = {}) {
     console.log('  (DRIFT is advisory: add NEW models to the adapter knownGood, or drop STALE ones. --deep also refreshed the probe cache.)');
   }
 
+  // ── Task-type policy (batch 2 lint) ────────────────────────────────────────
+  const policyReport = await buildTaskTypePolicyReport(hopperDir);
+  console.log('\nTask-type policy');
+  if (!policyReport.applicable) {
+    console.log(`  skipped — ${policyReport.reason}`);
+  } else {
+    // Model rule cell only ever renders r.modelStatus ('bound'|'unbound'|'unparseable') —
+    // width must fit the longest status word ('unparseable' = 11 chars) or it truncates
+    // to 'unparseabl'. Adaptive to the actual rows (+ a floor at the prior fixed width
+    // of 10) rather than a hand-picked constant, so a future longer status word can't
+    // silently truncate again. Rendering only — buildTaskTypePolicyReport's judgment
+    // logic (bound/unbound/unparseable + the two warning classes) is untouched.
+    const modelColWidth = Math.max(10, ...policyReport.rows.map((r) => String(r.modelStatus).length));
+    console.log('  | Task-type | Vendor | Effort policy | Model rule |');
+    console.log('  |-----------|--------|----------------|------------|');
+    for (const r of policyReport.rows) {
+      const vendorCell = r.vendorStatus === 'bound' ? r.vendor : 'unbound';
+      const effortCell = r.effortStatus === 'bound' ? r.effortValue : r.effortStatus;
+      const modelCell = r.modelStatus;
+      console.log(`  | ${cell(r.taskType, 24)} | ${cell(vendorCell, 8)} | ${cell(effortCell, 14)} | ${cell(modelCell, modelColWidth)} |`);
+    }
+    console.log('  Status vocabulary: bound (usable value) · unbound (empty/OOB `(...)` — falls through to the next');
+    console.log('  chain level, not an error) · unparseable (malformed cell — falls through with a dispatch-time notice).');
+    if (policyReport.warnings.length) {
+      console.log('\n  Warnings:');
+      for (const w of policyReport.warnings) console.log(`    ⚠ ${w}`);
+    } else {
+      console.log('  No policy warnings.');
+    }
+  }
+
   // ── Next steps (concrete, ordered) ─────────────────────────────────────────
   const steps = buildNextSteps(rows, sum, { hopperDir });
   if (steps.length) {
@@ -1818,6 +1886,49 @@ function runCapabilities(vendor) {
     console.log('');
     console.log(`  No cached probe data. Run \`hopper-dispatch --probe ${vendor}\` for live introspection.`);
   }
+}
+
+/**
+ * --check-model <vendor> <model> — zero-spawn assertion pre-check (see cli/src/model-check.js
+ * for the full verdict semantics). Vendor is pre-validated as a registered adapter by main().
+ * Reads only capabilitiesForAdapter() (static) + getVendorCache() (probe cache, read-only) —
+ * no vendor subprocess spawn, no cache write.
+ */
+function runCheckModel(vendor, model, { json = false } = {}) {
+  const caps = capabilitiesForAdapter(vendor);
+  const knownGood = (caps && caps.modelArg && caps.modelArg.knownGood) || [];
+  const cached = getVendorCache(vendor);
+  const catalog = (cached && Array.isArray(cached.models)) ? cached.models : null;
+
+  const result = evaluateModelCheck(vendor, model, knownGood, catalog);
+
+  if (json) {
+    console.log(JSON.stringify({
+      vendor: result.vendor,
+      model: result.model,
+      normalized: result.normalized,
+      verdict: result.verdict,
+      verified_list: result.verifiedList,
+      catalog: result.catalog,
+      cache_missing: result.cacheMissing,
+      exit_code: result.exitCode,
+      hint: result.hint.join(' '),
+    }));
+    process.exit(result.exitCode);
+  }
+
+  console.log(`hopper-dispatch v${VERSION} — check-model ${vendor} '${model}'`);
+  if (result.normalized !== result.model) console.log(`  normalized: ${result.normalized}`);
+  console.log(`  verdict: ${result.verdict}  (exit ${result.exitCode})`);
+  console.log('');
+  for (const line of result.hint) console.log(`  ${line}`);
+  if (result.verdict === 'verified' && caps && caps.modelArg && caps.modelArg.sourceNote) {
+    console.log('');
+    console.log(`  note: ${caps.modelArg.sourceNote}`);
+  }
+  console.log('');
+  console.log('No vendor subprocess is spawned for this check (static known-good + probe-cache read only).');
+  process.exit(result.exitCode);
 }
 
 // ─── Phase 6b commands ────────────────────────────────────────────────

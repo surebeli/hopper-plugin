@@ -28,10 +28,16 @@ export function parseAgentsContent(content) {
   const lines = content.split(/\r?\n/);
   const agents = [];
   const preferences = {};
+  // Batch 2 (2026-07): raw Effort policy / Model rule cells per task-type, keyed
+  // the same as `preferences`. Captured independently of vendor-binding status
+  // (a row can have a policy cell filled in even while its vendor is still
+  // `(bind per project)`) — additive, does not change `preferences` semantics.
+  const policies = {};
 
   // Three sections of interest:
   // 1. "Active Agent Instances" table — nickname → vendor binding
   // 2. "Task-type → vendor default preference" table — task-type → vendor
+  //    (+ optional Effort policy / Model rule columns, batch 2)
 
   let currentSection = null;     // 'agents' | 'preferences' | null
   let inTable = false;
@@ -83,14 +89,18 @@ export function parseAgentsContent(content) {
     } else if (currentSection === 'preferences') {
       const pref = extractPreferenceRow(cells, columnMap);
       if (pref) {
-        const { taskType, vendor } = pref;
+        const { taskType, vendor, effortPolicyRaw, modelRuleRaw } = pref;
         // First non-null wins (deterministic, per codex F1 — no round-robin)
-        if (!preferences[taskType]) preferences[taskType] = vendor;
+        if (vendor && !preferences[taskType]) preferences[taskType] = vendor;
+        // Policy cells are captured regardless of whether the vendor column is
+        // bound yet — a project may fill in Effort policy / Model rule before
+        // picking a vendor, and the setup lint (batch 2) needs to see that.
+        if (!policies[taskType]) policies[taskType] = { effortPolicy: effortPolicyRaw, modelRule: modelRuleRaw };
       }
     }
   }
 
-  return { agents, preferences };
+  return { agents, preferences, policies };
 }
 
 function parseRowCells(line) {
@@ -114,6 +124,10 @@ function mapColumns(cells, section) {
     const map = {
       taskTypeIdx: indexOfAny(lower, ['task-type', 'task type']),
       vendorIdx: indexOfAny(lower, ['default vendor', 'vendor', 'preferred vendor']),
+      // Batch 2: optional columns — older/scaffolded-before-batch-2 AGENTS.md
+      // files simply won't have them (indexOfAny returns null, handled below).
+      effortPolicyIdx: indexOfAny(lower, ['effort policy']),
+      modelRuleIdx: indexOfAny(lower, ['model rule']),
     };
     if (map.taskTypeIdx == null || map.vendorIdx == null) return null;
     return map;
@@ -149,16 +163,23 @@ function extractAgentRow(cells, map) {
 function extractPreferenceRow(cells, map) {
   const taskType = stripBackticks(cells[map.taskTypeIdx]);
   if (!taskType) return null;
-  const vendorCell = cells[map.vendorIdx];
+  const vendorCell = cells[map.vendorIdx] || '';
+  const effortPolicyRaw = map.effortPolicyIdx != null ? (cells[map.effortPolicyIdx] || '') : '';
+  const modelRuleRaw = map.modelRuleIdx != null ? (cells[map.modelRuleIdx] || '') : '';
   // Skip OOB markers: cells that START with parens are notes, not bindings.
   // e.g. "(Strategy invokes OOB /codex)" means this task-type is handled
-  // out-of-band, NOT dispatched through queue.md to a vendor.
-  if (/^\s*\(/.test(vendorCell)) return null;
-  // Vendor cell may have annotations: "kimi-builder *(static default — codex F1)*"
-  // Match first nickname-shaped token (lowercase-starting alphanumeric + hyphens)
-  const match = vendorCell.match(/`?([a-z][\w-]+)`?/);
-  if (!match) return null;
-  return { taskType, vendor: stripBackticks(match[1]) };
+  // out-of-band, NOT dispatched through queue.md to a vendor. Unlike before
+  // batch 2, this no longer short-circuits the WHOLE row — the policy cells
+  // (Effort policy / Model rule) may still be filled in and are worth
+  // returning even when the vendor itself is still unbound.
+  let vendor = null;
+  if (!/^\s*\(/.test(vendorCell)) {
+    // Vendor cell may have annotations: "kimi-builder *(static default — codex F1)*"
+    // Match first nickname-shaped token (lowercase-starting alphanumeric + hyphens)
+    const match = vendorCell.match(/`?([a-z][\w-]+)`?/);
+    if (match) vendor = stripBackticks(match[1]);
+  }
+  return { taskType, vendor, effortPolicyRaw, modelRuleRaw };
 }
 
 function stripBackticks(s) {
@@ -201,7 +222,8 @@ export function resolveVendor(task, agentsData) {
   // 4. No resolution — caller decides
   throw new Error(
     `No vendor binding for task-type '${task.taskType}'. ` +
-    `Add a row to .hopper/AGENTS.md task-vendor-preference table, ` +
-    `OR set Vendor column in queue.md for task '${task.id}'.`
+    `Bind a vendor in .hopper/AGENTS.md's task-vendor-preference table ` +
+    `(fill in the Default vendor column — a blank/'(bind per project)' row is unbound), ` +
+    `OR set the Vendor column in queue.md for task '${task.id}'.`
   );
 }

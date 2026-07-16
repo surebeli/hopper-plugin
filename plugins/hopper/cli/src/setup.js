@@ -18,6 +18,10 @@ import { listAdapters, getAdapter, installCheckForAdapter, capabilitiesForAdapte
 import { getVendorCache, setVendorCache } from './cache.js';
 import { compatCheckForAdapter } from './vendor-compat.js';
 import { reconcileModels } from './model-normalize.js';
+import { parseAgentsFile } from './agents.js';
+import { listTaskTypes } from './tasks.js';
+import { parseEffortPolicyCell, parseModelRuleCell, isOobCell, MODEL_SENTINELS } from './policy.js';
+import { join } from 'node:path';
 
 /**
  * Does the adapter enforce the sandbox through argv (so hopper can downgrade a
@@ -243,4 +247,90 @@ export function buildNextSteps(rows, sum, { hopperDir = null } = {}) {
     steps.push(`${r.name} is DISABLED for dispatch — enable with ${r.dispatchDisabled.enableEnv}=1 if needed (\`--vendors\` shows why).`);
   }
   return steps;
+}
+
+/**
+ * Batch 2: "Task-type policy" lint for `--setup`. Per task-type, reports the
+ * status of all three columns in AGENTS.md's task-vendor-preference table
+ * (Default vendor / Effort policy / Model rule) using the shared bound/unbound/
+ * unparseable vocabulary, plus two warning classes:
+ *   - effort out-of-range: an Effort policy value the bound vendor's
+ *     reasoningArg.knownGood enum doesn't list (it will be silently clamped at
+ *     dispatch unless you already know that — see policy.js computeEffortClamp).
+ *   - Model rule references a non-existent sentinel (anything other than a
+ *     known entry in MODEL_SENTINELS, once OOB/empty is ruled out).
+ *
+ * Pure I/O aggregation (reads AGENTS.md + task-type frame filenames), no
+ * subprocess spawn — safe on the --setup zero-extra-spawn path (the surrounding
+ * vendor-readiness rows are the only thing that spawns, and only in --deep).
+ *
+ * @param {string|null} hopperDir
+ * @returns {Promise<{
+ *   applicable: boolean, reason?: string,
+ *   rows: Array<{ taskType: string, vendor: string|null, vendorStatus: 'bound'|'unbound',
+ *                 effortStatus: 'bound'|'unbound'|'unparseable', effortValue: string|null,
+ *                 modelStatus: 'bound'|'unbound'|'unparseable', modelRuleRaw: string }>,
+ *   warnings: string[],
+ * }>}
+ */
+export async function buildTaskTypePolicyReport(hopperDir) {
+  if (!hopperDir) {
+    return { applicable: false, reason: 'no .hopper/ workspace found in cwd — run `hopper-dispatch --init-tasks` to scaffold one', rows: [], warnings: [] };
+  }
+  let agentsData;
+  try {
+    agentsData = await parseAgentsFile(join(hopperDir, 'AGENTS.md'));
+  } catch (err) {
+    return { applicable: false, reason: `could not read .hopper/AGENTS.md: ${String((err && err.message) || err)}`, rows: [], warnings: [] };
+  }
+  let taskTypes;
+  try { taskTypes = await listTaskTypes(hopperDir); } catch (_) { taskTypes = []; }
+  if (taskTypes.length === 0) {
+    return { applicable: false, reason: 'no task-type frames found under .hopper/tasks/', rows: [], warnings: [] };
+  }
+
+  const rows = [];
+  const warnings = [];
+  for (const taskType of taskTypes) {
+    // Resolve the SAME way resolveVendor() does for the preferences-table branch:
+    // the cell may name a nickname (Active Agent Instances), not a bare vendor id.
+    const prefCell = agentsData.preferences[taskType] || null;
+    let vendor = prefCell;
+    if (prefCell) {
+      const binding = agentsData.agents.find((a) => a.nickname === prefCell);
+      if (binding) vendor = binding.vendor;
+    }
+    const vendorStatus = vendor ? 'bound' : 'unbound';
+
+    const policy = (agentsData.policies && agentsData.policies[taskType]) || { effortPolicy: '', modelRule: '' };
+
+    // Effort policy: the per-vendor table form needs a bound vendor to select an
+    // entry; the single-token form does not. parseEffortPolicyCell handles both —
+    // pass '' when unbound so only the vendor-agnostic single-token form can resolve.
+    const parsedEffort = parseEffortPolicyCell(policy.effortPolicy, vendor || '');
+    const effortStatus = parsedEffort.status === 'ok' ? 'bound' : parsedEffort.status;
+    const effortValue = parsedEffort.value;
+
+    // Model rule: OOB/empty -> unbound; a recognized sentinel -> bound; anything else
+    // is a reference to a sentinel name that doesn't exist.
+    const parsedModel = parseModelRuleCell(policy.modelRule);
+    const modelStatus = parsedModel.status === 'ok' ? 'bound' : parsedModel.status;
+
+    rows.push({ taskType, vendor, vendorStatus, effortStatus, effortValue, modelStatus, modelRuleRaw: policy.modelRule });
+
+    // Warning 1: effort out-of-range for the vendor actually bound to this task-type.
+    if (vendor && effortStatus === 'bound') {
+      let reasoningKg = [];
+      try { reasoningKg = capabilitiesForAdapter(vendor)?.reasoningArg?.knownGood || []; } catch (_) { /* unknown vendor name — nothing to check against */ }
+      if (reasoningKg.length > 0 && !reasoningKg.includes(effortValue)) {
+        warnings.push(`[${taskType}] Effort policy '${effortValue}' exceeds vendor '${vendor}'s reasoning enum (${reasoningKg.join('|')}) — will be silently clamped at dispatch (see the dispatch-time clamp notice) unless intentional.`);
+      }
+    }
+    // Warning 2: Model rule references a non-existent sentinel.
+    if (modelStatus === 'unparseable' && !isOobCell(policy.modelRule)) {
+      warnings.push(`[${taskType}] Model rule '${String(policy.modelRule).trim()}' references an unrecognized sentinel (known: ${MODEL_SENTINELS.join(', ')}).`);
+    }
+  }
+
+  return { applicable: true, rows, warnings };
 }
