@@ -196,7 +196,7 @@ never route a task to the same CLI that is dispatching it.
 | \`opencode\` | \`-\` | opencode | \`opencode run "<input>" --model <provider/model>\` | Multi-provider |
 | \`copilot\` | \`-\` | copilot | \`copilot -p "<input>"\` | GitHub-tied; premium quota meters per call |
 | \`agy\` | \`-\` | agy | \`agy -p "<input>"\` | Antigravity (Gemini); OAuth-only. ⚠️ **DISABLED by default** — agy 1.0.12 \`--print\` emits no capturable answer on a non-TTY stdout (TUI-only), so dispatch is blocked; override with \`HOPPER_ENABLE_AGY=1\`. |
-| \`grok\` | \`-\` | grok | \`grok -p "<input>" --permission-mode bypassPermissions --always-approve -m grok-build\` | xAI Grok Build (headless needs an explicit permission mode) |
+| \`grok\` | \`-\` | grok | \`grok -p "<input>" --permission-mode bypassPermissions --always-approve -m grok-4.5\` | xAI Grok Build (headless needs an explicit permission mode) |
 
 ---
 

@@ -385,7 +385,9 @@ test('grok adapter args() builds headless json invocation with explicit default 
   assert.ok(argv.includes('--no-auto-update'));
   // Always passes explicit -m (avoids retired-slug grok-4.3 billing redirect)
   assert.ok(argv.includes('-m'));
-  assert.ok(argv.includes('grok-build'), 'default model must be grok-build');
+  // ISSUE-grok-model-line-rotation-stale-knownGood.md: grok-build retired
+  // ("unknown model id"); default moved to grok-4.5 (V-verified 2026-07-18).
+  assert.ok(argv.includes('grok-4.5'), 'default model must be grok-4.5');
   // Headless dispatch needs an explicit permission mode (and --always-approve for
   // full-access) or grok stalls with stopReason:"Cancelled" (vendor-preset
   // feedback 2026-06-15).

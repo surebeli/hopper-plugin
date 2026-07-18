@@ -48,7 +48,7 @@ import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
-const VERSION = '0.31.0';
+const VERSION = '0.32.0';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -1973,12 +1973,15 @@ function estimateSpawns(vendorName, introspectionSupported) {
   // copilot: version = 1 (plus zero-spawn FS scan)
   // kimi: --version + provider list = 2 when installed; config fallback = 0
   // mimo: --version + models + auth list = 3
-  // agy/grok: static = 0
+  // grok: `grok models` = 1 (V3: live-parsed, was static/0 — see
+  //   ISSUE-grok-model-line-rotation-stale-knownGood.md)
+  // agy: static = 0
   if (vendorName === 'opencode') return 3;
   if (vendorName === 'mimo') return 3;
   if (vendorName === 'codex') return 2;
   if (vendorName === 'copilot') return 1;
   if (vendorName === 'kimi') return 2;
+  if (vendorName === 'grok') return 1;
   // Fall back to the introspection-level approximation for unknown vendors
   switch (introspectionSupported) {
     case 'full': return 2;

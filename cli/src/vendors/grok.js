@@ -31,8 +31,14 @@ import { applyTaskTypeFloor } from '../subprocess.js';
 
 // Always pass -m explicitly: when -m is omitted the CLI's built-in default is
 // UNCONFIRMED, and retired slugs can silently redirect. Real-world dogfood on
-// 2026-06-02 confirmed `grok-build` as the working coding-model slug.
-const DEFAULT_MODEL = 'grok-build';
+// 2026-06-02 confirmed `grok-build` as the working coding-model slug — but the
+// grok model line ROTATES without notice (see
+// ISSUE-grok-model-line-rotation-stale-knownGood.md): as of 2026-07-16/18,
+// `grok-build` and `grok-composer-2.5-fast` both 400 with `Couldn't set model
+// '<x>': Invalid params: "unknown model id"`. `grok -p ... -m grok-4.5
+// --output-format json` live micro-test on 2026-07-18 (grok CLI v0.2.101)
+// returned `{"text":"OK","stopReason":"EndTurn",...}` — CONFIRMED working.
+const DEFAULT_MODEL = 'grok-4.5';
 
 /** @type {import('../types.js').VendorAdapter} */
 export const grokAdapter = {
@@ -55,13 +61,24 @@ export const grokAdapter = {
   capabilities: {
     modelArg: {
       accepted: 'freeform',
-      knownGood: ['grok-build', 'grok-composer-2.5-fast'],
-      sourceNote: 'grok `-m, --model <MODEL>` (CONFIRMED docs.x.ai/build/cli/headless-scripting). Local dogfood feedback on 2026-06-02 confirmed `grok-build` as the working coding-model slug; `grok-build-0.1` returned `unknown model id`. CLI built-in default when -m omitted is still UNCONFIRMED, so this adapter ALWAYS passes -m (default grok-build). NAME COLLISION: the third-party grok-cli defaults to grok-code-fast-1 and uses different auth/output flags.',
+      // knownGood[0] is the `verified-latest` sentinel target (cli/src/dispatch.js
+      // resolveAdapterOptsForTask + cli/src/policy.js). The grok model LINE is
+      // version-coupled and rotates without notice — xAI retires slugs and this
+      // list rots out from under us (ISSUE-grok-model-line-rotation-stale-
+      // knownGood.md: `grok-build` + `grok-composer-2.5-fast`, both live-good as
+      // of 2026-06-02, returned `Couldn't set model '<x>': Invalid params:
+      // "unknown model id"` by 2026-07-16). Live `--probe grok` (see
+      // cli/src/vendor-probe/grok.js) now parses `grok models`' own "Available
+      // models:" listing and is the PREFERRED self-healing source when its cache
+      // is fresh — this static list is the offline/never-probed fallback baseline
+      // only, not the source of truth.
+      knownGood: ['grok-4.5'],
+      sourceNote: 'grok `-m, --model <MODEL>` (CONFIRMED docs.x.ai/build/cli/headless-scripting). V-verified 2026-07-18 via `grok -p "..." -m grok-4.5 --output-format json` live micro-test on grok CLI v0.2.101 → {"text":"OK","stopReason":"EndTurn",...} (real dispatch, not just `grok models` listing it). `grok models` (live, same date) confirms grok-4.5 is also the CLI\'s own default. `grok-build` / `grok-composer-2.5-fast` (the prior knownGood) both now 400 with "unknown model id" — retired sometime between 2026-06-02 and 2026-07-16. CLI built-in default when -m omitted is still UNCONFIRMED as a matter of policy, so this adapter ALWAYS passes -m explicitly. NAME COLLISION: the third-party grok-cli defaults to grok-code-fast-1 and uses different auth/output flags.',
     },
     reasoningArg: {
       accepted: 'enumerated',
       knownGood: ['low', 'medium', 'high'],
-      sourceNote: 'grok headless `--effort <LEVEL>` exists (CONFIRMED via `grok --help`, vendor-preset feedback 2026-06-15). The adapter forwards opts.reasoning -> --effort ONLY when set (opt-in), so grok builds predating the flag are unaffected by default dispatches. Accepted level vocabulary is not fully documented; low|medium|high are known-good. Older docs.x.ai claimed no CLI effort flag — that is now stale.',
+      sourceNote: 'grok headless `--effort`/`--reasoning-effort <EFFORT>` exists (CONFIRMED via `grok --help` on v0.2.101, re-checked 2026-07-18 — flag present, unchanged). The adapter forwards opts.reasoning -> --effort ONLY when set (opt-in), so grok builds predating the flag are unaffected by default dispatches. Accepted level vocabulary is STILL not enumerated by `grok --help` (unlike --permission-mode/--output-format, which do list "[possible values: ...]"); low|medium|high remain the known-good levels observed, re-confirmed 2026-07-18 alongside the grok-4.5 model-line rotation fix — no xhigh ceiling on grok, unchanged. Older docs.x.ai claimed no CLI effort flag — that is now stale.',
     },
     features: {
       sessionResume: { supported: true, mechanism: '`grok -s <id>` (named headless session) / `-r <id>` (resume) / `-c` (continue cwd). Adapter passes `-r <id>` only when opts.conversationId set. Background+session interaction UNCONFIRMED.' },

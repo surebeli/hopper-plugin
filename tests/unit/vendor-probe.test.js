@@ -396,3 +396,170 @@ test('vendor-probe modules are NOT pulled into --check/--capabilities (lazy impo
   assert.match(indexSrc, /await\s+import\s*\(\s*['"`]\.\.\/vendor-probe\//,
     'vendors/index.js must lazy-import vendor-probe modules so --check/--capabilities stay spawn-free');
 });
+
+// ─── grok parser + live-probe self-heal (ISSUE-grok-model-line-rotation-stale-knownGood.md) ───
+//
+// V3 upgrade: grok's model line rotates without notice (grok-build /
+// grok-composer-2.5-fast both silently became "unknown model id" between
+// 2026-06-02 and 2026-07-16). The probe used to be a hardcoded static
+// catalog (zero-spawn); it now actually spawns `grok models` and parses its
+// "Available models:" bullet list, so a future rename self-heals via
+// `--probe grok` instead of requiring a source-code fix every time xAI
+// renames a model.
+
+test('grok parser: extracts the single default model from a real "grok models" sample (v0.2.101, 2026-07-18)', async () => {
+  const { parseGrokModelsList } = await import('../../cli/src/vendor-probe/grok.js');
+  // Verbatim live capture: `grok models` on grok CLI v0.2.101.
+  const stdout = [
+    'You are logged in with grok.com.',
+    '',
+    'Default model: grok-4.5',
+    '',
+    'Available models:',
+    '  * grok-4.5 (default)',
+    '',
+  ].join('\n');
+  assert.deepEqual(parseGrokModelsList(stdout), ['grok-4.5']);
+});
+
+test('grok parser: extracts multiple bulleted models, dash leaders, and stops at trailing prose', async () => {
+  const { parseGrokModelsList } = await import('../../cli/src/vendor-probe/grok.js');
+  const stdout = [
+    'Available models:',
+    '  * grok-4.5 (default)',
+    '  * grok-4.5-fast',
+    '  - grok-3-mini',
+    '',
+    'Use --model <id> to select a model.',
+  ].join('\n');
+  assert.deepEqual(parseGrokModelsList(stdout), ['grok-4.5', 'grok-4.5-fast', 'grok-3-mini']);
+});
+
+test('grok parser: no "Available models:" header returns [] (never throws)', async () => {
+  const { parseGrokModelsList } = await import('../../cli/src/vendor-probe/grok.js');
+  assert.deepEqual(parseGrokModelsList('You are not logged in. Run `grok login`.'), []);
+  assert.deepEqual(parseGrokModelsList(''), []);
+  assert.deepEqual(parseGrokModelsList(undefined), []);
+});
+
+test('grok parser: header present but no bullet lines follow returns []', async () => {
+  const { parseGrokModelsList } = await import('../../cli/src/vendor-probe/grok.js');
+  assert.deepEqual(parseGrokModelsList('Available models:\nNo models configured.'), []);
+});
+
+test('grok probe: live-parses a fake `grok models` binary into introspection_supported=full', async (t) => {
+  const { mkdtempSync, writeFileSync, rmSync, chmodSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join, delimiter } = await import('node:path');
+  const { probe } = await import('../../cli/src/vendor-probe/grok.js');
+
+  const tmp = mkdtempSync(join(tmpdir(), 'grok-probe-'));
+  t.after(() => rmSync(tmp, { recursive: true, force: true }));
+  const isWindows = process.platform === 'win32';
+  const fakeGrok = join(tmp, isWindows ? 'grok.cmd' : 'grok');
+  const sample = [
+    'You are logged in with grok.com.',
+    '',
+    'Default model: grok-4.5',
+    '',
+    'Available models:',
+    '  * grok-4.5 (default)',
+  ].join('\n');
+  if (isWindows) {
+    writeFileSync(fakeGrok, [
+      '@echo off',
+      'if "%1"=="models" (',
+      `  echo ${sample.split('\n').join('&echo ')}`,
+      '  exit /b 0',
+      ')',
+      'exit /b 2',
+    ].join('\r\n'));
+  } else {
+    writeFileSync(fakeGrok, [
+      '#!/bin/sh',
+      'if [ "$1" = "models" ]; then',
+      `  cat <<'GROKEOF'`,
+      sample,
+      'GROKEOF',
+      '  exit 0',
+      'fi',
+      'exit 2',
+      '',
+    ].join('\n'));
+    chmodSync(fakeGrok, 0o755);
+  }
+
+  const savedPath = process.env.PATH;
+  process.env.PATH = `${tmp}${delimiter}${savedPath || ''}`;
+  try {
+    const r = await probe();
+    assert.equal(r.introspection_supported, 'full');
+    assert.deepEqual(r.models, ['grok-4.5']);
+    assert.match(r.models_source, /grok models/);
+    assert.ok(r.notes.some((n) => /model line rotates/.test(n)), 'notes should explain the self-heal rationale');
+  } finally {
+    if (savedPath === undefined) delete process.env.PATH;
+    else process.env.PATH = savedPath;
+  }
+});
+
+test('grok probe: falls back HONESTLY to static knownGood when `grok models` is unparseable, and says so', async (t) => {
+  const { mkdtempSync, writeFileSync, rmSync, chmodSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join, delimiter } = await import('node:path');
+  const { probe } = await import('../../cli/src/vendor-probe/grok.js');
+  const { grokAdapter } = await import('../../cli/src/vendors/grok.js');
+
+  const tmp = mkdtempSync(join(tmpdir(), 'grok-probe-fallback-'));
+  t.after(() => rmSync(tmp, { recursive: true, force: true }));
+  const isWindows = process.platform === 'win32';
+  const fakeGrok = join(tmp, isWindows ? 'grok.cmd' : 'grok');
+  if (isWindows) {
+    writeFileSync(fakeGrok, [
+      '@echo off',
+      'if "%1"=="models" (',
+      '  echo unexpected output shape, no header',
+      '  exit /b 0',
+      ')',
+      'exit /b 2',
+    ].join('\r\n'));
+  } else {
+    writeFileSync(fakeGrok, [
+      '#!/bin/sh',
+      'if [ "$1" = "models" ]; then',
+      '  echo "unexpected output shape, no header"',
+      '  exit 0',
+      'fi',
+      'exit 2',
+      '',
+    ].join('\n'));
+    chmodSync(fakeGrok, 0o755);
+  }
+
+  const savedPath = process.env.PATH;
+  process.env.PATH = `${tmp}${delimiter}${savedPath || ''}`;
+  try {
+    const r = await probe();
+    assert.equal(r.introspection_supported, 'partial', 'unparseable live output degrades to partial, not a silent full/none');
+    assert.deepEqual(r.models, grokAdapter.capabilities.modelArg.knownGood, 'falls back to the adapter static knownGood verbatim');
+    assert.match(r.models_source, /static knownGood fallback/);
+    assert.ok(r.notes.some((n) => /did not match the expected/.test(n)), 'notes must explain WHY it fell back');
+  } finally {
+    if (savedPath === undefined) delete process.env.PATH;
+    else process.env.PATH = savedPath;
+  }
+});
+
+test('grok probe: binary not on PATH returns introspection_supported=none (unchanged contract)', async () => {
+  const { probe } = await import('../../cli/src/vendor-probe/grok.js');
+  const savedPath = process.env.PATH;
+  process.env.PATH = '';
+  try {
+    const r = await probe();
+    assert.equal(r.introspection_supported, 'none');
+    assert.deepEqual(r.models, []);
+  } finally {
+    if (savedPath === undefined) delete process.env.PATH;
+    else process.env.PATH = savedPath;
+  }
+});

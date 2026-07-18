@@ -346,7 +346,7 @@ For quick reference (re-verify quarterly per each adapter's `staleAfter` date):
 | **opencode** | freeform (`<provider>/<model>`) | IGNORED | ✓ (per-machine session IDs; NOT cross-OS) | ✗ | ✓ |
 | **copilot** | freeform | IGNORED | partial (`--resume` picker; UNCONFIRMED ID arg) | ✗ | ✓ |
 | **agy** | IGNORED | IGNORED | UNCONFIRMED | ✗ (`--log-file` is diagnostic, not answer) | ✓ |
-| **grok** | freeform (`-m`; default `grok-build`) | IGNORED (no CLI flag) | ✓ (`-s` / `-r` / `-c`) | ✗ (stdout only) | ✓ (`--output-format streaming-json`) |
+| **grok** | freeform (`-m`; default `grok-4.5`) | IGNORED (no CLI flag) | ✓ (`-s` / `-r` / `-c`) | ✗ (stdout only) | ✓ (`--output-format streaming-json`) |
 | **mimo** | freeform (`<provider>/<model>`) | `minimal \| low \| medium \| high \| xhigh` (`xhigh` -> `max`) | ✓ (`--session <id>` / `--continue`) | ✗ | ✓ (`--format json`) |
 
 **Honest gotchas surfaced by the capability data**:
@@ -449,10 +449,10 @@ Spawns the vendor CLI to query model catalog. Costs subprocesses; this is the **
 | copilot  | `partial`               | 1 subprocess + FS   | `version` + filesystem scan of `~/.copilot/agents/*.agent.md` (model list server-side per-tier, not exposed) |
 | kimi     | `partial` / `config-only` | 2 subprocesses when installed; config fallback is 0 | Kimi 0.14+ reads `--version` + `provider list --json`; fallback reads `~/.kimi-code/config.toml` (or `$KIMI_CODE_HOME`; legacy `~/.kimi/config.{toml,json}`) `[models.NAME]` blocks |
 | agy      | `none`                  | 0 subprocesses      | Static (`gemini-3.5-flash` baked into agy itself)   |
-| grok     | `none`                  | 0 subprocesses      | Static (`grok-build`, `grok-4.3`)                   |
+| grok     | `full` / `partial`      | 1 subprocess        | `grok models` (live parse of its "Available models:" list); falls back to static knownGood (`partial`) on spawn/parse failure — see ISSUE-grok-model-line-rotation-stale-knownGood.md |
 
 ```bash
-hopper-dispatch --probe                    # probe all vendors (~11 subprocesses total when Kimi and MiMo are installed: codex 2 + kimi 2 + opencode 3 + copilot 1 + mimo 3; agy/grok 0)
+hopper-dispatch --probe                    # probe all vendors (~12 subprocesses total when Kimi and MiMo are installed: codex 2 + kimi 2 + opencode 3 + copilot 1 + mimo 3 + grok 1; agy 0)
 hopper-dispatch --probe codex              # probe one vendor only
 ```
 

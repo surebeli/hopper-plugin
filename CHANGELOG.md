@@ -1,0 +1,87 @@
+# Changelog
+
+All notable changes to hopper-plugin are documented in this file. Format loosely
+follows [Keep a Changelog](https://keepachangelog.com/); versioning follows the
+project's established convention (see "Versioning" below) rather than strict
+SemVer patch/minor semantics.
+
+This file starts at 0.32.0 — prior releases (0.1.0 through 0.31.0) are documented
+in git commit history (`git log --oneline`) and `.hopper/MANIFEST.md`'s 修改记录
+table; they are not backfilled here.
+
+## Versioning
+
+Historically every release (0.20.0 → 0.31.0, 12 releases) bumps the **minor**
+digit and leaves patch at `0`, regardless of whether the change was tagged
+`fix:` or `feat:` in the commit message — patch-digit releases (0.7.1, 0.8.1,
+0.11.1) are rare early-project exceptions. New entries here follow that
+convention: any user-observable behavior change (new capability, fixed defect,
+changed default) bumps minor; patch is reserved for the rare non-functional
+tweak.
+
+## [0.32.0] - 2026-07-18
+
+### Fixed
+
+- **grok adapter `knownGood` was stale, breaking every `verified-latest`
+  dispatch to grok.** xAI rotated the Grok Build CLI's model line between
+  2026-06-02 and 2026-07-16: `grok-build` and `grok-composer-2.5-fast` (the
+  prior `knownGood`) both now return `Couldn't set model '<x>': Invalid
+  params: "unknown model id"`. `knownGood` is now `['grok-4.5']`
+  (`cli/src/vendors/grok.js`, live-verified 2026-07-18 via
+  `grok -p ... -m grok-4.5` micro-test), and `DEFAULT_MODEL` follows.
+  See `ISSUE-grok-model-line-rotation-stale-knownGood.md`.
+
+### Changed
+
+- **`hopper-dispatch --probe grok` now live-parses `grok models` instead of
+  returning a hardcoded static catalog.** This was the deeper root cause
+  behind the knownGood staleness above: the old probe admitted in its own
+  comments that live introspection was an unimplemented follow-up, so
+  `--probe grok` could never self-heal a model-line rotation — it just wrote
+  the same stale hardcoded list back to the cache. `cli/src/vendor-probe/grok.js`
+  now spawns `grok models` (one subprocess, 30s timeout, no retry — mirrors
+  the codex/opencode/kimi probe pattern), parses the "Available models:"
+  bullet list (new exported pure parser `parseGrokModelsList`), and reports
+  `introspection_supported: 'full'` with the live catalog. On spawn/parse
+  failure it degrades honestly to the adapter's static `knownGood`
+  (`introspection_supported: 'partial'`, notes explain why) instead of
+  silently reporting stale or empty data. `estimateSpawns()` in
+  `cli/bin/hopper-dispatch` updated (grok: 0 → 1 subprocess per probe).
+
+### Documentation
+
+- `docs/release/INSTALL-MATRIX.md`, `commands/models.md`,
+  `cli/src/scaffold.js`'s example vendor table: grok references updated from
+  `grok-build` to `grok-4.5` and from "static" to "live `grok models` parse
+  with static fallback".
+- Recorded a follow-up hardening idea in
+  `ISSUE-grok-model-line-rotation-stale-knownGood.md`: `--check-model`'s
+  `verified` verdict and the `verified-latest` sentinel resolution
+  (`cli/src/model-check.js`, `cli/src/policy.js`) trust the static
+  `knownGood` list unconditionally and never cross-check it against a fresh
+  probe cache, so a stale `knownGood` entry (as above) produces a false
+  "verified" even on a machine that has already probed and knows better.
+  `cli/src/setup.js`'s `--setup --deep` / `--doctor --deep` path already has
+  a live-vs-static reconciliation mechanism (`modelReconcile` /
+  `reconcileModels`) but `--check-model` and `verified-latest` don't reuse
+  it. Not fixed in this release — flagged for follow-up.
+
+### Tests
+
+- `tests/unit/vendor-probe.test.js`: 8 new grok cases — 4 pure-function
+  fixtures for `parseGrokModelsList` (single model, multiple models with
+  dash/asterisk leaders, missing header, header with no bullets) + 3
+  fake-binary integration tests covering the `full` / `partial`-fallback /
+  `none` introspection paths.
+- Updated 3 existing tests that read the live grok adapter state and
+  asserted the now-retired `grok-build` value: `tests/unit/
+  dispatch-fallback-chain.test.js`, `tests/unit/vendor-model-auth.test.js`,
+  `tests/unit/vendors-contract.test.js`.
+
+### Sync points touched
+
+`package.json`, `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`,
+`.claude-plugin/marketplace.json` (catalog + plugin entry), `commands/smoke.md`,
+`commands/vendors.md`; `plugins/hopper/` vendored copy refreshed via
+`node scripts/sync-vendored-plugin.mjs`.

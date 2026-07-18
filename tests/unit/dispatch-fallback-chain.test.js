@@ -116,7 +116,10 @@ test('model chain: Model rule verified-latest resolves to the vendor knownGood[0
 
 test('model chain: sentinel resolution is vendor-scoped (grok gets its own knownGood[0])', () => {
   const out = resolveAdapterOptsForTask(resolvedWith('grok', 'code-impl', { effortPolicy: '', modelRule: 'verified-latest' }), {});
-  assert.equal(out.model, 'grok-build');
+  // ISSUE-grok-model-line-rotation-stale-knownGood.md: grok-build retired
+  // ("unknown model id") between 2026-06-02 and 2026-07-16; knownGood[0]
+  // moved to grok-4.5 (V-verified 2026-07-18 live micro-test).
+  assert.equal(out.model, 'grok-4.5');
 });
 
 test('model chain: unbound Model rule (OOB) falls through silently to vendor CLI default (--model omitted)', () => {

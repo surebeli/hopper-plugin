@@ -84,7 +84,13 @@ test('V2 agy: --model forwarded as a verbatim label; modelArg freeform with the 
 
 test('V2 knownGood corrections: grok drops stale grok-4.3; codex includes gpt-5.4', () => {
   const grok = getAdapter('grok').capabilities.modelArg.knownGood;
-  assert.ok(grok.includes('grok-build') && grok.includes('grok-composer-2.5-fast'));
+  // ISSUE-grok-model-line-rotation-stale-knownGood.md: grok-build /
+  // grok-composer-2.5-fast (the prior knownGood, asserted here through
+  // 0.31.0) were retired to "unknown model id" between 2026-06-02 and
+  // 2026-07-16; knownGood now points at the V-verified 2026-07-18 default.
+  assert.ok(grok.includes('grok-4.5'), 'grok-4.5 is the live-verified knownGood[0]');
+  assert.ok(!grok.includes('grok-build'), 'retired grok-build must not linger in knownGood');
+  assert.ok(!grok.includes('grok-composer-2.5-fast'), 'retired grok-composer-2.5-fast must not linger in knownGood');
   assert.ok(!grok.includes('grok-4.3'), 'stale grok-4.3 removed');
   const codexModelArg = getAdapter('codex').capabilities.modelArg;
   const codex = codexModelArg.knownGood;
