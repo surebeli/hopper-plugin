@@ -44,6 +44,9 @@
  * @property {'read-only'|'workspace-write'|'danger-full-access'} [sandbox]  Vendor permission mode. Dispatcher defaults to danger-full-access unless task text explicitly says read-only.
  * @property {string} [reasoning]     Reasoning effort hint (codex honors the enum directly; mimo maps it to --variant; kimi/opencode/grok currently ignore or use config/vendor-specific knobs instead of argv)
  * @property {string} [model]         Optional model override
+ * @property {string|null} [requestedSelector] Original user `--model` value for audit only; set by the dispatcher and never used for runtime comparison
+ * @property {string|null} [effectiveSelector] Policy-resolved selector actually passed to the adapter; null means vendor default
+ * @property {'user-argv'|'policy'|'vendor-default'} [effectiveSelectorSource] Provenance of effectiveSelector
  * @property {boolean} [webSearch]    Optional web search enable
  * @property {string} [conversationId] Optional session resume ID
  * @property {string} [logFile]       Adapter log file path (set by runner before adapter.args() so adapter can thread it through)
@@ -73,11 +76,28 @@
 
 /**
  * Structured output after subprocess runs and adapter parses raw output.
+ * @typedef {object} ModelAttestation
+ * @property {string[]} observedModels Stable, vendor-reported actual model identifiers for this result only
+ * @property {string} source Closed adapter metadata source for observedModels
+ * @property {string} observedAt ISO-8601 observation time
+ */
+
+/**
+ * Sanitized versioned selector metadata used for zero-spawn classification.
+ * @typedef {object} SelectorMetadataEnvelope
+ * @property {number} schema_version Currently 1
+ * @property {string} vendor Exact adapter vendor binding
+ * @property {object[]} selectors Exact-literal alias or concrete records only; never an auto record
+ */
+
+/**
+ * Structured output after subprocess runs and adapter parses raw output.
  * @typedef {object} TaskOutput
  * @property {string} text            Primary response text
  * @property {object} [usage]         Optional token usage info (vendor-specific shape)
  * @property {string} [error]         Set if adapter detected failure (e.g. silent auth-fail)
  * @property {'success'|'auth-fail'|'timeout'|'permission-fail'|'unknown-fail'} status
+ * @property {ModelAttestation} [modelAttestation] Optional structured runtime evidence; absent means no runtime proof
  */
 
 /**
@@ -98,6 +118,7 @@
  * @property {function(AdapterOpts): Record<string,string>} [env]  Optional extra env vars merged over process.env for the vendor spawn (e.g. codex CODEX_HOME auto-isolation). Threaded by dispatch.js + hopper-runner.
  * @property {function(string, string): {logPath: string|null}} [prepareLog]  Optional per-dispatch log file setup
  * @property {string[]} [knownInstallPaths]                   Phase 6c F2: deterministic vendor-installer locations (NOT vendor-retry orchestration). Walked by resolveCommandWithKnownPaths when PATH lookup fails. Each entry must be an absolute path to the binary (e.g. ~/AppData/Local/agy/bin/agy.exe; expand via os.homedir() before declaring).
+ * @property {SelectorMetadataEnvelope} [selectorMetadata]   Optional sanitized, versioned local selector metadata; classification remains zero-spawn.
  */
 
 // Re-export marker (no actual exports — JSDoc only)

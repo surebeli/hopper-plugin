@@ -230,6 +230,11 @@ export function taskTextRequestsReadOnly(resolved) {
 export function resolveAdapterOptsForTask(resolved, adapterOpts = {}) {
   const out = { ...adapterOpts };
   const taskType = resolved?.task?.taskType;
+  // Preserve argv provenance before policy/sentinel resolution and advisory
+  // selector normalization mutate out.model. Runtime attestation must compare
+  // only the effective selector, never this requested audit value.
+  const requestedSelector = typeof adapterOpts.model === 'string' ? adapterOpts.model : null;
+  let modelResolvedByPolicy = false;
   // Batch 2: notices surfaced by the fallback chains below (policy-cell resolution,
   // sentinel resolution, effort clamp visibility) — collected here and read by the
   // CLI print layer as `effectiveAdapterOpts.policyNotices` immediately after this
@@ -249,6 +254,7 @@ export function resolveAdapterOptsForTask(resolved, adapterOpts = {}) {
     const parsedRule = parseModelRuleCell(resolved.policy.modelRule);
     if (parsedRule.status === 'ok') {
       out.model = parsedRule.sentinel; // resolved to a real name below (sentinel-or-normalize)
+      modelResolvedByPolicy = true;
       notices.push(`model resolved from AGENTS.md Model rule (task-type '${taskType}'): ${parsedRule.sentinel}`);
     } else if (parsedRule.status === 'unparseable') {
       notices.push(`Model rule cell for task-type '${taskType}' references an unrecognized sentinel ('${String(resolved.policy.modelRule).trim()}') — ignoring; vendor CLI default will be used.`);
@@ -277,6 +283,11 @@ export function resolveAdapterOptsForTask(resolved, adapterOpts = {}) {
       }
     } catch (_) { /* normalization is advisory; keep the original on any error */ }
   }
+  out.requestedSelector = requestedSelector;
+  out.effectiveSelector = out.model || null;
+  out.effectiveSelectorSource = out.effectiveSelector === null
+    ? 'vendor-default'
+    : (modelResolvedByPolicy ? 'policy' : 'user-argv');
   // Permission default (precedence, most specific first):
   //   1. explicit --sandbox (already in out.sandbox) wins
   //   2. read-only task TEXT (brief/spec says read-only / 只读)

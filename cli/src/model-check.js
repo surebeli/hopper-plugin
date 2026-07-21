@@ -90,6 +90,8 @@ export function detectSplicedEffort(model) {
  *   cacheMissing: boolean,
  *   splicedEffort?: string,
  *   hint: string[],
+ *   selector_valid: 'verified'|'catalog-only'|'not-found'|'effort-spliced',
+ *   runtime_attestation: 'not-run',
  * }}
  */
 export function evaluateModelCheck(vendor, rawModel, knownGood = [], catalog = null) {
@@ -97,6 +99,14 @@ export function evaluateModelCheck(vendor, rawModel, knownGood = [], catalog = n
   const cacheMissing = catalog === null || catalog === undefined;
   const cat = Array.isArray(catalog) ? catalog : [];
   const model = typeof rawModel === 'string' ? rawModel.trim() : String(rawModel ?? '');
+  // Keep the historical verdict/exit code contract intact while making the
+  // zero-spawn evidence boundary explicit. This command validates a selector
+  // against static/cache catalog evidence; it never attests a runtime model.
+  const finish = (value) => ({
+    ...value,
+    selector_valid: value.verdict,
+    runtime_attestation: 'not-run',
+  });
 
   // Step 1 (req #3): V4 normalization BEFORE matching — same normalizer + same
   // knownGood source the dispatch chokepoint (resolveAdapterOptsForTask) uses,
@@ -106,16 +116,16 @@ export function evaluateModelCheck(vendor, rawModel, knownGood = [], catalog = n
 
   const inVerified = kg.some((g) => modelKeysMatch(vendor, g, normalized));
   if (inVerified) {
-    return {
+    return finish({
       vendor, model, normalized, verdict: 'verified', exitCode: CHECK_MODEL_EXIT.verified,
       verifiedList: kg, catalog: cat, cacheMissing,
       hint: [`'${normalized}' is on the ${vendor} verified/known-good list.`],
-    };
+    });
   }
 
   const inCatalog = !cacheMissing && cat.some((c) => modelKeysMatch(vendor, c, normalized));
   if (inCatalog) {
-    return {
+    return finish({
       vendor, model, normalized, verdict: 'catalog-only', exitCode: CHECK_MODEL_EXIT['catalog-only'],
       verifiedList: kg, catalog: cat, cacheMissing,
       hint: [
@@ -125,7 +135,7 @@ export function evaluateModelCheck(vendor, rawModel, knownGood = [], catalog = n
           `older CLI still rejects with 400 — see codex.js's gpt-5.6-* note).`,
         `Pin to a verified name, or run one small real dispatch to confirm before relying on it.`,
       ],
-    };
+    });
   }
 
   // Dedicated effort-splice diagnosis (req #3) — only reached once neither list
@@ -133,7 +143,7 @@ export function evaluateModelCheck(vendor, rawModel, knownGood = [], catalog = n
   const splicedEffort = detectSplicedEffort(model);
   if (splicedEffort) {
     const base = model.slice(0, model.length - splicedEffort.length - 1);
-    return {
+    return finish({
       vendor, model, normalized, verdict: 'effort-spliced', exitCode: CHECK_MODEL_EXIT['effort-spliced'],
       verifiedList: kg, catalog: cat, cacheMissing, splicedEffort,
       hint: [
@@ -141,13 +151,13 @@ export function evaluateModelCheck(vendor, rawModel, knownGood = [], catalog = n
         `--model and --reasoning are separate flags — try:`,
         `  --model ${base} --reasoning ${splicedEffort}`,
       ],
-    };
+    });
   }
 
   // Degraded path (req #4): never-probed vendor — only the static knownGood was
   // checkable, say so plainly instead of implying a full catalog search happened.
   if (cacheMissing) {
-    return {
+    return finish({
       vendor, model, normalized, verdict: 'not-found', exitCode: CHECK_MODEL_EXIT['not-found'],
       verifiedList: kg, catalog: cat, cacheMissing: true,
       hint: [
@@ -157,10 +167,10 @@ export function evaluateModelCheck(vendor, rawModel, knownGood = [], catalog = n
         `Verified: ${kg.join(', ') || '(none)'}`,
         `Run \`hopper-dispatch --probe ${vendor}\` to populate the catalog, then re-check.`,
       ],
-    };
+    });
   }
 
-  return {
+  return finish({
     vendor, model, normalized, verdict: 'not-found', exitCode: CHECK_MODEL_EXIT['not-found'],
     verifiedList: kg, catalog: cat, cacheMissing: false,
     hint: [
@@ -169,5 +179,5 @@ export function evaluateModelCheck(vendor, rawModel, knownGood = [], catalog = n
       `Catalog (${cat.length}): ${cat.slice(0, 12).join(', ') || '(none)'}${cat.length > 12 ? ', ...' : ''}`,
       `Run \`hopper-dispatch --probe ${vendor}\` to refresh the catalog, or \`hopper-dispatch --models ${vendor}\` to browse the cached list.`,
     ],
-  };
+  });
 }

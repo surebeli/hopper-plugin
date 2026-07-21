@@ -101,6 +101,61 @@ export function modelKeysMatch(vendor, a, b) {
 }
 
 /**
+ * Parse exactly one provider/model pair for runtime identity comparison.
+ * This intentionally does not share any selector-validation canonicalization:
+ * a bare value, an extra namespace, or an empty component is not a structured
+ * runtime identity.
+ * @param {unknown} value
+ * @returns {{provider:string, model:string}|null}
+ */
+export function parseStrictProviderModel(value) {
+  if (typeof value !== 'string') return null;
+  const parts = value.trim().split('/');
+  if (parts.length !== 2) return null;
+  const [provider, model] = parts.map((part) => part.trim());
+  return provider && model ? { provider, model } : null;
+}
+
+/**
+ * Compare one observed runtime model identity with a validated expected identity.
+ * This is deliberately separate from modelKeysMatch(): runtime attestation must
+ * never strip namespaces, collapse separators, tail-match, or expand aliases.
+ * @param {string} vendor
+ * @param {object} expectedIdentity
+ * @param {unknown} observedModel
+ * @returns {'match'|'non-match'|'uncomparable'}
+ */
+export function compareRuntimeIdentity(vendor, expectedIdentity, observedModel) {
+  if (!expectedIdentity || typeof expectedIdentity !== 'object' || typeof observedModel !== 'string') {
+    return 'uncomparable';
+  }
+  const observed = observedModel.trim();
+  if (!observed) return 'uncomparable';
+
+  if (vendor === 'claude') {
+    if (expectedIdentity.identity_kind !== 'opaque-id' || typeof expectedIdentity.id !== 'string' || !expectedIdentity.id.trim()) {
+      return 'uncomparable';
+    }
+    return observed === expectedIdentity.id.trim() ? 'match' : 'non-match';
+  }
+
+  if (vendor === 'opencode') {
+    if (expectedIdentity.identity_kind !== 'provider-model'
+      || typeof expectedIdentity.provider !== 'string' || !expectedIdentity.provider.trim()
+      || typeof expectedIdentity.model !== 'string' || !expectedIdentity.model.trim()) {
+      return 'uncomparable';
+    }
+    const parsed = parseStrictProviderModel(observed);
+    if (!parsed) return 'uncomparable';
+    return parsed.provider === expectedIdentity.provider.trim() && parsed.model === expectedIdentity.model.trim()
+      ? 'match'
+      : 'non-match';
+  }
+
+  return 'uncomparable';
+}
+
+/**
  * Reconcile a vendor's hardcoded `knownGood` defaults against a LIVE-enumerated
  * model list (from --probe / doctor --deep). Advisory, vendor-scoped drift report:
  *   - matched:         knownGood entries the live catalog still lists

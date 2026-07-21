@@ -20,6 +20,8 @@ test('verified: a knownGood model returns verdict=verified, exit 0', () => {
   assert.equal(r.exitCode, CHECK_MODEL_EXIT.verified);
   assert.equal(r.normalized, 'gpt-5.5');
   assert.deepEqual(r.verifiedList, ['gpt-5.5', 'gpt-5.4']);
+  assert.equal(r.selector_valid, 'verified');
+  assert.equal(r.runtime_attestation, 'not-run');
 });
 
 test('verified wins even when the SAME model also happens to be in the catalog', () => {
@@ -41,6 +43,8 @@ test('catalog-only: a probed-but-not-verified model returns verdict=catalog-only
   assert.equal(r.exitCode, CHECK_MODEL_EXIT['catalog-only']);
   assert.ok(r.hint.some((h) => /NOT on the verified list/.test(h)));
   assert.ok(r.hint.some((h) => /400/.test(h)), 'hint explains catalog != dispatch-time acceptance');
+  assert.equal(r.selector_valid, 'catalog-only');
+  assert.equal(r.runtime_attestation, 'not-run');
 });
 
 test('not-found: neither verified nor catalog has it (cache present), exit 1', () => {
@@ -51,6 +55,8 @@ test('not-found: neither verified nor catalog has it (cache present), exit 1', (
   assert.equal(r.cacheMissing, false);
   assert.ok(r.hint.some((h) => h.includes('Verified:')));
   assert.ok(r.hint.some((h) => h.includes('Catalog')));
+  assert.equal(r.selector_valid, 'not-found');
+  assert.equal(r.runtime_attestation, 'not-run');
 });
 
 // ─── V4 normalization reuse (req #3: normalize BEFORE matching) ───
@@ -119,6 +125,8 @@ test('effort-spliced: gpt-5.5-xhigh gets a dedicated verdict + exit 1, hint sugg
   assert.equal(r.exitCode, CHECK_MODEL_EXIT['effort-spliced']);
   assert.equal(r.splicedEffort, 'xhigh');
   assert.ok(r.hint.some((h) => h.includes('--model gpt-5.5 --reasoning xhigh')));
+  assert.equal(r.selector_valid, 'effort-spliced');
+  assert.equal(r.runtime_attestation, 'not-run');
 });
 
 test('effort-spliced: fires even when the probe cache is missing (checked before the cache-missing not-found path)', () => {

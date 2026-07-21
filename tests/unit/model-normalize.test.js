@@ -3,7 +3,7 @@
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { normalizeModel, reconcileModels, modelKeysMatch } from '../../cli/src/model-normalize.js';
+import { normalizeModel, reconcileModels, modelKeysMatch, compareRuntimeIdentity } from '../../cli/src/model-normalize.js';
 import { resolveAdapterOptsForTask } from '../../cli/src/dispatch.js';
 
 test('V4 normalizeModel: codex — case/dash/dot-insensitive, prefix-strip, FULL-key equality, passthrough', () => {
@@ -145,4 +145,31 @@ test('V3 modelKeysMatch: provider-prefixed — bare↔prefixed matches by tail, 
   assert.ok(modelKeysMatch('mimo', 'xiaomi/mimo-v2.5-pro', 'mimo-v2.5-pro'), 'a bare live id matches a prefixed default by tail');
   assert.ok(modelKeysMatch('mimo', 'xiaomi/mimo-v2.5-pro', 'xiaomi/mimo-v2.5-pro'), 'identical prefixed ids match');
   assert.ok(!modelKeysMatch('mimo', 'xiaomi/mimo-v2.5-pro', 'openai/mimo-v2.5-pro'), 'two providers same tail → NOT a match (real drift not hidden)');
+});
+
+test('strict runtime identity comparator is separate from legacy modelKeysMatch', () => {
+  assert.ok(modelKeysMatch('opencode', 'openai/gpt-5', 'gpt-5'), 'legacy validation deliberately accepts a bare tail');
+  assert.equal(
+    compareRuntimeIdentity('opencode', { identity_kind: 'provider-model', provider: 'openai', model: 'gpt-5' }, 'gpt-5'),
+    'uncomparable',
+    'runtime proof must not inherit legacy tail matching',
+  );
+});
+
+test('V4 resolveAdapterOptsForTask retains raw/effective selector provenance', () => {
+  const explicit = resolveAdapterOptsForTask(
+    { vendor: 'codex', task: { taskType: 'code-impl', brief: 'x' }, taskSpec: '' },
+    { model: 'GPT-5.5' },
+  );
+  assert.equal(explicit.requestedSelector, 'GPT-5.5');
+  assert.equal(explicit.effectiveSelector, 'gpt-5.5');
+  assert.equal(explicit.effectiveSelectorSource, 'user-argv');
+
+  const fallback = resolveAdapterOptsForTask(
+    { vendor: 'codex', task: { taskType: 'code-impl', brief: 'x' }, taskSpec: '', policy: { modelRule: '' } },
+    {},
+  );
+  assert.equal(fallback.requestedSelector, null);
+  assert.equal(fallback.effectiveSelector, null);
+  assert.equal(fallback.effectiveSelectorSource, 'vendor-default');
 });
