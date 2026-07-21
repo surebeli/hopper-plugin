@@ -41,25 +41,90 @@ export interface TaskProgressResponse {
   events: ProgressEvent[];
 }
 
+export type VendorBinaryAvailability = 'present' | 'missing' | 'unknown';
+export type VendorBinaryBasename = 'agy' | 'claude' | 'codex' | 'copilot' | 'grok' | 'kimi' | 'mimo' | 'opencode' | 'unknown' | null;
+export type VendorSourceKind = 'static' | 'unavailable' | 'adapter-aliases' | 'cli-catalog' | 'config' | 'unknown';
+export type VendorSourceLabel = 'adapter-static-selectors' | 'unavailable' | 'claude-selector-metadata' | 'opencode-cli-catalog' | 'kimi-configured-aliases' | 'unknown';
+export type VendorDiagnosticCode =
+  | 'none'
+  | 'metadata-envelope-malformed'
+  | 'selector-metadata-cache-schema-unsupported'
+  | 'selector-metadata-cache-adapter-mismatch'
+  | 'selector-metadata-cache-expired'
+  | 'selector-metadata-cache-missing'
+  | 'runtime-model-metadata-malformed'
+  | 'runtime-model-metadata-conflict'
+  | 'runtime-model-metadata-absent'
+  | 'inventory-cache-version-unsupported'
+  | 'inventory-cache-malformed'
+  | 'inventory-cache-recovery-backup-create-failed'
+  | 'inventory-cache-recovery-replace-failed'
+  | 'inventory-cache-recovery-durability-unknown'
+  | 'capability-failed'
+  | 'probe-failed'
+  | 'catalog-unavailable'
+  | 'unknown';
+export type VendorDiagnosticState = 'none' | 'unavailable' | 'degraded' | 'unknown';
+
 export interface Vendor {
   name: string;
-  installStatus: 'installed' | 'cached' | 'unknown';
-  binaryPath: string | null;
   cachedAt: string | null;
   cachedModels: string[];
-  cacheError: string | null;
-  introspection: string | null;
-  modelsSource: string | null;
-  notes: string[];
   reasoningLevels: string[];
-  stale: boolean;
-  staleness: string;
+  binaryAvailability: VendorBinaryAvailability;
+  binaryBasename: VendorBinaryBasename;
+  sourceKind: VendorSourceKind;
+  sourceLabel: VendorSourceLabel;
+  diagnosticCode: VendorDiagnosticCode;
+  diagnosticState: VendorDiagnosticState;
+  notes: [];
+  cacheError: null;
+  modelsSource: null;
+  binaryPath: null;
 }
 
 export interface VendorsResponse {
   vendors: Vendor[];
-  cacheError: string | null;
   generatedAt: string;
+  inventoryContractVersion?: number | null;
+}
+
+const VISIBLE_BINARY_AVAILABILITY = new Set(['present', 'missing']);
+const VISIBLE_BINARY_BASENAMES = new Set(['agy', 'claude', 'codex', 'copilot', 'grok', 'kimi', 'mimo', 'opencode']);
+const VISIBLE_SOURCE_KINDS = new Set(['static', 'unavailable', 'adapter-aliases', 'cli-catalog', 'config']);
+const VISIBLE_SOURCE_LABELS = new Set([
+  'adapter-static-selectors', 'unavailable', 'claude-selector-metadata', 'opencode-cli-catalog', 'kimi-configured-aliases',
+]);
+const VISIBLE_DIAGNOSTIC_CODES = new Set([
+  'none', 'metadata-envelope-malformed', 'selector-metadata-cache-schema-unsupported',
+  'selector-metadata-cache-adapter-mismatch', 'selector-metadata-cache-expired', 'selector-metadata-cache-missing',
+  'runtime-model-metadata-malformed', 'runtime-model-metadata-conflict', 'runtime-model-metadata-absent',
+  'inventory-cache-version-unsupported', 'inventory-cache-malformed', 'inventory-cache-recovery-backup-create-failed',
+  'inventory-cache-recovery-replace-failed', 'inventory-cache-recovery-durability-unknown', 'capability-failed',
+  'probe-failed', 'catalog-unavailable',
+]);
+const VISIBLE_DIAGNOSTIC_STATES = new Set(['none', 'unavailable', 'degraded']);
+
+function visibleValue(value: unknown, allowed: Set<string>) {
+  return typeof value === 'string' && allowed.has(value) ? value : 'unavailable';
+}
+
+/**
+ * Old, missing, or future inventory contracts must render as unavailable.
+ * This helper intentionally accepts untyped JSON and never reads legacy shims.
+ */
+export function normalizeVendorDisplay(vendor: Partial<Vendor> | null | undefined) {
+  const binaryAvailability = visibleValue(vendor?.binaryAvailability, VISIBLE_BINARY_AVAILABILITY);
+  const binaryBasename = visibleValue(vendor?.binaryBasename, VISIBLE_BINARY_BASENAMES);
+  const sourceKind = visibleValue(vendor?.sourceKind, VISIBLE_SOURCE_KINDS);
+  const sourceLabel = visibleValue(vendor?.sourceLabel, VISIBLE_SOURCE_LABELS);
+  const diagnosticCode = visibleValue(vendor?.diagnosticCode, VISIBLE_DIAGNOSTIC_CODES);
+  const diagnosticState = visibleValue(vendor?.diagnosticState, VISIBLE_DIAGNOSTIC_STATES);
+  return {
+    binary: binaryAvailability === 'unavailable' ? 'unavailable' : `${binaryAvailability} (${binaryBasename})`,
+    diagnostic: diagnosticCode === 'unavailable' || diagnosticState === 'unavailable' ? 'unavailable' : diagnosticCode,
+    source: sourceKind === 'unavailable' || sourceLabel === 'unavailable' ? 'unavailable' : sourceLabel,
+  };
 }
 
 export interface ProbeResponse {
