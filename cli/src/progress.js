@@ -100,6 +100,15 @@ const OPTIONAL_EVENT_FIELDS = [
   'process_cleanup',
   'process_cleanup_attempted',
   'process_cleanup_method',
+  'requested_selector',
+  'effective_selector',
+  'effective_selector_source',
+  'selector_kind',
+  'observed_models',
+  'model_attestation_source',
+  'model_attestation_observed_at',
+  'resolution_status',
+  'resolution_detail',
 ];
 
 /**

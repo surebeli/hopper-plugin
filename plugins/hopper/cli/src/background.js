@@ -61,8 +61,18 @@ function parseScalar(s) {
   if (s === 'false') return false;
   // numeric (integers only — we don't store floats)
   if (/^-?\d+$/.test(s)) return parseInt(s, 10);
-  // quoted string
-  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+  // JSON double-quoted strings are used for scalar-safe attestation values.
+  if (s.startsWith('"') && s.endsWith('"')) {
+    try {
+      const parsed = JSON.parse(s);
+      if (typeof parsed === 'string') return parsed;
+    } catch (_) {
+      // Preserve legacy permissive parsing below for malformed hand-written YAML.
+    }
+    return s.slice(1, -1);
+  }
+  // quoted legacy string
+  if (s.startsWith("'") && s.endsWith("'")) {
     return s.slice(1, -1);
   }
   return s;
@@ -80,6 +90,10 @@ function emitScalar(v) {
     return v;
   }
   throw new Error(`Cannot emit scalar of type ${typeof v}: ${v}`);
+}
+
+function emitJsonStringScalar(v) {
+  return JSON.stringify(String(v));
 }
 
 /**
@@ -125,7 +139,7 @@ export function writeFrontmatter(path, fm) {
   const lines = [];
   for (const [k, v] of Object.entries(rest)) {
     if (v === undefined) continue;
-    lines.push(`${k}: ${emitScalar(v)}`);
+    lines.push(`${k}: ${k === 'observed_models_json' ? emitJsonStringScalar(v) : emitScalar(v)}`);
   }
   const out = `---\n${lines.join('\n')}\n---\n${body}`;
   const tmp = `${path}.tmp.${process.pid}.${Date.now()}`;
@@ -352,7 +366,7 @@ export function resolveVendorCwd(hopperDir) {
   return dirname(resolve(hopperDir));
 }
 
-export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, runnerPath, hostNative = null, stdinInput = null, adapterOpts = null, promptStdinFile = null }) {
+export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, runnerPath, hostNative = null, stdinInput = null, adapterOpts = null, promptStdinFile = null, startupSnapshot = null }) {
   validateTaskId(taskId);
 
   const vendorCwd = resolveVendorCwd(hopperDir);
@@ -478,6 +492,7 @@ export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, run
     // so a fallback from a canonical preset to the vendor's local default is
     // visible. Persists through the terminal write (frontmatter is spread).
     model: (adapterOpts && adapterOpts.model) || '(vendor default)',
+    ...(startupSnapshot?.frontmatter || {}),
     status: 'in-progress',
     pid: null,
     start_time: startTime,
@@ -533,6 +548,7 @@ export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, run
       ...process.env,
       HOPPER_RUNNER_INVOKED: '1',
       HOPPER_ADAPTER_OPTS: optsJson,
+      HOPPER_ATTESTATION_STARTUP: startupSnapshot ? JSON.stringify(startupSnapshot) : undefined,
       // STDIN delivery (win-cmd-shim): the runner reads this 0600 file and pipes it to
       // the vendor's stdin. This is NOT the banned dispatcher-stdin pipe — the runner
       // (the vendor's alive parent) does the piping locally, so nothing crosses the

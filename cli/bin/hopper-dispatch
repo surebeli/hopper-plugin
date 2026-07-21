@@ -34,10 +34,12 @@ import {
   reapStaleJobs,
   stopBackgroundJob,
   readFrontmatter,
+  writeFrontmatter,
   isAlive,
   hoursSince,
   resolveVendorCwd,
 } from '../src/background.js';
+import { buildAttestationStartupSnapshot, finalizeTerminalAttestation } from '../src/handoff-attestation.js';
 import { runArchive, findArchivedOutputMd } from '../src/archive.js';
 import { readProgressEvents } from '../src/progress.js';
 import { notify } from '../src/notify.js';
@@ -749,6 +751,33 @@ function warnIfModelUnknown(vendor, model) {
   }
 }
 
+// Dispatch may only consume an existing cache snapshot. Never infer observed
+// runtime models from cache values and never probe or mutate cache here.
+function attestationCatalogSnapshot(vendor, adapter) {
+  const cached = getVendorCache(vendor);
+  const provenance = cached?.catalog_provenance ?? cached?.catalogProvenance ?? {};
+  return {
+    sourceKind: provenance.source_kind ?? provenance.sourceKind ?? 'unknown',
+    sourceLabel: provenance.source_label ?? provenance.sourceLabel ?? 'unknown',
+    observedAt: provenance.observed_at ?? provenance.observedAt ?? null,
+    freshness: provenance.freshness ?? 'unknown',
+    binaryAvailability: provenance.binary_availability ?? provenance.binaryAvailability ?? 'unknown',
+    binaryBasename: provenance.binary_basename ?? provenance.binaryBasename ?? null,
+    binding: adapter?.selectorMetadataBinding ?? null,
+  };
+}
+
+function attestationStartupSnapshot(effectiveAdapterOpts, vendor, adapter) {
+  return buildAttestationStartupSnapshot({
+    requestedSelector: effectiveAdapterOpts.requestedSelector,
+    effectiveSelector: effectiveAdapterOpts.effectiveSelector,
+    effectiveSelectorSource: effectiveAdapterOpts.effectiveSelectorSource,
+    catalog: attestationCatalogSnapshot(vendor, adapter),
+    selectorMetadata: adapter?.selectorMetadata ? { adapterManifest: adapter.selectorMetadata } : {},
+    binding: adapter?.selectorMetadataBinding ?? null,
+  });
+}
+
 async function runDispatch(hopperDir, taskId, { write = false, force = false, adapterOpts = {}, vendorOverride = null, adhocSpec = null } = {}) {
   try {
     const optsSummary = Object.keys(adapterOpts).length > 0
@@ -796,6 +825,7 @@ async function runDispatch(hopperDir, taskId, { write = false, force = false, ad
     if (!adapter) {
       throw new Error(`unknown vendor '${resolved.vendor}'`);
     }
+    const startupSnapshot = attestationStartupSnapshot(effectiveAdapterOpts, resolved.vendor, adapter);
     const result = await executeWithAdapter({ resolved, adapter, adapterOpts: effectiveAdapterOpts, hopperDir, cwd: resolveVendorCwd(hopperDir) });
     const elapsedMs = Date.now() - startedAt;
 
@@ -846,6 +876,40 @@ async function runDispatch(hopperDir, taskId, { write = false, force = false, ad
         // value (background dispatch already used the equivalent effectiveOpts here;
         // this was the one path still threading the pre-resolution raw flag through).
         const written = await writeOutput({ hopperDir, dispatchResult: result, force, model: effectiveAdapterOpts.model });
+        // Existing sync formatting remains the body contract. Wrap it in an
+        // in-progress frontmatter record, then use the same event-first
+        // finalizer as hopper-runner so --write cannot skip JSONL evidence.
+        const initial = readFrontmatter(written.path);
+        writeFrontmatter(written.path, {
+          task_id: result.task.id,
+          adapter: result.vendor,
+          model: effectiveAdapterOpts.model || '(vendor default)',
+          ...startupSnapshot.frontmatter,
+          status: 'in-progress',
+          mode: 'sync',
+          start_time: new Date(startedAt).toISOString(),
+          end_time: null,
+          terminal_event_emitted: false,
+          _body: initial._body,
+        });
+        const terminalStatus = result.output.status === 'success' ? 'done' : 'failed';
+        finalizeTerminalAttestation({
+          hopperDir,
+          taskId: result.task.id,
+          outputMdPath: written.path,
+          startupSnapshot,
+          parsed: result.output,
+          completion: {
+            vendor: result.vendor,
+            status: terminalStatus,
+            phase: terminalStatus,
+            message: terminalStatus === 'done' ? 'Task completed successfully.' : 'Task failed.',
+            source: 'sync',
+            durationMs: result.raw.durationMs ?? elapsedMs,
+            exitCode: result.raw.exitCode,
+            adapterStatus: result.output.status,
+          },
+        });
         console.log('');
         console.log('=== OUTPUT.MD WRITTEN ===');
         console.log(`Wrote: ${written.path}${written.overwritten ? ' (overwritten)' : ''}`);
@@ -947,6 +1011,7 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {}, vend
   const logPath = outputMdPath.replace(/\.md$/, '.log');
   // Phase 6c F1: thread taskType through so runner's timeoutMs() applies review floor.
   const effectiveOpts = { ...effectiveAdapterOpts, background: true, logFile: logPath, taskType: resolved.task.taskType, cwd: resolveVendorCwd(hopperDir) };
+  const startupSnapshot = attestationStartupSnapshot(effectiveAdapterOpts, resolved.vendor, adapter);
   // Size-gated prompt delivery (ISSUE-codex-bypass-flag-missing-from-argv): resolve
   // the command to know the OS command-line regime (cmd.exe shim vs native .exe), and
   // if the inline command line would be too large, write handoffs/<task>-prompt.md and
@@ -982,6 +1047,7 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {}, vend
       hostNative: hostVendor || null,
       adapterOpts: effectiveOpts,  // codex Phase 5 F2: opts → runner via env for timeoutMs
       promptStdinFile: delivery.channel === 'stdin' ? delivery.promptFilePath : null,
+      startupSnapshot,
     });
     console.log('=== BACKGROUND DISPATCH STARTED ===');
     console.log(`Task:        ${taskId}`);

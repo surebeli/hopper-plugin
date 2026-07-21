@@ -15,6 +15,7 @@ import { openSync, closeSync, readFileSync, readSync, existsSync, statSync } fro
 import { basename, dirname } from 'node:path';
 import { readFrontmatter, writeFrontmatter } from '../src/background.js';
 import { appendProgressEvent, findLatestVendorProgressEvent } from '../src/progress.js';
+import { finalizeTerminalAttestation } from '../src/handoff-attestation.js';
 import { getAdapter } from '../src/vendors/index.js';
 import { acquireVendorLock, killProcessTree, resolveDispatchTimeouts, chunkHasSubstantiveLine } from '../src/subprocess.js';
 import { resolveCommandOnPath, resolveCommandWithKnownPaths } from '../src/path-resolve.js';
@@ -52,14 +53,6 @@ function parseRunnerArgs(argv) {
   return parsed;
 }
 
-function taskContext(outputMdPath, fm, context) {
-  return {
-    hopperDir: context.hopperDir || dirname(dirname(outputMdPath)),
-    taskId: context.taskId || fm.task_id || basename(outputMdPath).replace(/-output\.md$/, ''),
-    adapterName: context.adapterName || fm.adapter || 'unknown',
-  };
-}
-
 function terminalMessageFor(status, adapterStatus, providedMessage = null) {
   if (providedMessage) return providedMessage;
   if (status === 'done') return 'Task completed successfully.';
@@ -75,72 +68,41 @@ function terminalPhaseFor(status, adapterStatus, timedOut) {
   return status;
 }
 
-function appendRunnerTerminalEvent(outputMdPath, fm, context) {
-  if (fm.terminal_event_emitted) return null;
-  const { hopperDir, taskId, adapterName } = taskContext(outputMdPath, fm, context);
-  return appendProgressEvent({
-    hopperDir,
-    taskId,
-    event: {
-      vendor: fm.adapter || adapterName,
-      phase: context.phase,
-      kind: 'terminal',
-      message: context.message,
-      source: 'runner',
-      terminal: true,
-      status: context.status,
-      duration_ms: context.duration_ms,
-      exit_code: context.exit_code,
-      signal: context.signal || null,
-      adapter_status: context.adapter_status,
-      timed_out: context.timed_out || null,
-      timeout_reason: context.timeout_reason || undefined,
-      process_cleanup: context.process_cleanup || undefined,
-    },
-  });
-}
-
-function terminalFrontmatterPatch(fm, event, phase, message) {
-  const patch = { ...fm, phase };
-  if (event) {
-    patch.last_progress_at = event.ts;
-    patch.last_progress = event.message;
-    patch.progress_seq = event.seq;
-    patch.terminal_event_emitted = true;
-  } else if (!fm.terminal_event_emitted) {
-    patch.last_progress = message;
+function runnerStartupSnapshot() {
+  try {
+    const parsed = JSON.parse(process.env.HOPPER_ATTESTATION_STARTUP || '');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch (_) {
+    return null;
   }
-  return patch;
 }
 
 function fail(outputMdPath, message, context = {}) {
-  // best-effort frontmatter update on early failure
+  // The shared finalizer retains event-first failure semantics: append failures
+  // deliberately leave frontmatter in-progress rather than inventing a terminal.
   try {
     const fm = readFrontmatter(outputMdPath);
     const endTime = new Date().toISOString();
     const duration_ms = Date.now() - Date.parse(fm.start_time || new Date().toISOString());
-    const phase = 'failed';
-    let event = null;
-    try {
-      event = appendRunnerTerminalEvent(outputMdPath, fm, {
-        ...context,
+    finalizeTerminalAttestation({
+      hopperDir: context.hopperDir || dirname(dirname(outputMdPath)),
+      taskId: context.taskId || fm.task_id || basename(outputMdPath).replace(/-output\.md$/, ''),
+      outputMdPath,
+      startupSnapshot: runnerStartupSnapshot(),
+      parsed: {},
+      completion: {
+        vendor: fm.adapter || context.adapterName,
         status: 'failed',
-        phase,
+        phase: 'failed',
         message,
-        duration_ms,
-        exit_code: -1,
-        adapter_status: context.adapter_status || 'unknown-fail',
-      });
-    } catch (_) {
-      // Progress writing is best-effort; final frontmatter is still authoritative.
-    }
-    writeFrontmatter(outputMdPath, {
-      ...terminalFrontmatterPatch(fm, event, phase, message),
-      status: 'failed',
-      end_time: endTime,
-      exit_code: -1,
-      duration_ms,
-      _body: (fm._body || '') + `\n## Failure (runner)\n${message}\n`,
+        source: 'runner',
+        durationMs: duration_ms,
+        exitCode: -1,
+        adapterStatus: context.adapter_status || 'unknown-fail',
+        endTime,
+        bodyAppend:
+          `\n## Failure (runner)\n${message}\n`,
+      },
     });
   } catch (_) {
     // if we can't even write frontmatter, all we can do is exit
@@ -545,8 +507,9 @@ async function main() {
     let adapterStatus;
     let adapterError;
     let adapterText = '';                   // HOPPER-5: the parsed vendor answer
+    let parsedResult = {};
     try {
-      const parsed = adapter.parseResult({
+      parsedResult = adapter.parseResult({
         exitCode: code === null ? -1 : code,
         stdout: stdoutTail,
         stderr: stderrTail,
@@ -555,9 +518,9 @@ async function main() {
         durationMs: duration_ms,
         logFileContent,
       });
-      adapterStatus = parsed.status;       // success | auth-fail | timeout | permission-fail | unknown-fail
-      adapterError = parsed.error || null;
-      adapterText = parsed.text || '';     // HOPPER-5: mirror into output.md body below
+      adapterStatus = parsedResult.status;       // success | auth-fail | timeout | permission-fail | unknown-fail
+      adapterError = parsedResult.error || null;
+      adapterText = parsedResult.text || '';     // HOPPER-5: mirror into output.md body below
     } catch (err) {
       adapterStatus = 'unknown-fail';
       adapterError = `parseResult threw: ${err.message}`;
@@ -585,59 +548,46 @@ async function main() {
     else status = 'failed';                // auth-fail / timeout / permission-fail / unknown-fail → failed
 
     try {
-      const fm = readFrontmatter(outputMdPath);
       const endTime = new Date().toISOString();
       const phase = terminalPhaseFor(status, adapterStatus, timedOut);
       const message = terminalMessageFor(status, adapterStatus);
-      let event = null;
-      try {
-        event = appendRunnerTerminalEvent(outputMdPath, fm, {
-          taskId,
-          hopperDir,
-          adapterName,
+      finalizeTerminalAttestation({
+        hopperDir,
+        taskId,
+        outputMdPath,
+        startupSnapshot: runnerStartupSnapshot(),
+        parsed: parsedResult,
+        completion: {
+          vendor: adapterName,
           status,
           phase,
           message,
-          duration_ms,
-          exit_code: code === null ? -1 : code,
+          source: 'runner',
+          durationMs: duration_ms,
+          exitCode: code === null ? -1 : code,
           signal: signal || null,
-          adapter_status: adapterStatus,
-          timed_out: timedOut || null,
-          timeout_reason: timeoutReason || undefined,
-          process_cleanup: processCleanup.status,
-        });
-      } catch (_) {
-        // Progress writing is best-effort; final frontmatter is still authoritative.
-      }
-      writeFrontmatter(outputMdPath, {
-        ...terminalFrontmatterPatch(fm, event, phase, message),
-        status,
-        end_time: endTime,
-        exit_code: code === null ? -1 : code,
-        signal: signal || null,
-        timed_out: timedOut || null,
-        timeout_reason: timeoutReason || null,
-        process_cleanup: processCleanup.status,
-        process_cleanup_method: processCleanup.method,
-        duration_ms,
-        adapter_status: adapterStatus,     // preserve the granular classification
-        _body: (fm._body || '') +
-          // HOPPER-5: embed the parsed vendor answer so output.md is self-
-          // contained (was log-only). Full raw stream stays in the .log.
-          renderVendorOutputSection(adapterText, { rawLogName: logPath.split(/[\\/]/).pop() }) +
-          `\n## Status (background completion)\n` +
-          `- queue_status: ${status}\n` +
-          `- adapter_status: ${adapterStatus}\n` +
-          `- exit_code: ${code === null ? -1 : code}\n` +
-          (signal ? `- signal: ${signal}\n` : '') +
-          (timedOut ? `- timed_out: true\n` : '') +
-          (timeoutReason ? `- timeout_reason: ${timeoutReason}\n` : '') +
-          `- process_cleanup: ${processCleanup.status}\n` +
-          (processCleanup.method ? `- process_cleanup_method: ${processCleanup.method}\n` : '') +
-          `- duration_ms: ${duration_ms}\n` +
-          `- end_time: ${endTime}\n` +
-          (adapterError ? `\n### Adapter error\n\`\`\`\n${adapterError.slice(0, 2000)}\n\`\`\`\n` : '') +
-          `- log: see \`${logPath.split(/[\\/]/).pop()}\` for raw output\n`,
+          adapterStatus,
+          timedOut: timedOut || null,
+          timeoutReason: timeoutReason || null,
+          processCleanup: processCleanup.status,
+          processCleanupMethod: processCleanup.method,
+          endTime,
+          bodyAppend:
+            renderVendorOutputSection(adapterText, { rawLogName: logPath.split(/[\\/]/).pop() }) +
+            `\n## Status (background completion)\n` +
+            `- queue_status: ${status}\n` +
+            `- adapter_status: ${adapterStatus}\n` +
+            `- exit_code: ${code === null ? -1 : code}\n` +
+            (signal ? `- signal: ${signal}\n` : '') +
+            (timedOut ? `- timed_out: true\n` : '') +
+            (timeoutReason ? `- timeout_reason: ${timeoutReason}\n` : '') +
+            `- process_cleanup: ${processCleanup.status}\n` +
+            (processCleanup.method ? `- process_cleanup_method: ${processCleanup.method}\n` : '') +
+            `- duration_ms: ${duration_ms}\n` +
+            `- end_time: ${endTime}\n` +
+            (adapterError ? `\n### Adapter error\n\`\`\`\n${adapterError.slice(0, 2000)}\n\`\`\`\n` : '') +
+            `- log: see \`${logPath.split(/[\\/]/).pop()}\` for raw output\n`,
+        },
       });
     } catch (err) {
       process.stderr.write(`hopper-runner: failed to write final frontmatter: ${err.message}\n`);

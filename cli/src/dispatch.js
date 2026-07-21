@@ -233,7 +233,14 @@ export function resolveAdapterOptsForTask(resolved, adapterOpts = {}) {
   // Preserve argv provenance before policy/sentinel resolution and advisory
   // selector normalization mutate out.model. Runtime attestation must compare
   // only the effective selector, never this requested audit value.
-  const requestedSelector = typeof adapterOpts.model === 'string' ? adapterOpts.model : null;
+  const requestedSelector = Object.hasOwn(adapterOpts, 'requestedSelector')
+    ? (typeof adapterOpts.requestedSelector === 'string' ? adapterOpts.requestedSelector : null)
+    : (typeof adapterOpts.model === 'string' ? adapterOpts.model : null);
+  const carriesEffectiveSelector = Object.hasOwn(adapterOpts, 'effectiveSelector');
+  const inheritedEffectiveSelector = carriesEffectiveSelector && typeof adapterOpts.effectiveSelector === 'string'
+    ? adapterOpts.effectiveSelector
+    : null;
+  const inheritedEffectiveSource = adapterOpts.effectiveSelectorSource;
   let modelResolvedByPolicy = false;
   // Batch 2: notices surfaced by the fallback chains below (policy-cell resolution,
   // sentinel resolution, effort clamp visibility) — collected here and read by the
@@ -250,7 +257,7 @@ export function resolveAdapterOptsForTask(resolved, adapterOpts = {}) {
   // against knownGood; advisory — passthrough if no confident match). Single
   // chokepoint — every dispatch path (sync / background / adhoc / swarm) flows
   // through resolveAdapterOptsForTask.
-  if (!out.model && resolved?.policy?.modelRule) {
+  if (!out.model && !carriesEffectiveSelector && resolved?.policy?.modelRule) {
     const parsedRule = parseModelRuleCell(resolved.policy.modelRule);
     if (parsedRule.status === 'ok') {
       out.model = parsedRule.sentinel; // resolved to a real name below (sentinel-or-normalize)
@@ -284,10 +291,12 @@ export function resolveAdapterOptsForTask(resolved, adapterOpts = {}) {
     } catch (_) { /* normalization is advisory; keep the original on any error */ }
   }
   out.requestedSelector = requestedSelector;
-  out.effectiveSelector = out.model || null;
-  out.effectiveSelectorSource = out.effectiveSelector === null
-    ? 'vendor-default'
-    : (modelResolvedByPolicy ? 'policy' : 'user-argv');
+  out.effectiveSelector = carriesEffectiveSelector ? inheritedEffectiveSelector : (out.model || null);
+  out.effectiveSelectorSource = ['user-argv', 'policy', 'vendor-default'].includes(inheritedEffectiveSource)
+    ? inheritedEffectiveSource
+    : (out.effectiveSelector === null
+      ? 'vendor-default'
+      : (modelResolvedByPolicy ? 'policy' : 'user-argv'));
   // Permission default (precedence, most specific first):
   //   1. explicit --sandbox (already in out.sandbox) wins
   //   2. read-only task TEXT (brief/spec says read-only / 只读)

@@ -172,3 +172,31 @@ test('appendProgressEvent rejects unsafe task ids before writing', () => {
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('terminal events retain the attestation optional-field allowlist exactly', () => {
+  const { tmp, hopperDir } = setup();
+  try {
+    const event = appendProgressEvent({
+      hopperDir,
+      taskId: 'T-attested-progress',
+      event: {
+        vendor: 'claude', phase: 'done', kind: 'terminal', message: 'done', source: 'runner', terminal: true,
+        requested_selector: 'fable', effective_selector: 'fable', effective_selector_source: 'user-argv',
+        selector_kind: 'alias', observed_models: ['claude-opus-4-6'],
+        model_attestation_source: 'claude.result.modelUsage.keys',
+        model_attestation_observed_at: '2026-07-21T12:00:00.000Z',
+        resolution_status: 'alias-resolved', resolution_detail: 'alias-runtime-resolved',
+      },
+    });
+    assert.deepEqual(Object.fromEntries([
+      'requested_selector', 'effective_selector', 'effective_selector_source', 'selector_kind', 'observed_models',
+      'model_attestation_source', 'model_attestation_observed_at', 'resolution_status', 'resolution_detail',
+    ].map((key) => [key, event[key]])), {
+      requested_selector: 'fable', effective_selector: 'fable', effective_selector_source: 'user-argv', selector_kind: 'alias',
+      observed_models: ['claude-opus-4-6'], model_attestation_source: 'claude.result.modelUsage.keys',
+      model_attestation_observed_at: '2026-07-21T12:00:00.000Z', resolution_status: 'alias-resolved', resolution_detail: 'alias-runtime-resolved',
+    });
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
