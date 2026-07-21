@@ -37,6 +37,18 @@ test('plugin advertises disabled shim behavior instead of native async execution
   assert.doesNotMatch(src, /session\.idle/);
 });
 
+test('disabled shim throws before any native async or git mutation route', () => {
+  const src = readFileSync(PLUGIN_PATH, 'utf-8');
+  const throwIndex = src.indexOf('throw new Error');
+  assert.ok(throwIndex >= 0, 'disabled shim must throw instead of routing');
+
+  for (const route of ['prompt_async', 'session.idle', 'git snapshot', 'git worktree', 'git checkout']) {
+    const routeIndex = src.toLowerCase().indexOf(route);
+    assert.ok(routeIndex === -1 || throwIndex < routeIndex,
+      `disabled shim must throw before a ${route} route`);
+  }
+});
+
 test('plugin has NO retry / fallback / orchestration constructs', () => {
   const src = readFileSync(PLUGIN_PATH, 'utf-8');
   const forbidden = [

@@ -20,6 +20,8 @@ const WRAPPER = join(HOST_DIR, 'bin', 'hopper-opencode');
 const WRAPPER_CMD = join(HOST_DIR, 'bin', 'hopper-opencode.cmd');
 const README = join(HOST_DIR, 'README.md');
 const CODEX_WRAPPER = join(REPO_ROOT, 'hosts', 'codex-cli', 'bin', 'hopper-codex');
+const COOKBOOK = join(REPO_ROOT, 'docs', 'cookbook.md');
+const DASHBOARD_README = join(REPO_ROOT, 'dashboard', 'README.md');
 
 test('opencode host directory exists with expected structure', () => {
   assert.ok(existsSync(HOST_DIR));
@@ -81,6 +83,29 @@ test('wrapper has no active retry/fallback construct', () => {
   for (const pat of forbidden) {
     assert.ok(!pat.test(content), `wrapper must not contain ${pat}`);
   }
+});
+
+test('wrapper does not issue git snapshot, worktree, or checkout commands', () => {
+  const commands = readFileSync(WRAPPER, 'utf-8')
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n');
+  assert.doesNotMatch(commands, /\bgit\s+(?:snapshot|worktree|checkout)\b/i);
+});
+
+test('operator docs define the OpenCode execution and evidence boundary', () => {
+  const cookbook = readFileSync(COOKBOOK, 'utf-8');
+  const dashboard = readFileSync(DASHBOARD_README, 'utf-8');
+
+  assert.match(cookbook, /tests use fake binaries and temporary directories/i);
+  assert.match(cookbook, /native plugin is a disabled shim/i);
+  assert.match(cookbook, /wrapper is the only repo-owned route/i);
+  assert.match(cookbook, /record the command, cwd, and observed writes/i);
+  assert.match(cookbook, /user-level snapshot side effect.*not.*handoff.*cache.*attestation status.*model evidence/is);
+  assert.match(cookbook, /current native plugin route remains disabled/i);
+  assert.match(cookbook, /separate design.*exact temporary root.*cleanup fixture/is);
+  assert.match(cookbook, /does not promise.*strict no-write.*external/i);
+  assert.match(dashboard, /external OpenCode.*not.*attestation.*model evidence/is);
 });
 
 test('wrapper prompt forbids soft-orchestration (diagnose/propose fixes/retry-nudge)', () => {

@@ -170,6 +170,14 @@ hopper-opencode T-PROG-REVIEW --background
 
 Every route eventually invokes the same dispatcher and reads the same `.hopper/AGENTS.md`. The dispatcher now enforces `host != vendor`, so a host session cannot dispatch back into the same vendor identity. Do not use multiple routes to dispatch the same task simultaneously; background dispatch refuses alive duplicate jobs.
 
+### OpenCode execution boundary and operator evidence
+
+Tests use fake binaries and temporary directories; they do not make an external OpenCode session a source of attestation evidence. The native plugin is a disabled shim, and the wrapper is the only repo-owned route. That wrapper dispatches through hopper and does not run `git snapshot`, `git worktree`, or `git checkout`.
+
+If an operator invokes an external OpenCode layer, record the command, CWD, and observed writes. A user-level snapshot side effect, including an observed `index.lock` attempt, is not handoff, cache, attestation status, or model evidence. It must not be copied into those records as proof of a model invocation.
+
+The current native plugin route remains disabled. A future isolated route requires a separate design with an exact temporary root and a cleanup fixture before it can be enabled. This boundary does not promise strict no-write behavior from an external tool unless that behavior has been observed; it only records what the repo-owned route does and how to treat external observations.
+
 ## Recipe 6 - Probe vendor capabilities and query the cache
 
 **Scenario**: Refresh per-machine model inventory before choosing a model override.

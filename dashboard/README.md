@@ -135,6 +135,14 @@ rotation, `/api/task/:id/progress` may briefly under-deliver history while
 `/events/progress/:id` continues from the current file. Treat snapshots as
 best-effort context, not an authoritative event count.
 
+### OpenCode operator-evidence boundary
+
+The dashboard only reads repo-owned queue, handoff, cache, and progress data.
+An external OpenCode user-level snapshot side effect is not attestation status
+or model evidence, and the dashboard does not infer either from observed
+external writes. See the cookbook's OpenCode execution boundary for the
+operator record required when external OpenCode is invoked.
+
 ---
 
 ## Configuration
