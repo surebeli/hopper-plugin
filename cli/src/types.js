@@ -119,6 +119,7 @@
  * @property {function(string, string): {logPath: string|null}} [prepareLog]  Optional per-dispatch log file setup
  * @property {string[]} [knownInstallPaths]                   Phase 6c F2: deterministic vendor-installer locations (NOT vendor-retry orchestration). Walked by resolveCommandWithKnownPaths when PATH lookup fails. Each entry must be an absolute path to the binary (e.g. ~/AppData/Local/agy/bin/agy.exe; expand via os.homedir() before declaring).
  * @property {SelectorMetadataEnvelope} [selectorMetadata]   Optional sanitized, versioned local selector metadata; classification remains zero-spawn.
+ * @property {object} [runtimeModelMetadata]                  Closed, versioned terminal-result paths/fields that may produce runtime model evidence.
  */
 
 // Re-export marker (no actual exports — JSDoc only)

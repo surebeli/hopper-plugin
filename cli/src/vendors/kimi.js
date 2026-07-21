@@ -141,7 +141,9 @@ export const kimiAdapter = {
     if (raw.exitCode === 0 && raw.stdout) {
       // 0.x sends the "To resume this session: kimi -r <id>" hint to STDERR, so this
       // strip is now a defensive no-op for the new tool (still strips the legacy 1.x
-      // stdout footer). Assistant text is already stdout-only in -p mode.
+      // stdout footer). Assistant text is already stdout-only in -p mode. Kimi has
+      // no approved terminal actual-model field yet, so this stays config-only and
+      // deliberately never attaches modelAttestation.
       const text = raw.stdout.replace(/\n*To resume this session:[^\n]*\n*$/m, '').trim();
       return { text, status: 'success' };
     }

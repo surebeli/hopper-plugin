@@ -10,11 +10,24 @@ import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
 import { applyTaskTypeFloor } from '../subprocess.js';
 
+// This is intentionally narrower than the completion parser: an answer can be
+// completed by several OpenCode event forms, but runtime model evidence is
+// available only in this approved, versioned terminal result shape.
+const OPENCODE_RUNTIME_MODEL_METADATA = Object.freeze({
+  schemaVersion: 1,
+  resultVersion: 1,
+  terminal: Object.freeze({ type: 'result', subtype: 'success' }),
+  providerField: 'providerID',
+  modelField: 'modelID',
+  source: 'opencode.result.providerID-modelID',
+});
+
 /** @type {import('../types.js').VendorAdapter} */
 export const opencodeAdapter = {
   name: 'opencode',
   command: 'opencode',
   stdinMode: 'none',
+  runtimeModelMetadata: OPENCODE_RUNTIME_MODEL_METADATA,
 
   // Phase 6a static capability hint.
   capabilities: {
@@ -122,7 +135,8 @@ export const opencodeAdapter = {
           error: 'opencode exited 0 without authoritative completion evidence and usable result text.',
         };
       }
-      return { text, status: 'success' };
+      const modelAttestation = extractOpencodeModelAttestation(raw.stdout);
+      return modelAttestation ? { text, status: 'success', modelAttestation } : { text, status: 'success' };
     }
     return {
       text: raw.stdout,
@@ -160,6 +174,45 @@ function extractOpencodeText(stdout) {
   let text = stdout.replace(/\x1b\[[0-9;]*m/g, '');
   text = text.replace(/^>\s+build\s+·\s+[^\n]+\n+/m, '').trim();
   return text;
+}
+
+/**
+ * Read only the approved top-level identity pair from a successful terminal
+ * result. Do not inspect nested request echoes or completion stream events.
+ * @param {string} stdout
+ * @returns {{observedModels:string[],source:string,observedAt:string}|undefined}
+ */
+function extractOpencodeModelAttestation(stdout) {
+  const lines = String(stdout || '').split(/\r?\n/).filter((line) => line.trim());
+  for (let index = lines.length - 1; index >= 0; index--) {
+    let envelope;
+    try { envelope = JSON.parse(lines[index]); } catch (_) { continue; }
+    if (!isApprovedOpencodeTerminalEnvelope(envelope)) continue;
+    const provider = normalizeOpencodeIdentityComponent(envelope[OPENCODE_RUNTIME_MODEL_METADATA.providerField]);
+    const model = normalizeOpencodeIdentityComponent(envelope[OPENCODE_RUNTIME_MODEL_METADATA.modelField]);
+    if (!provider || !model) return undefined;
+    return {
+      observedModels: [`${provider}/${model}`],
+      source: OPENCODE_RUNTIME_MODEL_METADATA.source,
+      observedAt: new Date().toISOString(),
+    };
+  }
+  return undefined;
+}
+
+function isApprovedOpencodeTerminalEnvelope(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    && OPENCODE_RUNTIME_MODEL_METADATA.schemaVersion === 1
+    && value.version === OPENCODE_RUNTIME_MODEL_METADATA.resultVersion
+    && value.type === OPENCODE_RUNTIME_MODEL_METADATA.terminal.type
+    && value.subtype === OPENCODE_RUNTIME_MODEL_METADATA.terminal.subtype
+    && value.is_error === false;
+}
+
+function normalizeOpencodeIdentityComponent(value) {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim();
+  return normalized && !normalized.includes('/') ? normalized : null;
 }
 
 /**

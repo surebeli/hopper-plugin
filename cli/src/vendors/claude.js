@@ -32,11 +32,26 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { applyTaskTypeFloor } from '../subprocess.js';
 
+// Versioned adapter metadata is the closed allowlist for result fields that are
+// stable enough to attest an actual runtime model. It deliberately names paths,
+// rather than allowing a recursive search through a vendor payload.
+const CLAUDE_RUNTIME_MODEL_METADATA = Object.freeze({
+  schemaVersion: 1,
+  terminal: Object.freeze({ type: 'result', subtype: 'success' }),
+  modelUsagePaths: Object.freeze([
+    Object.freeze({ path: Object.freeze(['modelUsage']), source: 'claude.result.modelUsage.keys' }),
+    Object.freeze({ path: Object.freeze(['result', 'modelUsage']), source: 'claude.result.result.modelUsage.keys' }),
+    Object.freeze({ path: Object.freeze(['usage', 'modelUsage']), source: 'claude.result.usage.modelUsage.keys' }),
+    Object.freeze({ path: Object.freeze(['usage', 'model_usage']), source: 'claude.result.usage.model_usage.keys' }),
+  ]),
+});
+
 /** @type {import('../types.js').VendorAdapter} */
 export const claudeAdapter = {
   name: 'claude',
   command: 'claude',
   stdinMode: 'none',
+  runtimeModelMetadata: CLAUDE_RUNTIME_MODEL_METADATA,
   // Prompt-delivery capability (win-cmd-shim multi-line truncation fix). `claude -p`
   // with NO positional reads the prompt from stdin (live-confirmed through claude.cmd:
   // token honored, exit 0). The delivery layer routes to stdin ONLY on win-cmd-shim;
@@ -180,9 +195,7 @@ export const claudeAdapter = {
     // a clean `result/success/is_error:false` envelope.
     const parsedResult = raw.exitCode === 0 ? extractClaudeResult(raw.stdout) : null;
     if (parsedResult && !parsedResult.isError && parsedResult.text.trim()) {
-      return parsedResult.usage
-        ? { text: parsedResult.text, status: 'success', usage: parsedResult.usage }
-        : { text: parsedResult.text, status: 'success' };
+      return successfulClaudeOutput(parsedResult);
     }
     const signal = `${raw.stdout || ''}\n${raw.stderr || ''}`;
     // Auth failure (the `error` categories the SDK emits include
@@ -221,9 +234,7 @@ export const claudeAdapter = {
             'Common causes: a blocked headless turn (permission mode) or a max-turns limit. Confirm auth + permission mode and re-dispatch.',
         };
       }
-      return parsed.usage
-        ? { text: parsed.text, status: 'success', usage: parsed.usage }
-        : { text: parsed.text, status: 'success' };
+      return successfulClaudeOutput(parsed);
     }
     return {
       text: raw.stdout,
@@ -242,7 +253,7 @@ export const claudeAdapter = {
  * --output-format text, or any unparseable payload) so a format drift degrades
  * gracefully instead of throwing.
  * @param {string} stdout
- * @returns {{ text: string, usage?: object, isError: boolean, subtype?: string }}
+ * @returns {{ text: string, usage?: object, isError: boolean, subtype?: string, terminalEnvelope?: object|null }}
  */
 function extractClaudeResult(stdout) {
   const trimmed = (stdout || '').trim();
@@ -255,7 +266,7 @@ function extractClaudeResult(stdout) {
     const isError = obj.is_error === true || /^error/i.test(String(obj.subtype || ''));
     let usage = (obj.usage && typeof obj.usage === 'object') ? { ...obj.usage } : undefined;
     if (typeof obj.total_cost_usd === 'number') usage = { ...(usage || {}), totalCostUsd: obj.total_cost_usd };
-    return { text, usage, isError, subtype: obj.subtype };
+    return { text, usage, isError, subtype: obj.subtype, terminalEnvelope: obj };
   };
   try {
     const got = fromObj(JSON.parse(trimmed));
@@ -269,5 +280,68 @@ function extractClaudeResult(stdout) {
     } catch (_) { /* keep scanning upward */ }
   }
   // Plain text (default --output-format text) or unparseable → use stdout as-is.
-  return { text: trimmed, isError: false };
+  return { text: trimmed, isError: false, terminalEnvelope: null };
+}
+
+function successfulClaudeOutput(parsed) {
+  const output = parsed.usage
+    ? { text: parsed.text, status: 'success', usage: parsed.usage }
+    : { text: parsed.text, status: 'success' };
+  const modelAttestation = extractClaudeModelAttestation(parsed.terminalEnvelope);
+  return modelAttestation ? { ...output, modelAttestation } : output;
+}
+
+/**
+ * @param {unknown} terminalEnvelope
+ * @returns {{observedModels:string[],source:string,observedAt:string}|undefined}
+ */
+function extractClaudeModelAttestation(terminalEnvelope) {
+  if (!isApprovedClaudeTerminalEnvelope(terminalEnvelope)) return undefined;
+  for (const candidate of CLAUDE_RUNTIME_MODEL_METADATA.modelUsagePaths) {
+    const observedModels = ownNonEmptyStringKeys(valueAtPath(terminalEnvelope, candidate.path));
+    if (observedModels.length > 0) {
+      return {
+        observedModels: firstSeenUniqueStringArray(observedModels),
+        source: candidate.source,
+        observedAt: new Date().toISOString(),
+      };
+    }
+  }
+  return undefined;
+}
+
+function isApprovedClaudeTerminalEnvelope(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    && CLAUDE_RUNTIME_MODEL_METADATA.schemaVersion === 1
+    && value.type === CLAUDE_RUNTIME_MODEL_METADATA.terminal.type
+    && value.subtype === CLAUDE_RUNTIME_MODEL_METADATA.terminal.subtype
+    && value.is_error !== true;
+}
+
+function valueAtPath(value, path) {
+  let current = value;
+  for (const key of path) {
+    if (current === null || typeof current !== 'object' || Array.isArray(current)
+      || !Object.prototype.hasOwnProperty.call(current, key)) return undefined;
+    current = current[key];
+  }
+  return current;
+}
+
+function ownNonEmptyStringKeys(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return [];
+  const keys = Object.keys(value);
+  return keys.length > 0 && keys.every((key) => key.trim().length > 0) ? keys : [];
+}
+
+function firstSeenUniqueStringArray(values) {
+  const seen = new Set();
+  const unique = [];
+  for (const value of values) {
+    if (typeof value === 'string' && !seen.has(value)) {
+      seen.add(value);
+      unique.push(value);
+    }
+  }
+  return unique;
 }
