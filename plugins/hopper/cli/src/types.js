@@ -49,6 +49,7 @@
  * @property {string} [logFile]       Adapter log file path (set by runner before adapter.args() so adapter can thread it through)
  * @property {string} [taskType]      Phase 6c F1: task-type for timeoutMs() floor calculation (e.g. 'code-review-adversarial')
  * @property {boolean} [background]   Set true by runner for background-mode dispatches
+ * @property {string} [subjectRoot]   Absolute tree denied file-write* by the macOS process guard; legal only with effective read-only sandbox
  */
 
 /**

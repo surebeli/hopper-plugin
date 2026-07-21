@@ -11,7 +11,7 @@
 // Counter-tested in tests/integration/runner-single-spawn.test.js.
 
 import { spawn } from 'node:child_process';
-import { openSync, closeSync, readFileSync, readSync, existsSync, statSync } from 'node:fs';
+import { openSync, closeSync, readFileSync, readSync, existsSync, statSync, writeSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import { readFrontmatter, writeFrontmatter } from '../src/background.js';
 import { appendProgressEvent } from '../src/progress.js';
@@ -19,6 +19,7 @@ import { getAdapter } from '../src/vendors/index.js';
 import { acquireVendorLock, killProcessTree, resolveDispatchTimeouts, chunkHasSubstantiveLine } from '../src/subprocess.js';
 import { resolveCommandOnPath, resolveCommandWithKnownPaths } from '../src/path-resolve.js';
 import { renderVendorOutputSection, writeRunnerSidecar } from '../src/output.js';
+import { prepareSubjectRootGuard, wrapSubjectRootInvocation } from '../src/subject-root-guard.js';
 
 function parseRunnerArgs(argv) {
   // Format: --task-id X --hopper-dir Y --adapter Z --output-md A --log B -- <adapter argv...>
@@ -180,6 +181,19 @@ async function main() {
     }
   }
 
+  // A requested subject root is mandatory. Validate the effective sandbox and
+  // backend before the sole vendor spawn; failure is fail-closed.
+  let subjectGuard;
+  try {
+    subjectGuard = prepareSubjectRootGuard({
+      subjectRoot: opts.subjectRoot || adapterOpts.subjectRoot || null,
+      sandbox: adapterOpts.sandbox,
+    });
+  } catch (err) {
+    fail(outputMdPath, err.message, { taskId, hopperDir, adapterName, adapter_status: 'subject-root-guard-fail' });
+    return;
+  }
+
   const t0 = Date.now();
 
   // Open log fds for vendor stdio. The runner's own stdout/stderr was already
@@ -224,6 +238,7 @@ async function main() {
   const resolvedCmd = resolved ? resolved.command : adapter.command;
   const prependArgs = resolved ? resolved.prependArgs : [];
   const finalArgv = [...prependArgs, ...adapterArgv];
+  const invocation = wrapSubjectRootInvocation(resolvedCmd, finalArgv, subjectGuard);
 
   // ISSUE-codex-bypass-flag-missing-from-argv: log the FINAL spawned argv (not
   // just the resolved opts) and the total command-line length, and warn loudly
@@ -239,8 +254,8 @@ async function main() {
     || prependArgs.some((a) => /\.(cmd|bat)$/i.test(String(a))));
   const cmdlineLen = [resolvedCmd, ...finalArgv].join(' ').length;
   if (process.env.HOPPER_DEBUG) {
-    process.stderr.write(`hopper-runner: spawn command = ${resolvedCmd}\n`);
-    process.stderr.write(`hopper-runner: final argv (${finalArgv.length} args, ~${cmdlineLen} chars) = ${JSON.stringify(finalArgv)}\n`);
+    process.stderr.write(`hopper-runner: spawn command = ${invocation.command}\n`);
+    process.stderr.write(`hopper-runner: final argv (${invocation.args.length} args, ~${cmdlineLen} chars) = ${JSON.stringify(invocation.args)}\n`);
   }
   if (viaCmdShim && cmdlineLen > 7000) {
     process.stderr.write(
@@ -276,11 +291,12 @@ async function main() {
   // runner's group, not the vendor's children. Windows uses taskkill /T
   // which works without detached. detached on POSIX puts vendor in new pgrp.
   const isWindows = process.platform === 'win32';
-  const vendor = spawn(resolvedCmd, finalArgv, {
-    // stdin: 'pipe' ONLY for stdin delivery (the runner writes the prompt); else
-    // 'ignore' (= /dev/null immediate EOF) so argv vendors — and agy, which HANGS on
-    // an open stdin pipe — are unaffected. stdout/stderr stay FILE fds (no deadlock).
-    stdio: [promptStdinFile ? 'pipe' : 'ignore', fdOut, fdErr],
+  const vendor = spawn(invocation.command, invocation.args, {
+    // Vendor stdio is always piped through this parent. Passing it the log file
+    // descriptors would let an inherited FD write inside subjectRoot despite the
+    // sandbox rule. The runner tees both streams to the same log without reducing
+    // visibility, while its own inherited stdout/stderr may still target the log.
+    stdio: [promptStdinFile ? 'pipe' : 'ignore', 'pipe', 'pipe'],
     windowsHide: true,
     // Retro #3 fix: vendor runs in the repo root that owns .hopper/ (passed via
     // --cwd by spawnDetached), not the runner's own process.cwd(). Falls back to
@@ -292,9 +308,11 @@ async function main() {
     detached: !isWindows,
   });
 
-  // Close our copies of the fds; vendor has its own.
-  closeSync(fdOut);
-  closeSync(fdErr);
+  const teeToLog = (fd) => (chunk) => {
+    try { writeSync(fd, chunk); } catch (_) { /* final log write is best-effort */ }
+  };
+  vendor.stdout?.on('data', teeToLog(fdOut));
+  vendor.stderr?.on('data', teeToLog(fdErr));
 
   // STDIN delivery — observable contract (NOT best-effort): write the full prompt,
   // end() (EOF — load-bearing: codex reads stdin to completion, openai/codex#20919),
@@ -408,6 +426,8 @@ async function main() {
     releaseVendorLockOnce();
     clearTimeout(killTimer);
     if (idlePoll) clearInterval(idlePoll);
+    try { closeSync(fdOut); } catch (_) {}
+    try { closeSync(fdErr); } catch (_) {}
     const duration_ms = Date.now() - t0;
 
     // Per codex Phase 5 audit P1 #2: read log + invoke adapter.parseResult
@@ -529,6 +549,8 @@ async function main() {
 
   vendor.on('error', (err) => {
     clearTimeout(killTimer);
+    try { closeSync(fdOut); } catch (_) {}
+    try { closeSync(fdErr); } catch (_) {}
     fail(outputMdPath, `Vendor spawn error: ${err.message} (command: ${adapter.command})`, { taskId, hopperDir, adapterName });
   });
 

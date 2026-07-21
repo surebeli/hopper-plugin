@@ -352,7 +352,7 @@ export function resolveVendorCwd(hopperDir) {
   return dirname(resolve(hopperDir));
 }
 
-export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, runnerPath, hostNative = null, stdinInput = null, adapterOpts = null, promptStdinFile = null }) {
+export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, runnerPath, hostNative = null, stdinInput = null, adapterOpts = null, promptStdinFile = null, subjectRoot = null }) {
   validateTaskId(taskId);
 
   const vendorCwd = resolveVendorCwd(hopperDir);
@@ -520,6 +520,7 @@ export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, run
     '--output-md', outputMdPath,
     '--log', logPath,
     '--cwd', vendorCwd,
+    ...(subjectRoot ? ['--subject-root', subjectRoot] : []),
     '--',
     ...adapterArgv,
   ], {

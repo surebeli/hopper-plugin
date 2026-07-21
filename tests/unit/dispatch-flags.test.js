@@ -136,8 +136,8 @@ test('validateSandbox accepts only canonical permission modes', () => {
   }
 });
 
-test('ALLOWED_DISPATCH_VALUE_FLAGS is exactly --model + --reasoning + --sandbox + --timeout + --vendor', () => {
-  assert.deepEqual([...ALLOWED_DISPATCH_VALUE_FLAGS], ['--model', '--reasoning', '--sandbox', '--timeout', '--vendor']);
+test('ALLOWED_DISPATCH_VALUE_FLAGS includes the explicit subject-root process guard', () => {
+  assert.deepEqual([...ALLOWED_DISPATCH_VALUE_FLAGS], ['--model', '--reasoning', '--sandbox', '--timeout', '--vendor', '--subject-root']);
 });
 
 test('taskTextRequestsReadOnly detects explicit read-only task text only', () => {
@@ -258,6 +258,28 @@ test('CLI rejects --sandbox with no value', () => {
   const r = runCli(['T-PLUGIN-05a', '--sandbox']);
   assert.equal(r.exitCode, 2);
   assert.match(r.stderr, /--sandbox requires a value/i);
+});
+
+test('CLI rejects a relative --subject-root before any vendor dispatch', () => {
+  const { root, hopperDir } = makeMinimalHopper('codex');
+  try {
+    const r = runCli(['T-SAME', '--subject-root', 'relative/project'], { hopperDir });
+    assert.equal(r.exitCode, 2);
+    assert.match(r.stderr, /subject-root.*absolute/i);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI rejects --subject-root when the effective sandbox is not read-only', () => {
+  const { root, hopperDir } = makeMinimalHopper('codex');
+  try {
+    const r = runCli(['T-SAME', '--subject-root', root], { hopperDir });
+    assert.equal(r.exitCode, 1);
+    assert.match(r.stderr, /subject-root.*effective sandbox.*read-only/i);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('CLI rejects unknown flag', () => {
@@ -385,12 +407,13 @@ test('CLI codex ignores even an explicit --sandbox read-only (always full-access
   }
 });
 
-test('CLI help mentions --model, --reasoning, and --sandbox', () => {
+test('CLI help mentions --model, --reasoning, --sandbox, and --subject-root', () => {
   const r = runCli(['--help']);
   assert.equal(r.exitCode, 0);
   assert.match(r.stdout, /--model/);
   assert.match(r.stdout, /--reasoning/);
   assert.match(r.stdout, /--sandbox/);
+  assert.match(r.stdout, /--subject-root/);
   assert.match(r.stdout, /danger-full-access/);
   assert.match(r.stdout, /low \| medium \| high \| xhigh/);
 });

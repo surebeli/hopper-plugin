@@ -148,6 +148,28 @@ test('executeWithAdapter aborts BEFORE spawn when envPreflight returns ok=false'
   }
 });
 
+test('executeWithAdapter aborts BEFORE vendor spawn when subject-root is not effectively read-only', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-e2e-subject-sandbox-'));
+  try {
+    const counterFile = join(tmp, 'count.txt');
+    const subject = join(tmp, 'subject');
+    writeFileSync(counterFile, '0');
+    mkdirSync(subject);
+    const adapter = makeCounterAdapter(counterFile);
+    const resolved = {
+      task: { id: 'T-fake-subject-sandbox', taskType: 'code-impl', status: 'pending', depends: [], priority: 'normal', brief: 'e2e', vendor: null },
+      vendor: 'fake-counter', composedPrompt: 'must not run', frame: '', taskSpec: '',
+    };
+    await assert.rejects(
+      () => executeWithAdapter({ resolved, adapter, adapterOpts: { sandbox: 'workspace-write', subjectRoot: subject } }),
+      /effective sandbox.*read-only/i,
+    );
+    assert.equal(readFileSync(counterFile, 'utf-8'), '0');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('multiple executeWithAdapter calls each spawn independently (no cross-call state)', async () => {
   const tmp = mkdtempSync(join(tmpdir(), 'hopper-e2e-multi-'));
   try {

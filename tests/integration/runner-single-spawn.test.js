@@ -47,7 +47,7 @@ const RUNNER_PATH = join(REPO_ROOT, 'cli', 'bin', 'hopper-runner');
  * codex.bat per PATHEXT. We write codex.cmd on Win, plain codex (chmod +x)
  * on Unix.
  */
-async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, exitCode = 0, sleepMs = 0, extraEnv = {} }) {
+async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, exitCode = 0, sleepMs = 0, extraEnv = {}, subjectRoot = null, adapterOpts = null, subjectWritePath = null, subjectLinkSource = null, subjectLinkAlias = null }) {
   const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-fake-'));
   try {
     const isWin = platform() === 'win32';
@@ -64,6 +64,8 @@ async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, exitCod
       const cur = fs.existsSync(file) ? parseInt(fs.readFileSync(file, 'utf-8')) : 0;
       fs.writeFileSync(file, String(cur + 1));
       console.log('FAKE_VENDOR_OK invocation ' + (cur + 1));
+      ${subjectWritePath ? `try { fs.writeFileSync(${JSON.stringify(subjectWritePath)}, 'blocked'); } catch {}` : ''}
+      ${subjectLinkSource ? `fs.linkSync(${JSON.stringify(subjectLinkSource)}, ${JSON.stringify(subjectLinkAlias)});` : ''}
       const sleepMs = ${sleepMs};
       if (sleepMs > 0) {
         setTimeout(() => process.exit(${exitCode}), sleepMs);
@@ -107,6 +109,7 @@ async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, exitCod
       ...extraEnv,
       PATH: shimDir + pathSep + (process.env.PATH || ''),
       HOPPER_RUNNER_INVOKED: '1',
+      HOPPER_ADAPTER_OPTS: adapterOpts ? JSON.stringify(adapterOpts) : undefined,
     };
 
     // Run runner synchronously (not detached — this is a test)
@@ -118,6 +121,7 @@ async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, exitCod
         '--adapter', 'opencode',
         '--output-md', outputMdPath,
         '--log', logPath,
+        ...(subjectRoot ? ['--subject-root', subjectRoot] : []),
         '--',
         // opencode adapter argv shape is irrelevant to the fake shim, but keep
         // it plausible for diagnostics.
@@ -234,6 +238,39 @@ test('hopper-runner spawns vendor EXACTLY ONCE on failure (no retry; spec §3 #4
 
     const fm = readFrontmatter(outputMdPath);
     assert.equal(fm.status, 'failed', `non-zero exit must flip status to 'failed'`);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('hopper-runner subject-root guard blocks writes and hard-link escape without inherited-FD bypass and tees output', { skip: platform() !== 'darwin' ? 'sandbox-exec guard is macOS-only' : false }, async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-subject-root-'));
+  try {
+    const subject = join(tmp, 'project');
+    const hopperDir = join(subject, '.hopper');
+    const counterFile = join(tmp, 'counter.txt');
+    const blockedWrite = join(subject, 'vendor-write.txt');
+    const subjectOriginal = join(subject, 'original.txt');
+    const externalAlias = join(tmp, 'external-alias.txt');
+    mkdirSync(join(hopperDir, 'handoffs'), { recursive: true });
+    writeFileSync(subjectOriginal, 'original');
+
+    const { logPath } = await runRunnerWithFakeVendor({
+      taskId: 'T-subject-root',
+      hopperDir,
+      counterFile,
+      subjectRoot: subject,
+      adapterOpts: { sandbox: 'read-only', subjectRoot: subject },
+      subjectWritePath: blockedWrite,
+      subjectLinkSource: subjectOriginal,
+      subjectLinkAlias: externalAlias,
+    });
+
+    assert.equal(readFileSync(counterFile, 'utf8'), '1', 'guarded vendor must remain a single attempt');
+    assert.equal(existsSync(blockedWrite), false, 'vendor must not write through an inherited log FD');
+    assert.equal(existsSync(externalAlias), false, 'vendor must not hard-link a protected file to an external alias');
+    assert.equal(readFileSync(subjectOriginal, 'utf8'), 'original', 'blocked hard-link attempt must not alter the subject file');
+    assert.match(readFileSync(logPath, 'utf8'), /FAKE_VENDOR_OK invocation 1/, 'parent pipe/tee must retain vendor output');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
