@@ -3,7 +3,7 @@
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -71,6 +71,8 @@ test('HOPPER-6: stopBackgroundJob marks in-progress job cancelled + emits termin
     assert.equal(fm.status, 'cancelled');
     assert.equal(fm.phase, 'cancelled');
     assert.equal(fm.terminal_event_emitted, true);
+    assert.equal(fm.process_cleanup, 'not-needed');
+    assert.equal(fm.process_cleanup_attempted, false);
     assert.ok(fm.end_time);
     assert.match(fm._body, /## Stopped \(user --stop\)/);
 
@@ -78,7 +80,45 @@ test('HOPPER-6: stopBackgroundJob marks in-progress job cancelled + emits termin
     const terminal = events.find((e) => e.terminal);
     assert.ok(terminal, 'a terminal progress event must be written');
     assert.equal(terminal.status, 'cancelled');
+    assert.equal(terminal.process_cleanup, 'not-needed');
+    assert.equal(terminal.process_cleanup_attempted, false);
   } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('HOPPER-6: stopBackgroundJob records a completed tree cleanup for an owned node child', async () => {
+  const { tmp, hopperDir } = makeHopper();
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 60_000)'], {
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  try {
+    await new Promise((resolve, reject) => {
+      child.once('spawn', resolve);
+      child.once('error', reject);
+    });
+    const outputMdPath = seedInProgress(hopperDir, 'T-STOP-OWNED', { pid: child.pid });
+
+    const res = stopBackgroundJob(hopperDir, 'T-STOP-OWNED');
+    assert.equal(res.ok, true);
+    assert.equal(res.killed, true);
+    assert.equal(res.processCleanup.status, 'succeeded');
+    assert.ok(res.processCleanup.method);
+
+    const fm = readFrontmatter(outputMdPath);
+    assert.equal(fm.process_cleanup, 'succeeded');
+    assert.equal(fm.process_cleanup_attempted, true);
+    assert.ok(fm.process_cleanup_method);
+
+    const terminal = readProgressEvents({ hopperDir, taskId: 'T-STOP-OWNED' }).find((event) => event.terminal);
+    assert.equal(terminal.process_cleanup, 'succeeded');
+    assert.equal(terminal.process_cleanup_attempted, true);
+    assert.ok(terminal.process_cleanup_method);
+
+    await new Promise((resolve) => child.once('close', resolve));
+  } finally {
+    try { child.kill('SIGKILL'); } catch (_) {}
     rmSync(tmp, { recursive: true, force: true });
   }
 });

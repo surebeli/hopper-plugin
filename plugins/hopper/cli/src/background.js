@@ -649,7 +649,7 @@ export function reapStaleJobs(hopperDir) {
  *
  * @param {string} hopperDir
  * @param {string} taskId
- * @returns {{ ok: boolean, status?: string, pid?: number|null, killed?: boolean, killSkipped?: boolean, already?: boolean, reason?: string }}
+ * @returns {{ ok: boolean, status?: string, pid?: number|null, killed?: boolean, killSkipped?: boolean, processCleanup?: object, already?: boolean, reason?: string }}
  */
 export function stopBackgroundJob(hopperDir, taskId) {
   validateTaskId(taskId);
@@ -673,6 +673,8 @@ export function stopBackgroundJob(hopperDir, taskId) {
   const pid = fm.pid;
   let killed = false;
   let killSkipped = false;
+  let processCleanup = { status: 'not-needed', method: null };
+  let processCleanupAttempted = false;
   if (pid && isAlive(pid)) {
     // PID-reuse guard (mgmt path → subprocess check is allowed; not dispatch).
     // 'mismatch' = the PID is now a non-node process (a recycled PID owned by
@@ -685,8 +687,15 @@ export function stopBackgroundJob(hopperDir, taskId) {
     const image = verifyPidImage(pid, { expectImageIncludes: 'node', isWindows });
     if (image === 'mismatch') {
       killSkipped = true;  // recycled PID owned by an unrelated process — leave it
+      processCleanup = { status: 'skipped-pid-mismatch', method: null };
     } else {
-      try { killProcessTree(pid, isWindows); killed = true; } catch (_) { /* best-effort */ }
+      processCleanupAttempted = true;
+      try {
+        processCleanup = killProcessTree(pid, isWindows);
+        killed = processCleanup.status === 'succeeded';
+      } catch (_) {
+        processCleanup = { status: 'failed', method: null };
+      }
     }
   }
 
@@ -708,6 +717,9 @@ export function stopBackgroundJob(hopperDir, taskId) {
         terminal: true,
         status: 'cancelled',
         duration_ms: duration_ms ?? undefined,
+        process_cleanup: processCleanup.status,
+        process_cleanup_attempted: processCleanupAttempted,
+        process_cleanup_method: processCleanup.method || undefined,
       },
     });
   } catch (_) {
@@ -721,6 +733,9 @@ export function stopBackgroundJob(hopperDir, taskId) {
     end_time: endTime,
     duration_ms,
     adapter_status: 'cancelled',
+    process_cleanup: processCleanup.status,
+    process_cleanup_attempted: processCleanupAttempted,
+    process_cleanup_method: processCleanup.method,
   };
   if (event) {
     patch.last_progress_at = event.ts;
@@ -734,12 +749,23 @@ export function stopBackgroundJob(hopperDir, taskId) {
       `\n## Stopped (user --stop)\n` +
       `- pid: ${pid ?? 'n/a'}\n` +
       `- killed: ${killed}\n` +
+      `- process_cleanup: ${processCleanup.status}\n` +
+      `- process_cleanup_attempted: ${processCleanupAttempted}\n` +
+      (processCleanup.method ? `- process_cleanup_method: ${processCleanup.method}\n` : '') +
       (killSkipped ? `- kill_skipped: PID reused by an unrelated process (left alone)\n` : '') +
       `- end_time: ${endTime}\n` +
       (duration_ms != null ? `- duration_ms: ${duration_ms}\n` : ''),
   });
 
-  return { ok: true, status: 'cancelled', pid: pid ?? null, killed, killSkipped };
+  return {
+    ok: true,
+    status: 'cancelled',
+    pid: pid ?? null,
+    killed,
+    killSkipped,
+    processCleanup,
+    processCleanupAttempted,
+  };
 }
 
 // ORPHAN_CEILING_HOURS already exported via the const declaration above.

@@ -83,15 +83,21 @@ for (const name of VENDORS) {
 
   test(`${name} adapter parseResult() handles success (exit 0 + stdout)`, () => {
     const a = getAdapter(name);
+    const stdout = name === 'opencode'
+      ? [
+        JSON.stringify({ type: 'text', part: { type: 'text', text: 'HELLO_RESPONSE' } }),
+        JSON.stringify({ type: 'step_finish', part: { type: 'step-finish', reason: 'stop' } }),
+      ].join('\n')
+      : 'HELLO_RESPONSE';
     const result = a.parseResult({
       exitCode: 0,
-      stdout: 'HELLO_RESPONSE',
+      stdout,
       stderr: '',
       timedOut: false,
       durationMs: 200,
     });
     assert.equal(result.status, 'success', `${name}: 0+stdout must map to success`);
-    assert.match(result.text, /HELLO_RESPONSE/);
+    if (name !== 'opencode') assert.match(result.text, /HELLO_RESPONSE/);
   });
 }
 
@@ -162,6 +168,7 @@ test('opencode adapter parseResult() reconstructs assistant text from json event
       JSON.stringify({ type: 'message.part.delta', delta: 'HELLO_' }),
       JSON.stringify({ type: 'message.part.delta', delta: 'WORLD' }),
       JSON.stringify({ type: 'message.completed' }),
+      JSON.stringify({ type: 'step_finish', part: { type: 'step-finish', reason: 'stop' } }),
     ].join('\n'),
     stderr: '',
     timedOut: false,
@@ -183,7 +190,7 @@ test('opencode adapter parseResult() reconstructs text from opencode 1.17+ {type
       JSON.stringify({ type: 'step_start', part: { type: 'step-start' } }),
       JSON.stringify({ type: 'text', part: { type: 'text', text: 'OK_' } }),
       JSON.stringify({ type: 'text', part: { type: 'text', text: 'DONE' } }),
-      JSON.stringify({ type: 'step_finish', part: { tokens: { total: 19834 } } }),
+      JSON.stringify({ type: 'step_finish', part: { type: 'step-finish', reason: 'stop', tokens: { total: 19834 } } }),
     ].join('\n'),
     stderr: '', timedOut: false, durationMs: 200,
   });

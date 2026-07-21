@@ -47,7 +47,7 @@ const RUNNER_PATH = join(REPO_ROOT, 'cli', 'bin', 'hopper-runner');
  * codex.bat per PATHEXT. We write codex.cmd on Win, plain codex (chmod +x)
  * on Unix.
  */
-async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, exitCode = 0, sleepMs = 0, extraEnv = {} }) {
+async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, killCounterFile = null, exitCode = 0, sleepMs = 0, extraEnv = {} }) {
   const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-fake-'));
   try {
     const isWin = platform() === 'win32';
@@ -63,7 +63,8 @@ async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, exitCod
       const file = ${JSON.stringify(counterFile)};
       const cur = fs.existsSync(file) ? parseInt(fs.readFileSync(file, 'utf-8')) : 0;
       fs.writeFileSync(file, String(cur + 1));
-      console.log('FAKE_VENDOR_OK invocation ' + (cur + 1));
+      console.log(JSON.stringify({ type: 'text', part: { type: 'text', text: 'FAKE_VENDOR_OK invocation ' + (cur + 1) } }));
+      console.log(JSON.stringify({ type: 'step_finish', part: { type: 'step-finish', reason: 'stop' } }));
       const sleepMs = ${sleepMs};
       if (sleepMs > 0) {
         setTimeout(() => process.exit(${exitCode}), sleepMs);
@@ -77,6 +78,20 @@ async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, exitCod
     const shimPath = join(shimDir, shimName);
     if (isWin) {
       writeFileSync(shimPath, `@echo off\r\nnode "${fakeScript.replace(/\\/g, '\\\\')}" %*\r\n`, 'utf-8');
+      if (killCounterFile) {
+        const fakeTaskkillScript = join(tmp, 'fake-taskkill.js');
+        writeFileSync(fakeTaskkillScript, `
+          const fs = require('node:fs');
+          const file = ${JSON.stringify(killCounterFile)};
+          const cur = fs.existsSync(file) ? parseInt(fs.readFileSync(file, 'utf-8')) : 0;
+          fs.writeFileSync(file, String(cur + 1));
+        `, 'utf-8');
+        writeFileSync(
+          join(shimDir, 'taskkill.cmd'),
+          `@echo off\r\nnode "${fakeTaskkillScript.replace(/\\/g, '\\\\')}" %*\r\n`,
+          'utf-8',
+        );
+      }
     } else {
       writeFileSync(shimPath, `#!/usr/bin/env bash\nexec node "${fakeScript}" "$@"\n`, 'utf-8');
       chmodSync(shimPath, 0o755);
@@ -330,6 +345,8 @@ test('hopper-runner appends exactly one timeout terminal progress event', async 
     assert.equal(fm.phase, 'timeout');
     assert.equal(fm.adapter_status, 'timeout');
     assert.equal(fm.timed_out, true);
+    assert.equal(fm.timeout_reason, 'ceiling');
+    assert.equal(fm.process_cleanup, 'succeeded');
     assert.equal(fm.terminal_event_emitted, true);
     assert.equal(fm.progress_seq, 1);
     assert.equal(fm.last_progress, 'Task timed out.');
@@ -341,7 +358,48 @@ test('hopper-runner appends exactly one timeout terminal progress event', async 
     assert.equal(events[0].phase, 'timeout');
     assert.equal(events[0].adapter_status, 'timeout');
     assert.equal(events[0].timed_out, true);
+    assert.equal(events[0].timeout_reason, 'ceiling');
+    assert.equal(events[0].process_cleanup, 'succeeded');
     assert.equal(events[0].message, 'Task timed out.');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('hopper-runner timeout arbitration is first-wins and kills the vendor tree exactly once', { skip: platform() !== 'win32' ? 'taskkill PATH shim is Windows-specific' : false }, async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-timeout-first-wins-'));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    mkdirSync(join(hopperDir, 'handoffs'), { recursive: true });
+    const counterFile = join(tmp, 'vendor-counter.txt');
+    const killCounterFile = join(tmp, 'kill-counter.txt');
+
+    const { outputMdPath } = await runRunnerWithFakeVendor({
+      taskId: 'T-timeout-first-wins',
+      hopperDir,
+      counterFile,
+      killCounterFile,
+      exitCode: 0,
+      // The taskkill shim intentionally does not terminate the vendor. Its
+      // startup output is observed by the first 1s poll; the second poll then
+      // crosses the 500ms idle budget after the 1s ceiling already fired.
+      sleepMs: 3000,
+      extraEnv: {
+        HOPPER_TEST_ONLY_TIMEOUT_MS: '1000',
+        HOPPER_IDLE_TIMEOUT_MS: '500',
+      },
+    });
+
+    assert.equal(parseInt(readFileSync(killCounterFile, 'utf-8')), 1,
+      'the first timeout must clear its peer before a second process-tree kill');
+
+    const fm = readFrontmatter(outputMdPath);
+    assert.equal(fm.timeout_reason, 'ceiling', 'the first timeout cause must remain authoritative');
+    assert.equal(fm.process_cleanup, 'succeeded', 'the first cleanup result must remain authoritative');
+
+    const events = readProgressEvents({ hopperDir, taskId: 'T-timeout-first-wins' });
+    assert.equal(events.filter((event) => event.terminal).length, 1,
+      'timeout terminalization must remain idempotent');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -377,9 +435,21 @@ test('hopper-runner appends exactly one timeout terminal progress event', async 
  * exits 0. Silence before that point produces ZERO log growth, exactly like
  * the real vendors.
  */
-async function runRunnerWithBufferedStub({ taskId, hopperDir, adapterName, command, silentMs, answerText, extraEnv = {} }) {
+async function runRunnerWithBufferedStub({
+  taskId,
+  hopperDir,
+  adapterName,
+  command,
+  silentMs,
+  answerText,
+  extraEnv = {},
+  inspectAfterMs = null,
+  promptText = 'test prompt',
+  preseedLog = '',
+}) {
   const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-buffered-'));
   try {
+    const isWin = platform() === 'win32';
     const shimDir = join(tmp, 'shim');
     mkdirSync(shimDir);
 
@@ -393,9 +463,13 @@ async function runRunnerWithBufferedStub({ taskId, hopperDir, adapterName, comma
       }, ${silentMs});
     `, 'utf-8');
 
-    const shimPath = join(shimDir, command);
-    writeFileSync(shimPath, `#!/usr/bin/env bash\nexec node "${fakeScript}" "$@"\n`, 'utf-8');
-    chmodSync(shimPath, 0o755);
+    const shimPath = join(shimDir, isWin ? `${command}.cmd` : command);
+    if (isWin) {
+      writeFileSync(shimPath, `@echo off\r\n"${process.execPath}" "${fakeScript}" %*\r\n`, 'utf-8');
+    } else {
+      writeFileSync(shimPath, `#!/usr/bin/env bash\nexec "${process.execPath}" "${fakeScript}" "$@"\n`, 'utf-8');
+      chmodSync(shimPath, 0o755);
+    }
 
     const outputMdPath = join(hopperDir, 'handoffs', `${taskId}-output.md`);
     const logPath = outputMdPath.replace(/\.md$/, '.log');
@@ -409,17 +483,22 @@ async function runRunnerWithBufferedStub({ taskId, hopperDir, adapterName, comma
       exit_code: null,
       duration_ms: null,
       mode: 'background',
+      phase: 'starting',
+      terminal_event_emitted: false,
       log: `./${taskId}-output.log`,
       _body: '',
     });
+    if (preseedLog) writeFileSync(logPath, preseedLog, 'utf-8');
 
     const childEnv = {
       ...process.env,
       ...extraEnv,
-      PATH: shimDir + ':' + (process.env.PATH || ''),
+      PATH: shimDir + (isWin ? ';' : ':') + (process.env.PATH || ''),
       HOPPER_RUNNER_INVOKED: '1',
     };
 
+    let interim = null;
+    let interimError = null;
     const result = await new Promise((resolveP, rejectP) => {
       const child = spawn(process.execPath, [
         RUNNER_PATH,
@@ -431,19 +510,42 @@ async function runRunnerWithBufferedStub({ taskId, hopperDir, adapterName, comma
         '--',
         // Argv content is irrelevant — the shim ignores it and always runs
         // fakeScript, but keep it plausible for diagnostics.
-        '-p', 'test prompt', '--output-format', 'json',
+        '-p', promptText, '--output-format', 'json',
       ], {
         env: childEnv,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       let stderr = '';
       child.stderr.on('data', (c) => { stderr += c.toString(); });
+      let inspectTimer = null;
+      if (Number.isFinite(inspectAfterMs) && inspectAfterMs >= 0) {
+        inspectTimer = setTimeout(() => {
+          inspectTimer = null;
+          try {
+            interim = {
+              frontmatter: readFrontmatter(outputMdPath),
+              events: readProgressEvents({ hopperDir, taskId }),
+            };
+          } catch (err) {
+            interimError = err;
+          }
+        }, inspectAfterMs);
+      }
       const timer = setTimeout(() => { child.kill('SIGKILL'); rejectP(new Error('runner timeout')); }, 15000);
-      child.on('exit', (code, signal) => { clearTimeout(timer); resolveP({ code, signal, stderr }); });
-      child.on('error', (err) => { clearTimeout(timer); rejectP(err); });
+      child.on('exit', (code, signal) => {
+        clearTimeout(timer);
+        if (inspectTimer) clearTimeout(inspectTimer);
+        resolveP({ code, signal, stderr });
+      });
+      child.on('error', (err) => {
+        clearTimeout(timer);
+        if (inspectTimer) clearTimeout(inspectTimer);
+        rejectP(err);
+      });
     });
+    if (interimError) throw interimError;
 
-    return { outputMdPath, logPath, result };
+    return { outputMdPath, logPath, result, interim };
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -538,6 +640,76 @@ test('Test B (fix): bufferedOutput:true (real grok adapter) — idle poll is nev
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test('buffered vendor emits non-sensitive process-alive liveness without extending the ceiling', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-buffered-liveness-'));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    mkdirSync(join(hopperDir, 'handoffs'), { recursive: true });
+    const promptSecret = 'PROMPT_SECRET_MUST_NOT_ENTER_PROGRESS';
+    const outputSecret = 'OUTPUT_SECRET_MUST_NOT_ENTER_PROGRESS';
+
+    const { outputMdPath, result, interim } = await runRunnerWithBufferedStub({
+      taskId: 'T-buffered-liveness',
+      hopperDir,
+      adapterName: 'grok',
+      command: 'grok',
+      silentMs: 60000,
+      answerText: JSON.stringify({ text: 'never delivered before ceiling', stopReason: 'stop' }),
+      promptText: promptSecret,
+      preseedLog: outputSecret,
+      inspectAfterMs: 1000,
+      extraEnv: {
+        HOPPER_TEST_ONLY_LIVENESS_INTERVAL_MS: '100',
+        HOPPER_TEST_ONLY_TIMEOUT_MS: '2500',
+      },
+    });
+
+    assert.ok(interim, 'must capture the runner before terminalization');
+    assert.equal(interim.frontmatter.status, 'in-progress');
+    assert.equal(interim.frontmatter.phase, 'running', 'liveness advances starting → running');
+    assert.equal(interim.frontmatter.last_stream_event, 'process_alive');
+
+    const liveness = interim.events.filter((event) => event.kind === 'liveness');
+    assert.ok(liveness.length >= 1, 'silent buffered process must emit a throttled liveness event');
+    assert.ok(liveness.every((event) => event.last_stream_event === 'process_alive'));
+    assert.ok(liveness.every((event) => event.message === 'Vendor process is still running.'));
+    const interimProtocol = JSON.stringify({ frontmatter: interim.frontmatter, events: liveness });
+    assert.doesNotMatch(interimProtocol, new RegExp(promptSecret));
+    assert.doesNotMatch(interimProtocol, new RegExp(outputSecret));
+
+    assert.notEqual(result.code, 0, 'liveness must not extend the absolute ceiling');
+    const finalFm = readFrontmatter(outputMdPath);
+    assert.equal(finalFm.phase, 'timeout');
+    assert.equal(finalFm.timeout_reason, 'ceiling');
+
+    const finalEvents = readProgressEvents({ hopperDir, taskId: 'T-buffered-liveness' });
+    const terminalEvents = finalEvents.filter((event) => event.terminal);
+    assert.equal(terminalEvents.length, 1);
+    const terminalSeq = terminalEvents[0].seq;
+    assert.ok(finalEvents.filter((event) => event.kind === 'liveness').every((event) => event.seq < terminalSeq),
+      'no liveness event may trail terminalization');
+
+    const eventCountAtTerminal = finalEvents.length;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+    assert.equal(readProgressEvents({ hopperDir, taskId: 'T-buffered-liveness' }).length, eventCountAtTerminal,
+      'terminalization must clear the liveness timer');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('buffered liveness timer is conditional and cleared on close/error paths', () => {
+  const runner = readFileSync(RUNNER_PATH, 'utf-8');
+  assert.match(runner, /bufferedLivenessTimer\s*=\s*bufferedOutput\s*\?\s*setInterval/,
+    'non-buffered vendors must not receive process-alive liveness events');
+
+  const closeStart = runner.indexOf("vendor.on('close'");
+  const errorStart = runner.indexOf("vendor.on('error'", closeStart);
+  assert.ok(closeStart >= 0 && errorStart > closeStart);
+  assert.match(runner.slice(closeStart, errorStart), /clearInterval\(bufferedLivenessTimer\)/);
+  assert.match(runner.slice(errorStart), /clearInterval\(bufferedLivenessTimer\)/);
 });
 
 test('hopper-runner early fail appends one terminal progress event when frontmatter exists', async () => {

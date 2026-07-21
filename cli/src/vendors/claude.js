@@ -174,6 +174,16 @@ export const claudeAdapter = {
         error: 'claude binary not found in PATH. Install: npm install -g @anthropic-ai/claude-code (see code.claude.com/docs).',
       };
     }
+    // A completed result object is the authoritative vendor outcome. The
+    // file-backed runner records startup diagnostics in the same log, so broad
+    // auth-shaped text (for example an env-precedence notice) must not override
+    // a clean `result/success/is_error:false` envelope.
+    const parsedResult = raw.exitCode === 0 ? extractClaudeResult(raw.stdout) : null;
+    if (parsedResult && !parsedResult.isError && parsedResult.text.trim()) {
+      return parsedResult.usage
+        ? { text: parsedResult.text, status: 'success', usage: parsedResult.usage }
+        : { text: parsedResult.text, status: 'success' };
+    }
     const signal = `${raw.stdout || ''}\n${raw.stderr || ''}`;
     // Auth failure (the `error` categories the SDK emits include
     // authentication_failed / oauth_org_not_allowed — code.claude.com/docs/en/headless).
@@ -199,7 +209,7 @@ export const claudeAdapter = {
       // --output-format json yields a single trailing result object. Parse
       // defensively (whole-stdout JSON → last JSON line for stream-json safety →
       // raw text for plain --output-format text).
-      const parsed = extractClaudeResult(raw.stdout);
+      const parsed = parsedResult || extractClaudeResult(raw.stdout);
       // FAIL FAST instead of recording a silent empty result: a blocked headless
       // turn (permission mode) or a max-turns hit can exit 0 with is_error/empty
       // result. Treat is_error OR no usable text as failure.

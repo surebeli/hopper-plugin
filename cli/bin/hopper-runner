@@ -14,7 +14,7 @@ import { spawn } from 'node:child_process';
 import { openSync, closeSync, readFileSync, readSync, existsSync, statSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import { readFrontmatter, writeFrontmatter } from '../src/background.js';
-import { appendProgressEvent } from '../src/progress.js';
+import { appendProgressEvent, findLatestVendorProgressEvent } from '../src/progress.js';
 import { getAdapter } from '../src/vendors/index.js';
 import { acquireVendorLock, killProcessTree, resolveDispatchTimeouts, chunkHasSubstantiveLine } from '../src/subprocess.js';
 import { resolveCommandOnPath, resolveCommandWithKnownPaths } from '../src/path-resolve.js';
@@ -94,6 +94,8 @@ function appendRunnerTerminalEvent(outputMdPath, fm, context) {
       signal: context.signal || null,
       adapter_status: context.adapter_status,
       timed_out: context.timed_out || null,
+      timeout_reason: context.timeout_reason || undefined,
+      process_cleanup: context.process_cleanup || undefined,
     },
   });
 }
@@ -318,6 +320,53 @@ async function main() {
 
   let timedOut = false;
   let timeoutReason = null;
+  let processCleanup = { status: 'not-needed', method: null };
+  let lastHeartbeatSignature = null;
+  let lastHeartbeatAt = 0;
+  const appendVendorHeartbeat = (chunk) => {
+    const stream = findLatestVendorProgressEvent(chunk);
+    if (!stream) return;
+    const now = Date.now();
+    const signature = `${stream.event}:${stream.reason || ''}`;
+    // Keep the file-backed protocol compact while still surfacing a new lifecycle
+    // transition immediately. No raw stream data is copied into progress.
+    if (signature === lastHeartbeatSignature && now - lastHeartbeatAt < 5000) return;
+    const update = new Date(now).toISOString();
+    try {
+      const fm = readFrontmatter(outputMdPath);
+      if (fm.terminal_event_emitted || (fm.status && fm.status !== 'in-progress')) return;
+      const message = `Vendor ${stream.event}${stream.reason ? ` (${stream.reason})` : ''}.`;
+      const event = appendProgressEvent({
+        hopperDir,
+        taskId,
+        event: {
+          vendor: fm.adapter || adapterName,
+          phase: 'running',
+          kind: 'heartbeat',
+          message,
+          source: 'vendor-stream',
+          terminal: false,
+          last_stream_event: stream.event,
+          last_reason: stream.reason || undefined,
+          last_update: update,
+        },
+      });
+      writeFrontmatter(outputMdPath, {
+        ...fm,
+        phase: 'running',
+        last_progress_at: event.ts,
+        last_progress: event.message,
+        progress_seq: event.seq,
+        last_stream_event: stream.event,
+        last_reason: stream.reason || null,
+        last_update: update,
+      });
+      lastHeartbeatSignature = signature;
+      lastHeartbeatAt = now;
+    } catch (_) {
+      // Stream progress is advisory; terminal frontmatter remains authoritative.
+    }
+  };
   // 乙: idle + ceiling instead of one total cap. Per codex Phase 5 audit F2,
   // adapter.timeoutMs honors --reasoning xhigh; it now SEEDS the ceiling (floored
   // to ≥30min by resolveDispatchTimeouts). The real "stuck" detector is idle:
@@ -334,12 +383,24 @@ async function main() {
   // Process-tree kill (not just top-level): children of .cmd wrappers + agentic
   // CLIs don't leak. taskkill /T /F on Windows; kill(-pid) on POSIX (vendor was
   // spawned detached → owns its own group).
+  let killTimer = null;
+  let idlePoll = null;
+  let bufferedLivenessTimer = null;
   const killVendor = (reason) => {
+    // Idle and ceiling are competing timeout sources. The first source owns
+    // both the diagnostic and cleanup result; clear its peer before the
+    // synchronous tree-kill so a timer that becomes due meanwhile cannot
+    // overwrite either field or issue a second kill.
+    if (timedOut) return false;
     timedOut = true;
     timeoutReason = reason;
-    try { killProcessTree(vendor.pid, isWindows); } catch (_) {}
+    if (killTimer) clearTimeout(killTimer);
+    if (idlePoll) clearInterval(idlePoll);
+    if (bufferedLivenessTimer) clearInterval(bufferedLivenessTimer);
+    processCleanup = killProcessTree(vendor.pid, isWindows);
+    return true;
   };
-  const killTimer = setTimeout(() => killVendor('ceiling'), ceilingMs);
+  killTimer = setTimeout(() => killVendor('ceiling'), ceilingMs);
   killTimer.unref();
   // Buffered-output vendors (ISSUE-grok-claude-buffered-output-idle-falsekill):
   // grok/claude `--output-format json` are END-BUFFERED — the vendor writes
@@ -354,6 +415,54 @@ async function main() {
   if (bufferedOutput) {
     process.stderr.write(`hopper-runner: idle watchdog disabled (bufferedOutput vendor) — ceiling-only timeout applies (${ceilingMs}ms)\n`);
   }
+  // End-buffered vendors cannot expose stream progress before completion. Emit
+  // a fixed, non-sensitive process-alive marker instead: no log reads, prompt,
+  // output, or idle activity clocks are involved, and the absolute ceiling is
+  // intentionally untouched. The test-only override keeps integration tests
+  // fast without changing the production cadence.
+  const DEFAULT_BUFFERED_LIVENESS_INTERVAL_MS = 30_000;
+  const testLivenessMs = Number.parseInt(process.env.HOPPER_TEST_ONLY_LIVENESS_INTERVAL_MS || '', 10);
+  const bufferedLivenessIntervalMs = Number.isFinite(testLivenessMs) && testLivenessMs > 0
+    ? testLivenessMs
+    : DEFAULT_BUFFERED_LIVENESS_INTERVAL_MS;
+  const appendBufferedLiveness = () => {
+    if (!vendor.pid || vendor.exitCode !== null || vendor.signalCode !== null) return;
+    const update = new Date().toISOString();
+    try {
+      const fm = readFrontmatter(outputMdPath);
+      if (fm.terminal_event_emitted || (fm.status && fm.status !== 'in-progress')) return;
+      const event = appendProgressEvent({
+        hopperDir,
+        taskId,
+        event: {
+          vendor: fm.adapter || adapterName,
+          phase: 'running',
+          kind: 'liveness',
+          message: 'Vendor process is still running.',
+          source: 'runner',
+          terminal: false,
+          last_stream_event: 'process_alive',
+          last_update: update,
+        },
+      });
+      writeFrontmatter(outputMdPath, {
+        ...fm,
+        phase: 'running',
+        last_progress_at: event.ts,
+        last_progress: event.message,
+        progress_seq: event.seq,
+        last_stream_event: 'process_alive',
+        last_update: update,
+      });
+    } catch (_) {
+      // Liveness is advisory; terminal frontmatter remains authoritative.
+    }
+  };
+  bufferedLivenessTimer = bufferedOutput ? setInterval(
+    appendBufferedLiveness,
+    bufferedLivenessIntervalMs,
+  ) : null;
+  if (bufferedLivenessTimer && bufferedLivenessTimer.unref) bufferedLivenessTimer.unref();
   // idle poll: reset the silence clock whenever the log grows; kill after idleMs
   // of no growth. Poll cadence is a fraction of idleMs (clamped 1–5s).
   //
@@ -368,46 +477,50 @@ async function main() {
   let lastReadOffset = 0;          // heartbeat-aware path: bytes already scanned for substance
   let lastGrowAt = Date.now();
   const pollMs = Math.max(1000, Math.min(idleMs || 0, 5000));
-  const idlePoll = (idleMs > 0 && !bufferedOutput) ? setInterval(() => {
+  idlePoll = (idleMs > 0 && !bufferedOutput) ? setInterval(() => {
     let sz = 0;
     try { sz = existsSync(logPath) ? statSync(logPath).size : 0; } catch (_) {}
-    if (sz !== lastSize) {
-      lastSize = sz;
-      if (!heartbeatRe) { lastGrowAt = Date.now(); return; }
-      // Heartbeat-aware: reset only if the newly-appended bytes hold a non-heartbeat line.
-      if (sz > lastReadOffset) {
-        let chunk = null;
-        try {
-          const fd = openSync(logPath, 'r');
-          try {
-            const len = sz - lastReadOffset;
-            const buf = Buffer.allocUnsafe(len);
-            const n = readSync(fd, buf, 0, len, lastReadOffset);
-            chunk = buf.toString('utf8', 0, n);
-          } finally { closeSync(fd); }
-        } catch (_) { chunk = null; }
-        if (chunk === null) {
-          // Read failed this tick (I/O hiccup): be conservative — DON'T reap on a read error,
-          // and DON'T advance the offset, so the appended bytes are re-scanned next poll (no skip).
-          lastGrowAt = Date.now();
-          return;
+        if (sz !== lastSize) {
+          lastSize = sz;
+          if (sz > lastReadOffset) {
+            let chunk = null;
+            try {
+              const fd = openSync(logPath, 'r');
+              try {
+                const len = sz - lastReadOffset;
+                const buf = Buffer.allocUnsafe(len);
+                const n = readSync(fd, buf, 0, len, lastReadOffset);
+                chunk = buf.toString('utf8', 0, n);
+              } finally { closeSync(fd); }
+            } catch (_) { chunk = null; }
+            if (chunk === null) {
+              // Read failed this tick (I/O hiccup): be conservative — DON'T reap on a read error,
+              // and DON'T advance the offset, so the appended bytes are re-scanned next poll (no skip).
+              lastGrowAt = Date.now();
+              return;
+            }
+            lastReadOffset = sz;
+            appendVendorHeartbeat(chunk);
+            if (!heartbeatRe || chunkHasSubstantiveLine(chunk, heartbeatRe)) { lastGrowAt = Date.now(); return; }
+            // Only a declared heartbeat grew → fall through to the idle check.
+          } else {
+            // Initial empty log or a size shrink/rotation: resync and count it as activity once.
+            lastReadOffset = sz; lastGrowAt = Date.now(); return;
+          }
         }
-        lastReadOffset = sz;
-        if (chunkHasSubstantiveLine(chunk, heartbeatRe)) { lastGrowAt = Date.now(); return; }
-        // else: only the heartbeat grew → fall through to the idle check (do NOT reset).
-      } else {
-        // size shrank/rotated → resync offset and count it as activity once.
-        lastReadOffset = sz; lastGrowAt = Date.now(); return;
-      }
-    }
     if (Date.now() - lastGrowAt >= idleMs) { clearInterval(idlePoll); killVendor('idle'); }
   }, pollMs) : null;
   if (idlePoll && idlePoll.unref) idlePoll.unref();
 
-  vendor.on('exit', (code, signal) => {
+  // `exit` can arrive before the child stdio handles have closed. Read the
+  // file-backed stream only on `close`, after EOF, so final completion records
+  // cannot be lost to the exit/read race. appendRunnerTerminalEvent remains
+  // idempotent if another terminal writer has already marked the task.
+  vendor.on('close', (code, signal) => {
     releaseVendorLockOnce();
     clearTimeout(killTimer);
     if (idlePoll) clearInterval(idlePoll);
+    if (bufferedLivenessTimer) clearInterval(bufferedLivenessTimer);
     const duration_ms = Date.now() - t0;
 
     // Per codex Phase 5 audit P1 #2: read log + invoke adapter.parseResult
@@ -490,6 +603,8 @@ async function main() {
           signal: signal || null,
           adapter_status: adapterStatus,
           timed_out: timedOut || null,
+          timeout_reason: timeoutReason || undefined,
+          process_cleanup: processCleanup.status,
         });
       } catch (_) {
         // Progress writing is best-effort; final frontmatter is still authoritative.
@@ -501,6 +616,9 @@ async function main() {
         exit_code: code === null ? -1 : code,
         signal: signal || null,
         timed_out: timedOut || null,
+        timeout_reason: timeoutReason || null,
+        process_cleanup: processCleanup.status,
+        process_cleanup_method: processCleanup.method,
         duration_ms,
         adapter_status: adapterStatus,     // preserve the granular classification
         _body: (fm._body || '') +
@@ -513,6 +631,9 @@ async function main() {
           `- exit_code: ${code === null ? -1 : code}\n` +
           (signal ? `- signal: ${signal}\n` : '') +
           (timedOut ? `- timed_out: true\n` : '') +
+          (timeoutReason ? `- timeout_reason: ${timeoutReason}\n` : '') +
+          `- process_cleanup: ${processCleanup.status}\n` +
+          (processCleanup.method ? `- process_cleanup_method: ${processCleanup.method}\n` : '') +
           `- duration_ms: ${duration_ms}\n` +
           `- end_time: ${endTime}\n` +
           (adapterError ? `\n### Adapter error\n\`\`\`\n${adapterError.slice(0, 2000)}\n\`\`\`\n` : '') +
@@ -529,6 +650,8 @@ async function main() {
 
   vendor.on('error', (err) => {
     clearTimeout(killTimer);
+    if (idlePoll) clearInterval(idlePoll);
+    if (bufferedLivenessTimer) clearInterval(bufferedLivenessTimer);
     fail(outputMdPath, `Vendor spawn error: ${err.message} (command: ${adapter.command})`, { taskId, hopperDir, adapterName });
   });
 

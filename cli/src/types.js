@@ -65,6 +65,8 @@
  * @property {string} stdout
  * @property {string} stderr
  * @property {boolean} timedOut       True if process was killed for exceeding timeoutMs
+ * @property {'idle'|'ceiling'|null} timeoutReason  First timeout source; null when no timeout fired
+ * @property {{status: string, method: string|null}} processCleanup  First timeout cleanup result, or not-needed
  * @property {number} durationMs
  * @property {string} [logFileContent] Optional content of a --log-file if adapter requested one
  */

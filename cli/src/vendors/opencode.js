@@ -114,7 +114,15 @@ export const opencodeAdapter = {
       return { text: '', status: 'permission-fail', error: 'opencode binary not found. Install: npm install -g opencode-ai/opencode' };
     }
     if (raw.exitCode === 0) {
-      return { text: extractOpencodeText(raw.stdout), status: 'success' };
+      const text = extractOpencodeText(raw.stdout);
+      if (!opencodeAnswerCompleted(raw.stdout) || !text) {
+        return {
+          text,
+          status: 'unknown-fail',
+          error: 'opencode exited 0 without authoritative completion evidence and usable result text.',
+        };
+      }
+      return { text, status: 'success' };
     }
     return {
       text: raw.stdout,
@@ -143,15 +151,91 @@ function extractOpencodeText(stdout) {
     }
   }
 
-  if (parsedJson) {
-    const joined = chunks.join('').trim();
-    if (joined) return joined;
-  }
+  // Once a structured stream is present, never fall back to rendering raw JSON
+  // or diagnostic lines as the answer. A usable answer must come from an
+  // answer-bearing event, and completion is checked separately below.
+  if (parsedJson) return chunks.join('').trim();
 
   // Legacy/plain-text fallback.
   let text = stdout.replace(/\x1b\[[0-9;]*m/g, '');
   text = text.replace(/^>\s+build\s+·\s+[^\n]+\n+/m, '').trim();
   return text;
+}
+
+/**
+ * Returns true only when an OpenCode JSON stream contains a whitelisted
+ * authoritative completion event: a reasonless/terminal `step_finish`, an
+ * exact `message.completed`, or an explicit successful `result` envelope.
+ * Older/forward-compatible wrappers may place those events under
+ * event/data/payload. Tool-call, error, and cancellation boundaries are
+ * deliberately excluded because they do not prove a usable final answer.
+ *
+ * @param {string} log full stdout/log stream
+ * @returns {boolean}
+ */
+export function opencodeAnswerCompleted(log) {
+  if (!log) return false;
+  for (const line of String(log).split(/\r?\n/)) {
+    let parsed;
+    try { parsed = JSON.parse(line); } catch (_) { continue; }
+    if (containsTerminalOpencodeEvent(parsed)) return true;
+  }
+  return false;
+}
+
+function containsTerminalOpencodeEvent(node, depth = 0) {
+  if (!node || typeof node !== 'object' || depth > 4) return false;
+  const type = normalizeProtocolToken(node.type ?? node.kind);
+  const reason = normalizeProtocolToken(node.part?.reason ?? node.reason);
+  if (type === 'step_finish') {
+    // OpenCode 1.17+ has emitted authoritative step_finish records without a
+    // reason. An explicit mid-turn/tool reason remains non-terminal.
+    return reason === '' || isTerminalStopReason(reason);
+  }
+  if (type === 'message.completed' || type === 'message_completed') return true;
+  if (type === 'result') return isSuccessfulResultEnvelope(node);
+
+  for (const key of ['event', 'data', 'payload', 'result']) {
+    if (containsTerminalOpencodeEvent(node[key], depth + 1)) return true;
+  }
+  return false;
+}
+
+function normalizeProtocolToken(value) {
+  return typeof value === 'string'
+    ? value.trim().toLowerCase().replace(/-/g, '_')
+    : '';
+}
+
+function isTerminalStopReason(reason) {
+  return new Set([
+    'stop', 'finished', 'finish', 'completed', 'complete', 'end_turn',
+    'length', 'max_tokens',
+  ]).has(reason);
+}
+
+function isSuccessfulResultEnvelope(node) {
+  const nested = node.result && typeof node.result === 'object' ? node.result : null;
+  const outcomes = [
+    node.subtype, node.status, node.state, node.stop_reason, node.reason,
+    nested?.subtype, nested?.status, nested?.state, nested?.stop_reason, nested?.reason,
+  ].map(normalizeProtocolToken).filter(Boolean);
+
+  const failed = outcomes.some((outcome) => new Set([
+    'error', 'failed', 'failure', 'cancelled', 'canceled', 'aborted', 'abort',
+    'interrupted', 'timeout', 'timed_out',
+  ]).has(outcome) || outcome.startsWith('error_'));
+  if (failed || node.is_error === true || node.success === false ||
+      node.cancelled === true || node.canceled === true ||
+      (typeof node.error === 'string' && node.error.trim()) || node.error === true) {
+    return false;
+  }
+
+  const succeeded = outcomes.some((outcome) => new Set([
+    'success', 'succeeded', 'completed', 'complete', 'done', 'stop',
+    'end_turn', 'finished', 'finish',
+  ]).has(outcome));
+  return node.is_error === false || node.success === true || succeeded;
 }
 
 function extractOpencodeEventText(event) {

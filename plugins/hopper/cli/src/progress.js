@@ -93,7 +93,52 @@ const OPTIONAL_EVENT_FIELDS = [
   'signal',
   'adapter_status',
   'timed_out',
+  'last_stream_event',
+  'last_reason',
+  'last_update',
+  'timeout_reason',
+  'process_cleanup',
+  'process_cleanup_attempted',
+  'process_cleanup_method',
 ];
+
+/**
+ * Extract the latest vendor lifecycle marker from a log chunk without retaining
+ * prompts, tool arguments, or model output. The normalized protocol tokens are
+ * safe to mirror into file-backed progress heartbeats.
+ *
+ * @param {string} chunk
+ * @returns {{ event: string, reason: string|null }|null}
+ */
+export function findLatestVendorProgressEvent(chunk) {
+  if (!chunk) return null;
+  let latest = null;
+  for (const line of String(chunk).split(/\r?\n/)) {
+    let parsed;
+    try { parsed = JSON.parse(line); } catch (_) { continue; }
+    const event = findLifecycleEvent(parsed);
+    if (event) latest = event;
+  }
+  return latest;
+}
+
+function findLifecycleEvent(node, depth = 0) {
+  if (!node || typeof node !== 'object' || depth > 4) return null;
+  const event = protocolToken(node.type ?? node.kind);
+  if (new Set(['step_start', 'step_finish', 'session_start', 'session_started', 'result']).has(event)) {
+    return { event, reason: protocolToken(node.part?.reason ?? node.reason) || null };
+  }
+  for (const key of ['event', 'data', 'payload', 'result']) {
+    const nested = findLifecycleEvent(node[key], depth + 1);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+function protocolToken(value) {
+  if (typeof value !== 'string') return '';
+  return value.trim().toLowerCase().replace(/-/g, '_').replace(/[^a-z0-9_.]/g, '').slice(0, 80);
+}
 
 export function appendProgressEvent({ hopperDir, taskId, event }) {
   const path = pathForTask(hopperDir, taskId);

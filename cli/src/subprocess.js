@@ -212,21 +212,36 @@ export async function runSubprocessOnce({
     let stderr = '';
     let timedOut = false;
     let timeoutReason = null;     // 'idle' | 'ceiling' (diagnostic)
+    let processCleanup = { status: 'not-needed', method: null };
     let killTimer = null;
     let idleTimer = null;
+
+    const clearTimeoutTimers = () => {
+      if (killTimer) clearTimeout(killTimer);
+      if (idleTimer) clearTimeout(idleTimer);
+      killTimer = null;
+      idleTimer = null;
+    };
+
+    const claimTimeout = (reason) => {
+      if (timedOut) return false;
+      timedOut = true;
+      timeoutReason = reason;
+      // Clear the competing source before the synchronous tree-kill. Output
+      // arriving after a best-effort cleanup must not re-arm idle either.
+      clearTimeoutTimers();
+      processCleanup = killProcessTree(child.pid, isWindows);
+      return true;
+    };
 
     // idle timer — resets on every chunk of vendor output; fires only after
     // idleMs of total silence (hung / reverse-pressured). ADDITIVE: when idleMs
     // is falsy this is a no-op, so callers/tests passing only timeoutMs keep the
     // legacy single-ceiling behavior unchanged.
     const armIdle = () => {
-      if (!(idleMs > 0)) return;
+      if (!(idleMs > 0) || timedOut) return;
       if (idleTimer) clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => {
-        timedOut = true;
-        timeoutReason = 'idle';
-        killProcessTree(child.pid, isWindows);
-      }, idleMs);
+      idleTimer = setTimeout(() => claimTimeout('idle'), idleMs);
       if (idleTimer.unref) idleTimer.unref();
     };
 
@@ -244,24 +259,18 @@ export async function runSubprocessOnce({
 
     // Absolute ceiling. NO retry on timeout — timeout = failure, surface it.
     if (timeoutMs > 0) {
-      killTimer = setTimeout(() => {
-        timedOut = true;
-        timeoutReason = 'ceiling';
-        killProcessTree(child.pid, isWindows);
-      }, timeoutMs);
+      killTimer = setTimeout(() => claimTimeout('ceiling'), timeoutMs);
     }
     armIdle();  // start the idle clock at spawn (silence before first byte counts)
 
     const exitCode = await new Promise((resolve) => {
       child.on('close', (code, signal) => {
-        if (killTimer) clearTimeout(killTimer);
-        if (idleTimer) clearTimeout(idleTimer);
+        clearTimeoutTimers();
         // Map signal to exit-code-equivalent (POSIX convention: 128 + signal)
         resolve(code != null ? code : 128 + (signal === 'SIGKILL' ? 9 : signal === 'SIGTERM' ? 15 : 0));
       });
       child.on('error', (_err) => {
-        if (killTimer) clearTimeout(killTimer);
-        if (idleTimer) clearTimeout(idleTimer);
+        clearTimeoutTimers();
         resolve(127); // command-not-found convention
       });
     });
@@ -279,7 +288,7 @@ export async function runSubprocessOnce({
       }
     }
 
-    return { exitCode, stdout, stderr, timedOut, timeoutReason, durationMs, logFileContent };
+    return { exitCode, stdout, stderr, timedOut, timeoutReason, processCleanup, durationMs, logFileContent };
   } finally {
     releaseVendorLock();
   }
@@ -294,21 +303,38 @@ export async function runSubprocessOnce({
  * @param {boolean} isWindows
  */
 export function killProcessTree(pid, isWindows) {
-  if (!pid) return;
+  if (!pid) return { status: 'not-requested', method: null };
   if (isWindows) {
     // taskkill /T = kill tree (all child processes), /F = force
     try {
       execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore', timeout: 5000 });
+      return { status: 'succeeded', method: 'taskkill /T /F' };
     } catch (_) {
-      // best-effort; process may already be dead
+      return { status: 'failed', method: 'taskkill /T /F' };
     }
   } else {
     // Unix: negative PID kills the process group (requires detached: true at spawn)
     try {
       process.kill(-pid, 'SIGKILL');
-    } catch (_) {
+      return { status: 'succeeded', method: 'process-group SIGKILL' };
+    } catch (groupError) {
       // try direct kill as fallback
-      try { process.kill(pid, 'SIGKILL'); } catch (_) {}
+      try {
+        process.kill(pid, 'SIGKILL');
+        return { status: 'succeeded', method: 'direct SIGKILL' };
+      } catch (directError) {
+        // The process can exit naturally between timeout detection and cleanup.
+        // Preserve the existing success/failure status enum while making that
+        // benign race observable. Do not mask EPERM/EACCES or mixed failures.
+        if (groupError?.code === 'ESRCH' && directError?.code === 'ESRCH') {
+          return {
+            status: 'succeeded',
+            method: 'already exited (group/direct ESRCH)',
+            alreadyExited: true,
+          };
+        }
+        return { status: 'failed', method: 'direct SIGKILL' };
+      }
     }
   }
 }
