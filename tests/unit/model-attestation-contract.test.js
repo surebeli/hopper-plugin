@@ -11,6 +11,8 @@ import {
   chooseDiagnosticCode,
   DIAGNOSTIC_PRECEDENCE,
 } from '../../cli/src/model-attestation.js';
+import { projectInventoryEntry } from '../../cli/src/inventory-contract.js';
+import { parseProbeCacheRecoveryArgs } from '../../cli/bin/hopper-dispatch';
 
 const NOW = '2026-07-21T12:00:00.000Z';
 const CLAUDE_BINDING = Object.freeze({
@@ -275,4 +277,80 @@ test('diagnostics use the frozen cross-domain precedence', () => {
   assert.equal(chooseDiagnosticCode(['runtime-model-metadata-absent', 'catalog-unavailable']), 'catalog-unavailable');
   assert.equal(chooseDiagnosticCode(['unknown-future-code']), 'unknown');
   assert.equal(chooseDiagnosticCode([]), 'none');
+});
+
+test('inventory projection returns only the six closed v2 fields and never copies raw cache data', () => {
+  const projected = projectInventoryEntry('claude', {
+    binary_path: 'C:\\Users\\person\\AppData\\Local\\bin\\claude.exe',
+    models_source: 'C:\\Users\\person\\.config\\claude.json',
+    notes: ['provider/account/token/stderr should never escape'],
+    sourceNote: 'https://private.example.invalid/path',
+    provenance: {
+      source_kind: 'adapter-aliases',
+      source_label: 'raw arbitrary label is ignored',
+      binary_availability: 'present',
+      binary_basename: 'claude',
+      provider: 'private-account',
+    },
+    diagnostic_code: 'none',
+  }, 'ok-v1');
+  assert.deepEqual(projected, {
+    binaryAvailability: 'present',
+    binaryBasename: 'claude',
+    sourceKind: 'adapter-aliases',
+    sourceLabel: 'claude-selector-metadata',
+    diagnosticCode: 'none',
+    diagnosticState: 'none',
+  });
+  assert.deepEqual(Object.keys(projected).sort(), [
+    'binaryAvailability', 'binaryBasename', 'diagnosticCode', 'diagnosticState', 'sourceKind', 'sourceLabel',
+  ]);
+});
+
+test('inventory projection uses the closed vendor/source allow map and normalizes future values', () => {
+  assert.deepEqual(projectInventoryEntry('opencode', {
+    provenance: { source_kind: 'cli-catalog', binary_availability: 'missing', binary_basename: 'opencode' },
+    diagnostic_code: 'probe-failed',
+  }, 'ok-v1'), {
+    binaryAvailability: 'missing', binaryBasename: 'opencode', sourceKind: 'cli-catalog',
+    sourceLabel: 'opencode-cli-catalog', diagnosticCode: 'probe-failed', diagnosticState: 'unavailable',
+  });
+  assert.deepEqual(projectInventoryEntry('kimi', {
+    provenance: { source_kind: 'adapter-aliases', binary_availability: 'future', binary_basename: 'C:/unsafe/kimi.exe' },
+    diagnostic_code: 'future-private-error',
+  }, 'ok-v1'), {
+    binaryAvailability: 'unknown', binaryBasename: 'unknown', sourceKind: 'unknown',
+    sourceLabel: 'unknown', diagnosticCode: 'unknown', diagnosticState: 'unknown',
+  });
+});
+
+test('inventory projection derives closed cache diagnostics from an unreadable outcome', () => {
+  assert.deepEqual(projectInventoryEntry('claude', null, 'version-mismatch'), {
+    binaryAvailability: 'unknown', binaryBasename: null, sourceKind: 'unknown', sourceLabel: 'unknown',
+    diagnosticCode: 'inventory-cache-version-unsupported', diagnosticState: 'degraded',
+  });
+  assert.deepEqual(projectInventoryEntry('claude', null, 'malformed'), {
+    binaryAvailability: 'unknown', binaryBasename: null, sourceKind: 'unknown', sourceLabel: 'unknown',
+    diagnosticCode: 'inventory-cache-malformed', diagnosticState: 'degraded',
+  });
+});
+
+test('cache recovery parser accepts only one declared probe vendor and never implies recovery', () => {
+  assert.deepEqual(parseProbeCacheRecoveryArgs(['--probe', 'claude', '--recover-cache'], ['claude', 'kimi']), {
+    target: 'claude', recoverCache: true, error: null,
+  });
+  for (const args of [
+    ['--recover-cache'],
+    ['--probe', '--recover-cache'],
+    ['--probe', 'unknown', '--recover-cache'],
+    ['--probe', 'claude', '--probe', 'kimi', '--recover-cache'],
+    ['--probe', 'claude', '--recover-cache', '--deep'],
+  ]) {
+    const parsed = parseProbeCacheRecoveryArgs(args, ['claude', 'kimi']);
+    assert.equal(parsed.recoverCache, false, args.join(' '));
+    assert.match(parsed.error, /--recover-cache/, args.join(' '));
+  }
+  assert.deepEqual(parseProbeCacheRecoveryArgs(['--probe', 'claude'], ['claude', 'kimi']), {
+    target: 'claude', recoverCache: false, error: null,
+  });
 });

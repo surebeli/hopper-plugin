@@ -16,6 +16,7 @@
 
 import { listAdapters, getAdapter, installCheckForAdapter, capabilitiesForAdapter, probeVendor } from './vendors/index.js';
 import { getVendorCache, setVendorCache } from './cache.js';
+import { projectInventoryEntry } from './inventory-contract.js';
 import { compatCheckForAdapter } from './vendor-compat.js';
 import { reconcileModels } from './model-normalize.js';
 import { parseAgentsFile } from './agents.js';
@@ -134,7 +135,9 @@ export async function buildVendorReadiness({ deep = false, only = null, now = ne
         // `['<provider>/<model>']` as a format example, not a model list).
         const kgUsable = kg.length > 0 && !kg.some((g) => typeof g === 'string' && g.includes('<'));
         row.modelsLive = liveModels;
-        row.modelsLiveSource = live ? (live.models_source || null) : null;
+        // This row can be consumed by future setup renderers; retain only the
+        // same closed projection used by all other public inventory surfaces.
+        row.modelsLiveSource = projectInventoryEntry(name, live, 'ok-v1').sourceLabel;
         row.introspection = introspection;
         // Refresh the cache + Models column ONLY for genuinely-live catalogs, so doctor
         // never stamps a fresh probed_at onto static/fallback data.

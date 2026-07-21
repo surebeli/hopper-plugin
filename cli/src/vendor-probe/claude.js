@@ -48,19 +48,22 @@ function runOnce(command, args) {
  */
 export async function probe() {
   const t0 = Date.now();
-  const notes = [];
 
   // Resolve binary path (no spawn — uses in-process PATH walk).
   const resolved = resolveCommandOnPath('claude');
   if (!resolved || !resolved.resolvedPath) {
     return {
       introspection_supported: 'none',
-      binary_path: null,
       version: null,
       models: [],
-      models_source: 'claude not on PATH',
+      models_source: 'unavailable',
       reasoning_levels: [],
-      notes: ['claude binary not found on PATH; install: npm install -g @anthropic-ai/claude-code'],
+      notes: [],
+      provenance: {
+        source_kind: 'unavailable', source_label: 'unavailable',
+        binary_availability: 'missing', binary_basename: null,
+      },
+      diagnostic_code: 'catalog-unavailable',
       duration_ms: Date.now() - t0,
     };
   }
@@ -73,20 +76,20 @@ export async function probe() {
   if (verResult.exitCode === 0 && verResult.stdout) {
     const m = verResult.stdout.match(/[\d]+\.[\d]+\.[\d]+/);
     if (m) version = m[0];
-  } else if (verResult.timedOut) {
-    notes.push('claude --version timed out');
   }
-
-  notes.push('claude has no machine-readable model-catalog command; reachable models depend on the authenticated account. Aliases sonnet|opus|haiku|fable always resolve; pass a full id for a specific model.');
 
   return {
     introspection_supported: 'partial',  // version is live; model list is static aliases
-    binary_path: resolved.resolvedPath,
     version,
     models: KNOWN_MODEL_ALIASES,
-    models_source: 'static aliases (claude has no model-catalog command; account-dependent)',
+    models_source: 'adapter-aliases',
     reasoning_levels: [],  // no per-invocation reasoning-effort flag in claude -p
-    notes,
+    notes: [],
+    provenance: {
+      source_kind: 'adapter-aliases', source_label: 'claude-selector-metadata',
+      binary_availability: 'present', binary_basename: 'claude',
+    },
+    diagnostic_code: 'none',
     duration_ms: Date.now() - t0,
   };
 }

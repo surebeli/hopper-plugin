@@ -4,12 +4,18 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import {
-  readCache, writeCache, getVendorCache, setVendorCache,
+  readCache, readCacheWithOutcome, writeCache, getVendorCache, setVendorCache, recoverCache,
   isStale, staleness, cachePath, CACHE_VERSION,
 } from '../../cli/src/cache.js';
+import * as fs from 'node:fs';
 import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const DISPATCH_CLI = join(REPO_ROOT, 'cli', 'bin', 'hopper-dispatch');
 
 function withTmpCache(fn) {
   const tmp = mkdtempSync(join(tmpdir(), 'hopper-cache-'));
@@ -27,6 +33,328 @@ function withTmpCache(fn) {
 test('readCache returns null when file does not exist', () => {
   withTmpCache(() => {
     assert.equal(readCache(), null);
+  });
+});
+
+test('readCacheWithOutcome distinguishes missing, v1, malformed, and version mismatch without exposing raw errors', () => {
+  withTmpCache((tmp) => {
+    assert.deepEqual(readCacheWithOutcome(), {
+      outcome: 'missing', cache: null, diagnostic_code: 'none',
+    });
+
+    writeCache({ version: CACHE_VERSION, host: 'x', probed_at_global: '', vendors: {} });
+    assert.equal(readCacheWithOutcome().outcome, 'ok-v1');
+
+    writeFileSync(join(tmp, 'vendor-capabilities.json'), '{ not JSON', 'utf-8');
+    assert.deepEqual(readCacheWithOutcome(), {
+      outcome: 'malformed', cache: null, diagnostic_code: 'inventory-cache-malformed',
+    });
+
+    writeFileSync(join(tmp, 'vendor-capabilities.json'), JSON.stringify({ version: 2, vendors: {} }), 'utf-8');
+    assert.deepEqual(readCacheWithOutcome(), {
+      outcome: 'version-mismatch', cache: null, diagnostic_code: 'inventory-cache-version-unsupported',
+    });
+  });
+});
+
+test('setVendorCache creates a v1 cache only when missing and additively preserves unknown root, vendor, and provenance fields', () => {
+  withTmpCache(() => {
+    writeCache({
+      version: CACHE_VERSION,
+      host: 'future-host',
+      probed_at_global: '2026-01-01T00:00:00.000Z',
+      future_root: { retained: true },
+      vendors: {
+        claude: {
+          models: ['old'],
+          models_source: 'old source',
+          reasoning_levels: ['high'],
+          future_vendor: { retained: true },
+          provenance: {
+            source_kind: 'adapter-aliases',
+            binary_availability: 'present',
+            future_provenance: 'retain-me',
+          },
+        },
+      },
+    });
+
+    const result = setVendorCache('claude', {
+      models: ['fable'],
+      models_source: 'canonical',
+      probed_at: '2026-07-22T00:00:00.000Z',
+      introspection_supported: 'partial',
+      provenance: { source_kind: 'static' },
+    });
+    assert.deepEqual(result, { written: true, outcome: 'ok-v1', diagnostic_code: 'none' });
+
+    const entry = getVendorCache('claude');
+    const cache = readCache();
+    assert.deepEqual(cache.future_root, { retained: true });
+    assert.deepEqual(entry.models, ['fable']);
+    assert.deepEqual(entry.reasoning_levels, ['high'], 'an omitted owned optional field retains its prior value');
+    assert.deepEqual(entry.future_vendor, { retained: true });
+    assert.equal(entry.provenance.source_kind, 'static');
+    assert.equal(entry.provenance.binary_availability, 'present');
+    assert.equal(entry.provenance.future_provenance, 'retain-me');
+  });
+});
+
+test('Kimi, Claude, and OpenCode cache writes retain only canonical provenance rather than raw probe diagnostics', () => {
+  withTmpCache(() => {
+    setVendorCache('kimi', {
+      models: ['configured-alias'],
+      models_source: 'C:\\Users\\person\\.kimi-code\\config.toml',
+      binary_path: 'C:\\Users\\person\\bin\\kimi.cmd',
+      notes: ['provider=private-account stderr=secret'],
+      provenance: { source_kind: 'config', binary_availability: 'present', binary_basename: 'kimi' },
+    });
+    const entry = getVendorCache('kimi');
+    assert.equal(entry.models_source, 'config');
+    assert.equal(Object.hasOwn(entry, 'binary_path'), false);
+    assert.equal(Object.hasOwn(entry, 'notes'), false);
+    assert.deepEqual(entry.provenance, {
+      source_kind: 'config', binary_availability: 'present', binary_basename: 'kimi',
+    });
+  });
+});
+
+test('setVendorCache leaves malformed and future-version cache bytes untouched', () => {
+  withTmpCache((tmp) => {
+    const path = join(tmp, 'vendor-capabilities.json');
+    for (const raw of ['{ malformed', '{"version":2,"vendors":{},"future":"retain"}']) {
+      writeFileSync(path, raw, 'utf-8');
+      const result = setVendorCache('claude', { models: ['fable'] });
+      assert.equal(result.written, false);
+      assert.ok(['malformed', 'version-mismatch'].includes(result.outcome));
+      assert.equal(readFileSync(path, 'utf-8'), raw);
+    }
+  });
+});
+
+test('ordinary CLI probe fails closed on malformed cache without spawning recovery or changing bytes', () => {
+  withTmpCache((tmp) => {
+    const path = join(tmp, 'vendor-capabilities.json');
+    const raw = '{ malformed ordinary probe must preserve';
+    writeFileSync(path, raw, 'utf-8');
+    const child = spawnSync(process.execPath, [DISPATCH_CLI, '--probe', 'claude'], {
+      encoding: 'utf-8',
+      env: { ...process.env, HOPPER_CACHE_DIR: tmp, PATH: '' },
+    });
+    assert.equal(child.status, 1);
+    assert.match(`${child.stdout}\n${child.stderr}`, /inventory-cache-malformed/);
+    assert.match(`${child.stdout}\n${child.stderr}`, /--recover-cache/);
+    assert.equal(readFileSync(path, 'utf-8'), raw);
+  });
+});
+
+test('CLI inventory readers use the closed projection instead of raw cache path, source, or notes', () => {
+  withTmpCache((tmp) => {
+    writeCache({
+      version: CACHE_VERSION,
+      host: 'x',
+      probed_at_global: '2026-07-22T00:00:00.000Z',
+      vendors: {
+        claude: {
+          models: ['fable'],
+          models_source: 'C:\\Users\\person\\.claude\\config.json',
+          binary_path: 'C:\\Users\\person\\bin\\claude.exe',
+          notes: ['private account detail and stderr'],
+          probed_at: '2026-07-22T00:00:00.000Z',
+          provenance: {
+            source_kind: 'adapter-aliases', binary_availability: 'present', binary_basename: 'claude',
+          },
+          diagnostic_code: 'none',
+        },
+      },
+    });
+    for (const args of [['--models', 'claude'], ['--capabilities', 'claude']]) {
+      const child = spawnSync(process.execPath, [DISPATCH_CLI, ...args], {
+        encoding: 'utf-8', env: { ...process.env, HOPPER_CACHE_DIR: tmp },
+      });
+      const output = `${child.stdout}\n${child.stderr}`;
+      assert.equal(child.status, 0, args.join(' '));
+      assert.match(output, /claude-selector-metadata/, args.join(' '));
+      assert.doesNotMatch(output, /C:\\Users\\person|private account detail|config\.json/, args.join(' '));
+    }
+  });
+});
+
+test('ordinary setup returns a closed recovery hint for an unreadable cache', () => {
+  withTmpCache((tmp) => {
+    writeFileSync(join(tmp, 'vendor-capabilities.json'), '{ malformed setup cache', 'utf-8');
+    const child = spawnSync(process.execPath, [DISPATCH_CLI, '--setup', 'claude'], {
+      encoding: 'utf-8', env: { ...process.env, HOPPER_CACHE_DIR: tmp },
+    });
+    assert.equal(child.status, 1);
+    assert.match(`${child.stdout}\n${child.stderr}`, /inventory-cache-malformed/);
+    assert.match(`${child.stdout}\n${child.stderr}`, /--recover-cache/);
+  });
+});
+
+test('ordinary models and capabilities return the same closed recovery hint for an unreadable cache', () => {
+  withTmpCache((tmp) => {
+    writeFileSync(join(tmp, 'vendor-capabilities.json'), '{ malformed reader cache', 'utf-8');
+    for (const args of [['--models', 'claude'], ['--capabilities', 'claude']]) {
+      const child = spawnSync(process.execPath, [DISPATCH_CLI, ...args], {
+        encoding: 'utf-8', env: { ...process.env, HOPPER_CACHE_DIR: tmp },
+      });
+      const output = `${child.stdout}\n${child.stderr}`;
+      assert.equal(child.status, 1, args.join(' '));
+      assert.match(output, /inventory-cache-malformed/, args.join(' '));
+      assert.match(output, /--recover-cache/, args.join(' '));
+    }
+  });
+});
+
+function recoveryFs(overrides = {}) {
+  return {
+    existsSync: fs.existsSync,
+    mkdirSync: fs.mkdirSync,
+    readFileSync: fs.readFileSync,
+    writeFileSync: fs.writeFileSync,
+    openSync: fs.openSync,
+    closeSync: fs.closeSync,
+    renameSync: fs.renameSync,
+    unlinkSync: fs.unlinkSync,
+    readdirSync: fs.readdirSync,
+    statSync: fs.statSync,
+    chmodSync: fs.chmodSync,
+    fsyncSync: fs.fsyncSync,
+    ...overrides,
+  };
+}
+
+function recoveryBackupNames(tmp) {
+  return readdirSync(tmp).filter((name) => name.includes('.recovery-') && name.endsWith('.bak'));
+}
+
+test('recoverCache makes a fresh v1 cache through an owner-only temp and exclusive backup commit', () => {
+  withTmpCache((tmp) => {
+    const path = cachePath();
+    const active = '{"version":999,"secret":"old"}\n';
+    writeFileSync(path, active, 'utf-8');
+
+    const recovered = recoverCache({ now: () => new Date('2026-07-22T01:02:03.000Z'), randomHex: () => 'deadbeef' });
+    assert.deepEqual(recovered, { committed: true, diagnostic_code: 'none' });
+    assert.equal(readCacheWithOutcome().outcome, 'ok-v1');
+    const backups = recoveryBackupNames(tmp);
+    assert.deepEqual(backups, ['vendor-capabilities.json.recovery-20260722T010203000Z-deadbeef.bak']);
+    assert.equal(readFileSync(join(tmp, backups[0]), 'utf-8'), active);
+    assert.deepEqual(readdirSync(tmp).filter((name) => name.includes('.tmp.')), []);
+  });
+});
+
+test('recoverCache installs a missing active cache without creating a backup', () => {
+  withTmpCache((tmp) => {
+    const result = recoverCache();
+    assert.deepEqual(result, { committed: true, diagnostic_code: 'none' });
+    assert.equal(readCacheWithOutcome().outcome, 'ok-v1');
+    assert.deepEqual(recoveryBackupNames(tmp), []);
+  });
+});
+
+test('recoverCache removes a temp whose owner-only assertion fails before touching active bytes', () => {
+  withTmpCache((tmp) => {
+    const path = cachePath();
+    const active = '{"version":2,"keep":"exact bytes"}';
+    writeFileSync(path, active, 'utf-8');
+    const result = recoverCache({ security: { assertOwnerOnly: () => false } });
+    assert.deepEqual(result, { committed: false, diagnostic_code: 'inventory-cache-recovery-backup-create-failed' });
+    assert.equal(readFileSync(path, 'utf-8'), active);
+    assert.deepEqual(readdirSync(tmp).filter((name) => name.includes('.tmp.')), []);
+    assert.deepEqual(recoveryBackupNames(tmp), []);
+  });
+});
+
+test('recoverCache deletes a newly-created backup when its owner-only assertion fails', () => {
+  withTmpCache((tmp) => {
+    const path = cachePath();
+    const active = '{"version":2,"keep":"exact bytes"}';
+    writeFileSync(path, active, 'utf-8');
+    let assertions = 0;
+    const result = recoverCache({
+      security: {
+        prepareOwnerOnly: () => {},
+        assertOwnerOnly: () => ++assertions === 1,
+      },
+    });
+    assert.deepEqual(result, { committed: false, diagnostic_code: 'inventory-cache-recovery-backup-create-failed' });
+    assert.equal(readFileSync(path, 'utf-8'), active);
+    assert.deepEqual(recoveryBackupNames(tmp), []);
+  });
+});
+
+test('recoverCache fails closed after eight exclusive backup-name collisions', () => {
+  withTmpCache((tmp) => {
+    const path = cachePath();
+    const active = '{"version":2}';
+    writeFileSync(path, active, 'utf-8');
+    writeFileSync(join(tmp, 'vendor-capabilities.json.recovery-20260722T010203000Z-deadbeef.bak'), 'existing', 'utf-8');
+    const result = recoverCache({ now: () => new Date('2026-07-22T01:02:03.000Z'), randomHex: () => 'deadbeef' });
+    assert.deepEqual(result, { committed: false, diagnostic_code: 'inventory-cache-recovery-backup-create-failed' });
+    assert.equal(readFileSync(path, 'utf-8'), active);
+  });
+});
+
+test('recoverCache retention uses timestamp then complete basename, excludes the current backup, and self-heals a failed prune', () => {
+  withTmpCache((tmp) => {
+    const path = cachePath();
+    writeFileSync(path, '{"version":2}', 'utf-8');
+    const prefix = 'vendor-capabilities.json.recovery-20260721T000000000Z-';
+    for (const suffix of ['aaaaaaaa', 'bbbbbbbb', 'cccccccc']) writeFileSync(join(tmp, `${prefix}${suffix}.bak`), suffix, 'utf-8');
+
+    let failPrune = true;
+    const failed = recoverCache({
+      now: () => new Date('2026-07-22T01:02:03.000Z'),
+      randomHex: () => 'deadbeef',
+      fsOps: recoveryFs({
+        unlinkSync: (target) => {
+          if (failPrune && target.endsWith('.bak')) throw new Error('retention denied');
+          return fs.unlinkSync(target);
+        },
+      }),
+    });
+    assert.deepEqual(failed, { committed: false, diagnostic_code: 'inventory-cache-recovery-backup-create-failed' });
+    assert.equal(readFileSync(path, 'utf-8'), '{"version":2}');
+    assert.equal(recoveryBackupNames(tmp).length, 4, 'a failed prune may leave a temporary retention excess');
+
+    failPrune = false;
+    const healed = recoverCache({ now: () => new Date('2026-07-22T01:02:04.000Z'), randomHex: () => 'feedface' });
+    assert.deepEqual(healed, { committed: true, diagnostic_code: 'none' });
+    const backups = recoveryBackupNames(tmp).sort();
+    assert.equal(backups.length, 3);
+    assert.equal(backups.some((name) => name.endsWith('-feedface.bak')), true, 'current invocation backup is retained');
+    assert.equal(backups.includes(`${prefix}aaaaaaaa.bak`), false, 'equal timestamps prune bytewise earliest basename first');
+  });
+});
+
+test('recoverCache keeps active bytes unchanged when prune precedes a failed replace', () => {
+  withTmpCache((tmp) => {
+    const path = cachePath();
+    const active = '{"version":2,"active":"unchanged"}';
+    writeFileSync(path, active, 'utf-8');
+    for (const suffix of ['aaaaaaaa', 'bbbbbbbb', 'cccccccc']) {
+      writeFileSync(join(tmp, `vendor-capabilities.json.recovery-20260721T000000000Z-${suffix}.bak`), suffix, 'utf-8');
+    }
+    const result = recoverCache({
+      now: () => new Date('2026-07-22T01:02:03.000Z'),
+      randomHex: () => 'deadbeef',
+      fsOps: recoveryFs({ renameSync: () => { throw new Error('replace failed'); } }),
+    });
+    assert.deepEqual(result, { committed: false, diagnostic_code: 'inventory-cache-recovery-replace-failed' });
+    assert.equal(readFileSync(path, 'utf-8'), active);
+    assert.equal(recoveryBackupNames(tmp).includes('vendor-capabilities.json.recovery-20260721T000000000Z-aaaaaaaa.bak'), false, 'pre-commit prune is not rolled back');
+  });
+});
+
+test('recoverCache reports durability unknown only after atomic replacement has committed', () => {
+  withTmpCache(() => {
+    const path = cachePath();
+    writeFileSync(path, '{"version":2,"old":true}', 'utf-8');
+    const result = recoverCache({ fsOps: recoveryFs({ fsyncSync: () => { throw new Error('durability unknown'); } }) });
+    assert.deepEqual(result, { committed: true, diagnostic_code: 'inventory-cache-recovery-durability-unknown' });
+    assert.equal(readCacheWithOutcome().outcome, 'ok-v1');
   });
 });
 

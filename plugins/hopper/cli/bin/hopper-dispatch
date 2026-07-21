@@ -8,7 +8,8 @@
 import { resolveDispatch, resolveAdhocDispatch, planSwarm, getStatus, executeWithAdapter, resolveAdapterOptsForTask, assertVendorDispatchable } from '../src/dispatch.js';
 import { listTaskTypes } from '../src/tasks.js';
 import { listAdapters, getAdapter, installCheckForAdapter, capabilitiesForAdapter, probeVendor } from '../src/vendors/index.js';
-import { readCache, readCacheWithDiagnostics, getVendorCache, setVendorCache, isStale, staleness } from '../src/cache.js';
+import { readCacheWithOutcome, getVendorCache, setVendorCache, recoverCache, isStale, staleness } from '../src/cache.js';
+import { projectInventoryEntry } from '../src/inventory-contract.js';
 import { writeOutput } from '../src/output.js';
 import { scaffoldHopper, scaffoldGovernance } from '../src/scaffold.js';
 import { renderRulesMarkdown } from '../src/rules.js';
@@ -59,6 +60,26 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const RUNNER_PATH = join(__dirname, 'hopper-runner');
 
+/** Parse the explicit recovery form without making recovery implicit. */
+export function parseProbeCacheRecoveryArgs(argv, vendors) {
+  const recoverCount = argv.filter((arg) => arg === '--recover-cache').length;
+  const probeCount = argv.filter((arg) => arg === '--probe').length;
+  if (recoverCount === 0) {
+    const index = argv.indexOf('--probe');
+    const target = index === -1 || !argv[index + 1] || argv[index + 1].startsWith('-') ? null : argv[index + 1];
+    return { target, recoverCache: false, error: null };
+  }
+  if (recoverCount !== 1 || probeCount !== 1 || argv.length !== 3) {
+    return { target: null, recoverCache: false, error: '--recover-cache is valid only as `--probe <vendor> --recover-cache`.' };
+  }
+  const probeIndex = argv.indexOf('--probe');
+  const target = argv[probeIndex + 1];
+  if (!target || target.startsWith('-') || !vendors.includes(target)) {
+    return { target: null, recoverCache: false, error: '--recover-cache requires exactly one registered vendor after --probe.' };
+  }
+  return { target, recoverCache: true, error: null };
+}
+
 function printUsage() {
   console.log(`hopper-dispatch v${VERSION}`);
   console.log('');
@@ -97,6 +118,7 @@ function printUsage() {
   console.log('  hopper-dispatch --capabilities <vendor>         Show static model/reasoning/feature support + cached data if probed');
   console.log('  hopper-dispatch --check-model <vendor> <model> [--json]  Assert model availability pre-dispatch (zero-spawn): verified (exit 0) | catalog-only (exit 2) | not-found (exit 1)');
   console.log('  hopper-dispatch --probe [<vendor>]              Run vendor introspection, write cache to ~/.hopper/cache/');
+  console.log('  hopper-dispatch --probe <vendor> --recover-cache  Explicitly replace the cache before writing this probe result');
   console.log('  hopper-dispatch --models [<vendor>]             Show cached model list per vendor (run --probe first)');
   console.log('  hopper-dispatch --setup [<vendor>] [--deep]     Vendor readiness: installed/auth/models/sandbox/web-search (--doctor alias)');
   console.log('  hopper-dispatch --help                          Show this message');
@@ -165,6 +187,12 @@ async function main() {
     return;
   }
 
+  const recoveryArgs = parseProbeCacheRecoveryArgs(args, listAdapters());
+  if (recoveryArgs.error) {
+    console.error(`Error: ${recoveryArgs.error}`);
+    process.exit(1);
+  }
+
   // Phase 6a discovery commands — project-agnostic (don't need hopperDir).
   if (args.includes('--check')) {
     const checkIdx = args.indexOf('--check');
@@ -221,9 +249,7 @@ async function main() {
 
   // Phase 6b probe-cache commands
   if (args.includes('--probe')) {
-    const probeIdx = args.indexOf('--probe');
-    const target = args[probeIdx + 1] && !args[probeIdx + 1].startsWith('-') ? args[probeIdx + 1] : null;
-    await runProbe(target);
+    await runProbe(recoveryArgs.target, { recoverCache: recoveryArgs.recoverCache });
     return;
   }
   if (args.includes('--models')) {
@@ -1653,6 +1679,13 @@ async function runWatch(hopperDir, taskId) {
 // ─── Discovery commands (Phase 6a) ────────────────────────────────────
 
 async function runSetup({ only = null, deep = false } = {}) {
+  const cacheOutcome = readCacheWithOutcome();
+  if (cacheOutcome.outcome === 'malformed' || cacheOutcome.outcome === 'version-mismatch') {
+    console.error(`Inventory cache diagnostic: ${cacheOutcome.diagnostic_code}`);
+    console.error('Cache was not changed. Recover explicitly with `hopper-dispatch --probe <vendor> --recover-cache`.');
+    process.exitCode = 1;
+    return;
+  }
   const rows = await buildVendorReadiness({ only, deep });
   const sum = summarizeReadiness(rows);
   const cell = (s, w) => String(s == null ? '—' : s).slice(0, w).padEnd(w);
@@ -1913,13 +1946,11 @@ function runCapabilities(vendor) {
   if (caps.modelArg.knownGood.length > 0) {
     console.log(`               Known good: ${caps.modelArg.knownGood.join(', ')}`);
   }
-  console.log(`               Note: ${caps.modelArg.sourceNote}`);
   console.log('');
   console.log(`  --reasoning  ${caps.reasoningArg.accepted}`);
   if (caps.reasoningArg.knownGood.length > 0) {
     console.log(`               Values: ${caps.reasoningArg.knownGood.join(' | ')}`);
   }
-  console.log(`               Note: ${caps.reasoningArg.sourceNote}`);
   console.log('');
   console.log('  Features:');
   for (const [feat, info] of Object.entries(caps.features)) {
@@ -1932,26 +1963,33 @@ function runCapabilities(vendor) {
   console.log('');
   console.log('No vendor subprocess is spawned for this lookup (static data only).');
 
-  // Phase 6b: merge in cached probe data if present
-  const cached = getVendorCache(vendor);
+  const cacheOutcome = readCacheWithOutcome();
+  if (cacheOutcome.outcome === 'malformed' || cacheOutcome.outcome === 'version-mismatch') {
+    console.error(`Inventory cache diagnostic: ${cacheOutcome.diagnostic_code}`);
+    console.error('Cache was not changed. Recover explicitly with `hopper-dispatch --probe <vendor> --recover-cache`.');
+    process.exitCode = 1;
+    return;
+  }
+
+  // Public cache output is projection-only: never echo raw paths, source
+  // strings, notes, or parser errors from the private entry.
+  const cached = cacheOutcome.cache?.vendors?.[vendor] || null;
   if (cached) {
+    const inventory = projectInventoryEntry(vendor, cached, cacheOutcome.outcome);
     console.log('');
     console.log(`  Cached probe data (${staleness(cached.probed_at)}${isStale(cached.probed_at) ? ' — STALE' : ''}):`);
     console.log(`    introspection_supported:  ${cached.introspection_supported}`);
     if (cached.version) console.log(`    version:                  ${cached.version}`);
-    if (cached.binary_path) console.log(`    binary_path:              ${cached.binary_path}`);
+    console.log(`    binary:                   ${inventory.binaryAvailability}${inventory.binaryBasename ? ` (${inventory.binaryBasename})` : ''}`);
+    console.log(`    catalog:                  ${inventory.sourceKind} (${inventory.sourceLabel})`);
+    console.log(`    diagnostic:               ${inventory.diagnosticCode} (${inventory.diagnosticState})`);
     if (cached.models && cached.models.length > 0) {
       const preview = cached.models.slice(0, 8).join(', ');
       const more = cached.models.length > 8 ? ` (+${cached.models.length - 8} more)` : '';
       console.log(`    models (${cached.models.length}):              ${preview}${more}`);
     }
-    console.log(`    models_source:            ${cached.models_source}`);
     if (cached.reasoning_levels && cached.reasoning_levels.length > 0) {
       console.log(`    reasoning_levels:         ${cached.reasoning_levels.join(' | ')}`);
-    }
-    if (cached.notes && cached.notes.length > 0) {
-      console.log(`    notes:`);
-      for (const n of cached.notes) console.log(`      - ${n}`);
     }
     console.log(`    duration_ms:              ${cached.duration_ms}`);
   } else {
@@ -1994,10 +2032,6 @@ function runCheckModel(vendor, model, { json = false } = {}) {
   console.log(`  verdict: ${result.verdict}  (exit ${result.exitCode})`);
   console.log('');
   for (const line of result.hint) console.log(`  ${line}`);
-  if (result.verdict === 'verified' && caps && caps.modelArg && caps.modelArg.sourceNote) {
-    console.log('');
-    console.log(`  note: ${caps.modelArg.sourceNote}`);
-  }
   console.log('');
   console.log('No vendor subprocess is spawned for this check (static known-good + probe-cache read only).');
   process.exit(result.exitCode);
@@ -2005,11 +2039,19 @@ function runCheckModel(vendor, model, { json = false } = {}) {
 
 // ─── Phase 6b commands ────────────────────────────────────────────────
 
-async function runProbe(target) {
+async function runProbe(target, { recoverCache: shouldRecoverCache = false } = {}) {
   const vendors = target ? [target] : listAdapters();
   if (target && !listAdapters().includes(target)) {
     console.error(`Error: unknown vendor '${target}'. Known: ${listAdapters().join(', ')}`);
     process.exit(1);
+  }
+
+  const cacheOutcome = readCacheWithOutcome();
+  if ((cacheOutcome.outcome === 'malformed' || cacheOutcome.outcome === 'version-mismatch') && !shouldRecoverCache) {
+    console.error(`Inventory cache diagnostic: ${cacheOutcome.diagnostic_code}`);
+    console.error('Cache was not changed. Recover explicitly with `hopper-dispatch --probe <vendor> --recover-cache`.');
+    process.exitCode = 1;
+    return;
   }
 
   console.log(`hopper-dispatch v${VERSION} — probing ${vendors.length} vendor(s)...`);
@@ -2023,7 +2065,24 @@ async function runProbe(target) {
     const start = Date.now();
     try {
       const result = await probeVendor(v);
-      setVendorCache(v, { ...result, probed_at: new Date().toISOString() });
+      const entry = { ...result, probed_at: new Date().toISOString() };
+      if (shouldRecoverCache) {
+        const recovery = recoverCache({ vendor: v, entry });
+        if (!recovery.committed || recovery.diagnostic_code !== 'none') {
+          process.stderr.write(`${recovery.diagnostic_code}\n`);
+          if (!recovery.committed) {
+            process.exitCode = 1;
+            continue;
+          }
+        }
+      } else {
+        const write = setVendorCache(v, entry);
+        if (!write.written) {
+          process.stderr.write(`${write.diagnostic_code}; use --recover-cache for explicit recovery\n`);
+          process.exitCode = 1;
+          continue;
+        }
+      }
       const elapsed = Date.now() - start;
       const modelCount = result.models ? result.models.length : 0;
       process.stderr.write(`${result.introspection_supported} | ${modelCount} model(s) | ${elapsed}ms\n`);
@@ -2065,11 +2124,10 @@ function estimateSpawns(vendorName, introspectionSupported) {
 }
 
 function runModels(target) {
-  // P3b-fix: distinguish "no cache yet" from "cache is corrupt" so user knows
-  // whether to run --probe (no cache) vs delete + re-probe (corrupt).
-  const { cache, error } = readCacheWithDiagnostics();
-  if (error) {
-    console.error(`Error reading cache: ${error}`);
+  const { cache, outcome, diagnostic_code: diagnosticCode } = readCacheWithOutcome();
+  if (outcome === 'malformed' || outcome === 'version-mismatch') {
+    console.error(`Inventory cache diagnostic: ${diagnosticCode}`);
+    console.error('Cache was not changed. Recover explicitly with `hopper-dispatch --probe <vendor> --recover-cache`.');
     process.exit(1);
   }
   if (!cache) {
@@ -2090,12 +2148,14 @@ function runModels(target) {
   for (const v of vendors) {
     const entry = cache.vendors[v];
     if (!entry) continue;
+    const inventory = projectInventoryEntry(v, entry, outcome);
     const stale = isStale(entry.probed_at) ? ' [STALE]' : '';
     console.log(`${v} (${entry.introspection_supported}, ${staleness(entry.probed_at)})${stale}`);
+    console.log(`  catalog: ${inventory.sourceKind} (${inventory.sourceLabel}) | binary: ${inventory.binaryAvailability}${inventory.binaryBasename ? ` (${inventory.binaryBasename})` : ''} | diagnostic: ${inventory.diagnosticCode}`);
     if (entry.models && entry.models.length > 0) {
       for (const m of entry.models) console.log(`  - ${m}`);
     } else {
-      console.log(`  (no models in cache; source: ${entry.models_source})`);
+      console.log(`  (no models in cache; source: ${inventory.sourceLabel})`);
     }
     if (entry.reasoning_levels && entry.reasoning_levels.length > 0) {
       console.log(`  reasoning: ${entry.reasoning_levels.join(' | ')}`);

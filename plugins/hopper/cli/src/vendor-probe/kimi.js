@@ -123,7 +123,6 @@ export async function probe() {
   const resolved = resolveCommandOnPath('kimi');
   const binaryPath = resolved && resolved.resolvedPath ? resolved.resolvedPath : null;
   let version = null;
-  let providerListFailed = false;
 
   if (resolved && resolved.resolvedPath) {
     const cmd = resolved.command;
@@ -151,23 +150,24 @@ export async function probe() {
         }
         return {
           introspection_supported: 'partial',
-          binary_path: binaryPath,
           version,
           models: parsed.models,
           models_source: 'kimi provider list --json (configured aliases)',
           reasoning_levels: ['low', 'medium', 'high', 'xhigh', 'max'],
           notes,
+          provenance: {
+            source_kind: 'config', source_label: 'kimi-configured-aliases',
+            binary_availability: binaryPath ? 'present' : 'missing', binary_basename: binaryPath ? 'kimi' : null,
+          },
+          diagnostic_code: 'none',
           duration_ms: Date.now() - t0,
         };
       } catch (err) {
-        providerListFailed = true;
         notes.push(`kimi provider list JSON parse failed: ${err.message}`);
       }
     } else if (providerResult.timedOut) {
-      providerListFailed = true;
       notes.push('kimi provider list --json timed out; falling back to config file');
     } else {
-      providerListFailed = true;
       notes.push(`kimi provider list --json exited ${providerResult.exitCode}; stderr: ${providerResult.stderr.slice(0, 200)}; falling back to config file`);
     }
   } else {
@@ -196,7 +196,7 @@ export async function probe() {
         const parsed = parseKimiTomlConfig(content);
         models = parsed.models;
         modelsCaps.push(...parsed.modelsCaps);
-        modelsSource = `${path} (${parsed.models.length} [models.X] block(s))`;
+        modelsSource = 'config';
       } else {
         // JSON variant
         const parsed = JSON.parse(content);
@@ -208,7 +208,7 @@ export async function probe() {
               modelsCaps.push({ name, caps: block.capabilities });
             }
           }
-          modelsSource = `${path} (${models.length} models entry/entries)`;
+          modelsSource = 'config';
         }
       }
       break;
@@ -219,10 +219,10 @@ export async function probe() {
 
   if (models.length === 0 && notes.length === 0) {
     notes.push('No ~/.kimi-code/config.toml (or $KIMI_CODE_HOME / legacy ~/.kimi/config.{toml,json}) found OR no [models.NAME] blocks defined. Run `kimi` then `/login`, or define aliases.');
-    modelsSource = 'no config file';
+    modelsSource = 'unavailable';
   } else if (models.length === 0) {
     notes.push('No configured Kimi model aliases found in config fallback. Run `kimi provider list --json` or `kimi` then `/login` to refresh Kimi Code configuration.');
-    modelsSource = modelsSource || 'no config file';
+    modelsSource = modelsSource || 'unavailable';
   }
 
   // Capability summary as notes
@@ -233,14 +233,19 @@ export async function probe() {
 
   return {
     introspection_supported: 'config-only',
-    binary_path: binaryPath,
     version,
     models,
-    models_source: providerListFailed && modelsSource ? `${modelsSource} (fallback)` : modelsSource,
+    models_source: modelsSource,
     // Kimi Code 0.x: reasoning is config-driven [thinking].effort (no argv flag).
     // Effort enum (CONFIRMED via binary); mode is auto|on|off, default_thinking bool.
     reasoning_levels: ['low', 'medium', 'high', 'xhigh', 'max'],
     notes,
+    provenance: {
+      source_kind: models.length > 0 ? 'config' : 'unavailable',
+      source_label: models.length > 0 ? 'kimi-configured-aliases' : 'unavailable',
+      binary_availability: binaryPath ? 'present' : 'missing', binary_basename: binaryPath ? 'kimi' : null,
+    },
+    diagnostic_code: models.length > 0 ? 'none' : 'catalog-unavailable',
     duration_ms: Date.now() - t0,
   };
 }

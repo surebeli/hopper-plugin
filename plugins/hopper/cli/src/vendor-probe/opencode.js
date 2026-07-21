@@ -54,18 +54,21 @@ function runOnce(command, args) {
 
 export async function probe() {
   const t0 = Date.now();
-  const notes = [];
 
   const resolved = resolveCommandOnPath('opencode');
   if (!resolved || !resolved.resolvedPath) {
     return {
       introspection_supported: 'none',
-      binary_path: null,
       version: null,
       models: [],
-      models_source: 'opencode not on PATH',
+      models_source: 'unavailable',
       reasoning_levels: [],
-      notes: ['opencode binary not found on PATH'],
+      notes: [],
+      provenance: {
+        source_kind: 'unavailable', source_label: 'unavailable',
+        binary_availability: 'missing', binary_basename: null,
+      },
+      diagnostic_code: 'catalog-unavailable',
       duration_ms: Date.now() - t0,
     };
   }
@@ -82,39 +85,30 @@ export async function probe() {
 
   // 2. models — text output, one per line (NO --json per research)
   let models = [];
-  let modelsSource = '';
+  let modelsSource = 'unavailable';
+  let diagnosticCode = 'probe-failed';
   const modelsResult = await runOnce(cmd, [...prepend, 'models']);
   if (modelsResult.exitCode === 0 && modelsResult.stdout.trim()) {
     models = parseOpencodeModelsList(modelsResult.stdout);
-    modelsSource = 'opencode models (text)';
-  } else if (modelsResult.timedOut) {
-    notes.push('opencode models timed out');
-    modelsSource = 'timeout';
+    modelsSource = 'cli-catalog';
+    diagnosticCode = 'none';
   } else {
-    notes.push(`opencode models exited ${modelsResult.exitCode}; stderr: ${modelsResult.stderr.slice(0, 200)}`);
-    modelsSource = `exit ${modelsResult.exitCode}`;
-  }
-
-  // 3. auth list — what providers are signed in (informational)
-  const authResult = await runOnce(cmd, [...prepend, 'auth', 'list']);
-  if (authResult.exitCode === 0 && authResult.stdout.trim()) {
-    const clean = stripAnsi(authResult.stdout).slice(0, 500);
-    const providerCount = (clean.match(/\b(anthropic|openai|deepseek|opencode|xiaomi|google|mistral|groq)\b/gi) || []).length;
-    notes.push(`opencode auth list found ${providerCount} provider mention(s); see cache for excerpt`);
-    notes.push(`auth excerpt: ${clean.slice(0, 200).replace(/\n/g, ' | ')}`);
-  } else {
-    notes.push('opencode auth list unavailable (may need server running)');
   }
 
   return {
     introspection_supported: 'full',
-    binary_path: resolved.resolvedPath,
     version,
     models,
     models_source: modelsSource,
     // No global reasoning enum — opencode does per-provider --variant
     reasoning_levels: [],
-    notes,
+    notes: [],
+    provenance: {
+      source_kind: modelsSource === 'cli-catalog' ? 'cli-catalog' : 'unavailable',
+      source_label: modelsSource === 'cli-catalog' ? 'opencode-cli-catalog' : 'unavailable',
+      binary_availability: 'present', binary_basename: 'opencode',
+    },
+    diagnostic_code: diagnosticCode,
     duration_ms: Date.now() - t0,
   };
 }
