@@ -1,24 +1,20 @@
 docs/superpowers/specs/2026-07-21-model-selector-attestation-design.md
-  s_9b9532ed48c3cb::t_491cd32b433404 69-69,132-132,136-136,138-138,140-140,142-142,177-177,180-189,197-197,204-204,206-206,232-232,236-237,239-239,264-264,342-342,344-344,358-358,375-375,378-378,387-387,391-391,396-396,423-427,441-441
-  s_9b9532ed48c3cb::t_61f6eaa088c751 379-379,395-395,439-439,444-444
+  s_9b9532ed48c3cb::t_491cd32b433404 69,132,136,138,140,142,177,180-189,197,204,206,232,236-237,239,264,342,344,358,375,378,387,391,396,423-427,441
+  s_9b9532ed48c3cb::t_61f6eaa088c751 379,395,439,444
 ---
 {
   "schema_version": "authorship/3.0.0",
   "git_ai_version": "1.6.15",
   "base_commit_sha": "b691c5437d7baa98b9c459503ab651756751f758",
-  "prompts": {
-    "s_9b9532ed48c3cb::t_491cd32b433404": {
+  "prompts": {},
+  "sessions": {
+    "s_9b9532ed48c3cb": {
       "agent_id": {
         "tool": "codex",
         "id": "019f829e-39fc-7e93-a464-c73aba41ebea",
         "model": "gpt-5.6-terra"
       },
-      "human_author": "litianyi <litianyi@corp.netease.com>",
-      "messages": [],
-      "total_additions": 39,
-      "total_deletions": 0,
-      "accepted_lines": 39,
-      "overriden_lines": 0
+      "human_author": "litianyi <litianyi@corp.netease.com>"
     }
   }
 }
