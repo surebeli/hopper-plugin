@@ -12,8 +12,13 @@ import {
   validateTaskId,
 } from '../../cli/src/output.js';
 import { mkdtempSync, readFileSync, existsSync, writeFileSync, mkdirSync, rmSync, symlinkSync, statSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir, platform } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { writeFrontmatter } from '../../cli/src/background.js';
+
+const DISPATCH_CLI = resolve(fileURLToPath(import.meta.url), '..', '..', '..', 'cli', 'bin', 'hopper-dispatch');
 
 function makeDispatchResult(overrides = {}) {
   return {
@@ -82,8 +87,8 @@ test('renderOutputMarkdown: failure case includes Vendor error context section',
   assert.match(md, /Vendor dispatch status: `auth-fail` \[FAIL\]/);
   assert.match(md, /## Vendor error context/);
   assert.match(md, /kimi: HTTP 402 membership/);
-  assert.match(md, /Stderr excerpt/);
-  assert.match(md, /auth error from server/);
+  assert.doesNotMatch(md, /Stderr excerpt/);
+  assert.doesNotMatch(md, /auth error from server/);
 });
 
 test('renderOutputMarkdown: timed-out case is annotated', () => {
@@ -95,14 +100,15 @@ test('renderOutputMarkdown: timed-out case is annotated', () => {
   assert.match(md, /\(timed out\)/i);
 });
 
-test('renderOutputMarkdown: long output text is truncated with notice + sidecar reference', () => {
+test('renderOutputMarkdown: long output text is truncated with an explicit --full boundary but no sidecar path', () => {
   const longText = 'A'.repeat(5000);  // > 4096 truncation threshold
   const result = makeDispatchResult({ output: { text: longText, status: 'success' } });
   const rawPath = '/fake/handoffs/T-PLUGIN-XX-output-raw.txt';
   const md = renderOutputMarkdown({ ...result, rawPath });
   assert.match(md, /\[truncated, \d+ chars omitted\]/);
   assert.match(md, /Full vendor output exceeds 4096-char preview limit/);
-  assert.match(md, /output-raw\.txt/);
+  assert.match(md, /hopper-dispatch --result T-PLUGIN-XX --full/);
+  assert.doesNotMatch(md, /\/fake\/handoffs/);
   // First 4096 chars should be present
   assert.ok(md.includes('A'.repeat(4096)));
   // Full 5000 chars should NOT be present
@@ -284,6 +290,68 @@ test('writeOutput: writes sidecar -output-raw.txt when output exceeds preview li
     const rawContent = readFileSync(written.rawPath, 'utf-8');
     assert.equal(rawContent.length, 8000, 'sidecar must contain FULL output, not truncated');
     assert.equal(rawContent, longText, 'sidecar content must equal output.text exactly');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('writeOutput: generated markdown and frontmatter omit absolute sidecar paths and raw stderr while --full remains an explicit sidecar boundary', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-out-private-sidecar-'));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    mkdirSync(hopperDir, { recursive: true });
+    const rawStderr = 'RAW_STDERR_DO_NOT_PUBLISH';
+    const sidecarText = `RAW_SIDECAR_EXPLICIT_ONLY-${'x'.repeat(8_200)}`;
+    const result = makeDispatchResult({
+      output: { text: sidecarText, status: 'unknown-fail', error: 'closed dispatch failure' },
+      raw: { stderr: rawStderr, exitCode: 1 },
+    });
+    const written = await writeOutput({ hopperDir, dispatchResult: result });
+
+    writeFrontmatter(written.path, {
+      task_id: result.task.id,
+      adapter: result.vendor,
+      status: 'done',
+      adapter_status: 'success',
+      duration_ms: 1234,
+      exit_code: 0,
+      requested_selector: 'safe-requested',
+      effective_selector: 'safe-effective',
+      effective_selector_source: 'user-argv',
+      selector_kind: 'concrete',
+      observed_models_json: '["safe-observed"]',
+      resolution_status: 'exact',
+      resolution_detail: 'concrete-runtime-exact',
+      catalog_source_kind: 'static',
+      catalog_source_label: 'adapter-static-selectors',
+      binary_availability: 'present',
+      binary_basename: 'codex',
+      _body: readFileSync(written.path, 'utf-8'),
+    });
+
+    const markdown = readFileSync(written.path, 'utf-8');
+    assert.match(markdown, /^---\n/, 'the generated output contains frontmatter');
+    assert.ok(written.rawPath && existsSync(written.rawPath), 'the private sidecar remains on disk');
+    const renderedSidecarPath = written.rawPath.replace(/\\/g, '/');
+    assert.deepEqual(
+      [renderedSidecarPath, rawStderr].filter((secret) => markdown.includes(secret)),
+      [],
+      'neither frontmatter nor body may reveal a local sidecar path or raw stderr',
+    );
+    assert.equal(readFileSync(written.rawPath, 'utf-8'), sidecarText, 'the sidecar retains the full raw text');
+
+    const defaultResult = spawnSync(process.execPath, [DISPATCH_CLI, '--result', result.task.id], {
+      encoding: 'utf-8', env: { ...process.env, HOPPER_DIR: hopperDir },
+    });
+    assert.equal(defaultResult.status, 0, defaultResult.stderr);
+    assert.doesNotMatch(`${defaultResult.stdout}\n${defaultResult.stderr}`, /RAW_SIDECAR_EXPLICIT_ONLY|RAW_STDERR_DO_NOT_PUBLISH/);
+
+    const fullResult = spawnSync(process.execPath, [DISPATCH_CLI, '--result', result.task.id, '--full'], {
+      encoding: 'utf-8', env: { ...process.env, HOPPER_DIR: hopperDir },
+    });
+    assert.equal(fullResult.status, 0, fullResult.stderr);
+    assert.match(fullResult.stdout, /FULL OUTPUT \(sidecar/);
+    assert.match(fullResult.stdout, /RAW_SIDECAR_EXPLICIT_ONLY/);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

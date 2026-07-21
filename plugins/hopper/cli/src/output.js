@@ -200,6 +200,7 @@ export function renderOutputMarkdown({ task, vendor, output, raw, rawPath = null
   const safeBrief = task.brief ? sanitizeInline(task.brief) : '(no brief in queue.md)';
   const previewText = truncate(output.text || '', effectivePreviewLimit(PREVIEW_CHAR_LIMIT));
   const fullTextLen = (output.text || '').length;
+  const rawSidecarName = rawPath ? expectedRawSidecarName(task.id) : null;
 
   return `# ${safeTaskId} — ${safeTaskType} Output (vendor: ${safeVendor})
 
@@ -269,14 +270,14 @@ _(Recipient fills in after verdict; e.g. "proceed to T-XX" or "REWORK before T-X
 - Stdout bytes: ${(raw.stdout || '').length}
 - Stderr bytes: ${(raw.stderr || '').length}
 - Log file bytes: ${raw.logFileContent === undefined ? 'n/a (no log file)' : (raw.logFileContent || '').length}
-- Output text length: ${fullTextLen} chars${rawPath ? ` (full text in sidecar: \`${posixify(rawPath)}\`)` : ''}
+- Output text length: ${fullTextLen} chars${rawSidecarName ? ` (full text is available only with \`hopper-dispatch --result ${safeTaskId} --full\`)` : ''}
 - Dispatched: ${today}
 
 ## Vendor output text _(preview, ${previewText.length}/${fullTextLen} chars)_
 
 ${fence(previewText || '(empty)')}
-${rawPath ? `\n_Full vendor output exceeds ${effectivePreviewLimit(PREVIEW_CHAR_LIMIT)}-char preview limit; complete text written to \`${posixify(rawPath)}\`._\n` : ''}
-${output.error ? `## Vendor error context\n\n${fence(truncate(output.error, 2000))}\n${raw.stderr ? `\n**Stderr excerpt** (${(raw.stderr || '').length} bytes total):\n\n${fence(truncate(raw.stderr, 1000))}\n` : ''}` : ''}
+${rawSidecarName ? `\n_Full vendor output exceeds ${effectivePreviewLimit(PREVIEW_CHAR_LIMIT)}-char preview limit; retrieve the complete text only with \`hopper-dispatch --result ${safeTaskId} --full\`._\n` : ''}
+${output.error ? `## Vendor error context\n\n${fence(truncate(output.error, 2000))}\n` : ''}
 
 ## Suggested protocol edits _(auto-generated)_
 
@@ -421,6 +422,6 @@ function todayDate() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function posixify(p) {
-  return p.split(sep).join('/');
+function expectedRawSidecarName(taskId) {
+  return `${taskId}-output-raw.txt`;
 }

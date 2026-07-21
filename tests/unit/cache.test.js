@@ -163,6 +163,104 @@ test('Kimi, Claude, and OpenCode cache writes retain only canonical provenance r
   });
 });
 
+test('setVendorCache removes sensitive legacy fields from every vendor and nested provenance while retaining canonical and unknown benign fields', () => {
+  withTmpCache(() => {
+    writeCache({
+      version: CACHE_VERSION,
+      host: 'x',
+      probed_at_global: '2026-07-22T00:00:00.000Z',
+      vendors: {
+        mimo: {
+          models: ['mimo-safe'],
+          reasoning_levels: ['high'],
+          models_source: 'RAW_MIMO_MODELS_SOURCE',
+          binary_path: 'C:\\PRIVATE\\mimo.cmd',
+          config_path: 'C:\\PRIVATE\\mimo-config.toml',
+          raw_path: 'C:\\PRIVATE\\mimo-output.log',
+          notes: ['AUTH_EXCERPT_PRIVATE'],
+          sourceNote: 'SOURCE_NOTE_PRIVATE',
+          error: 'RAW_ERROR_PRIVATE',
+          stderr: 'RAW_STDERR_PRIVATE',
+          auth_excerpt: 'AUTH_EXCERPT_PRIVATE',
+          provider_url: 'https://private.example.invalid/mimo',
+          future_vendor: { retained: true },
+          provenance: {
+            source_kind: 'static',
+            binaryPath: 'C:\\PRIVATE\\nested-mimo.cmd',
+            configPath: 'C:\\PRIVATE\\nested-config.toml',
+            rawPath: 'C:\\PRIVATE\\nested-output.log',
+            notes: ['NESTED_NOTE_PRIVATE'],
+            modelsSource: 'NESTED_RAW_SOURCE_PRIVATE',
+            stderr: 'NESTED_STDERR_PRIVATE',
+            authExcerpt: 'NESTED_AUTH_PRIVATE',
+            providerUrl: 'https://private.example.invalid/nested',
+            future_provenance: 'retain-me',
+          },
+        },
+      },
+    });
+
+    setVendorCache('future-vendor', {
+      models: ['future-safe'],
+      reasoning_levels: ['xhigh'],
+      models_source: 'RAW_FUTURE_MODELS_SOURCE',
+      binary_path: 'C:\\PRIVATE\\future.cmd',
+      notes: ['FUTURE_NOTE_PRIVATE'],
+      sourceNote: 'FUTURE_SOURCE_NOTE_PRIVATE',
+      error: 'FUTURE_ERROR_PRIVATE',
+      stderr: 'FUTURE_STDERR_PRIVATE',
+      auth_excerpt: 'FUTURE_AUTH_PRIVATE',
+      provider_url: 'https://private.example.invalid/future',
+      future_vendor: { retained: true },
+      provenance: {
+        source_kind: 'cli-catalog',
+        binary_path: 'C:\\PRIVATE\\future-nested.cmd',
+        raw_source: 'FUTURE_NESTED_RAW_SOURCE_PRIVATE',
+        notes: ['FUTURE_NESTED_NOTE_PRIVATE'],
+        stderr: 'FUTURE_NESTED_STDERR_PRIVATE',
+        auth_excerpt: 'FUTURE_NESTED_AUTH_PRIVATE',
+        provider_url: 'https://private.example.invalid/future-nested',
+        future_provenance: 'retain-me-too',
+      },
+    });
+
+    const cache = readCache();
+    const sensitiveKeys = new Set([
+      'binary_path', 'binaryPath', 'config_path', 'configPath', 'raw_path', 'rawPath',
+      'notes', 'sourceNote', 'source_note', 'modelsSource', 'raw_source', 'rawSource',
+      'error', 'stderr', 'auth_excerpt', 'authExcerpt', 'provider_url', 'providerUrl',
+    ]);
+    const findSensitiveKeys = (value, path = '$') => {
+      if (!value || typeof value !== 'object') return [];
+      return Object.entries(value).flatMap(([key, child]) => [
+        ...(sensitiveKeys.has(key) ? [`${path}.${key}`] : []),
+        ...findSensitiveKeys(child, `${path}.${key}`),
+      ]);
+    };
+    const serialized = JSON.stringify(cache.vendors);
+    const privateValues = [
+      'C:\\PRIVATE', 'RAW_MIMO_MODELS_SOURCE', 'AUTH_EXCERPT_PRIVATE', 'SOURCE_NOTE_PRIVATE',
+      'RAW_ERROR_PRIVATE', 'RAW_STDERR_PRIVATE', 'private.example.invalid', 'NESTED_RAW_SOURCE_PRIVATE',
+      'NESTED_NOTE_PRIVATE', 'NESTED_STDERR_PRIVATE', 'NESTED_AUTH_PRIVATE', 'RAW_FUTURE_MODELS_SOURCE',
+      'FUTURE_NOTE_PRIVATE', 'FUTURE_SOURCE_NOTE_PRIVATE', 'FUTURE_ERROR_PRIVATE', 'FUTURE_STDERR_PRIVATE',
+      'FUTURE_AUTH_PRIVATE', 'FUTURE_NESTED_RAW_SOURCE_PRIVATE', 'FUTURE_NESTED_NOTE_PRIVATE',
+      'FUTURE_NESTED_STDERR_PRIVATE', 'FUTURE_NESTED_AUTH_PRIVATE',
+    ];
+    assert.deepEqual(findSensitiveKeys(cache.vendors), []);
+    for (const value of privateValues) assert.ok(!serialized.includes(value), value);
+    assert.deepEqual(cache.vendors.mimo.models, ['mimo-safe']);
+    assert.deepEqual(cache.vendors.mimo.reasoning_levels, ['high']);
+    assert.equal(cache.vendors.mimo.models_source, 'static');
+    assert.deepEqual(cache.vendors.mimo.future_vendor, { retained: true });
+    assert.equal(cache.vendors.mimo.provenance.future_provenance, 'retain-me');
+    assert.deepEqual(cache.vendors['future-vendor'].models, ['future-safe']);
+    assert.deepEqual(cache.vendors['future-vendor'].reasoning_levels, ['xhigh']);
+    assert.equal(cache.vendors['future-vendor'].models_source, 'cli-catalog');
+    assert.deepEqual(cache.vendors['future-vendor'].future_vendor, { retained: true });
+    assert.equal(cache.vendors['future-vendor'].provenance.future_provenance, 'retain-me-too');
+  });
+});
+
 test('setVendorCache leaves malformed and future-version cache bytes untouched', () => {
   withTmpCache((tmp) => {
     const path = join(tmp, 'vendor-capabilities.json');

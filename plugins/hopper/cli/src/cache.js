@@ -193,8 +193,9 @@ export function setVendorCache(name, entry, { fsOps = DEFAULT_FS_OPS, security =
       return { written: false, outcome: prior.outcome, diagnostic_code: prior.diagnostic_code };
     }
     const c = prior.outcome === 'missing' ? freshCache() : prior.cache;
+    c.vendors = sanitizeVendorRegistry(c.vendors);
     const oldEntry = c.vendors[name] && typeof c.vendors[name] === 'object' ? c.vendors[name] : {};
-    c.vendors[name] = mergeOwnedVendorEntry(oldEntry, sanitizeProbeEntryForStorage(name, entry));
+    c.vendors[name] = sanitizeVendorEntry(mergeVendorEntry(oldEntry, entry));
     c.probed_at_global = new Date().toISOString();
     try {
       writeCache(c, { fsOps, security });
@@ -210,26 +211,11 @@ export function setVendorCache(name, entry, { fsOps = DEFAULT_FS_OPS, security =
   }
 }
 
-const OWNED_VENDOR_FIELDS = new Set([
-  'models',
-  'models_source',
-  'probed_at',
-  'introspection_supported',
-  'provenance',
-  'diagnostic_code',
-  'binary_path',
-  'binary_basename',
-  'binary_availability',
-  'version',
-  'reasoning_levels',
-  'duration_ms',
-]);
-
-function mergeOwnedVendorEntry(previous, incoming) {
+function mergeVendorEntry(previous, incoming) {
   const merged = { ...previous };
   if (!incoming || typeof incoming !== 'object') return merged;
   for (const [key, value] of Object.entries(incoming)) {
-    if (!OWNED_VENDOR_FIELDS.has(key) || value === undefined) continue;
+    if (value === undefined) continue;
     if (key === 'provenance' && value && typeof value === 'object' && !Array.isArray(value)) {
       const priorProvenance = previous.provenance && typeof previous.provenance === 'object' && !Array.isArray(previous.provenance)
         ? previous.provenance
@@ -242,29 +228,53 @@ function mergeOwnedVendorEntry(previous, incoming) {
   return merged;
 }
 
-function sanitizeProbeEntryForStorage(vendor, entry) {
-  if (!entry || typeof entry !== 'object') return entry;
-  if (!['claude', 'opencode', 'kimi'].includes(vendor)) return entry;
-  const sanitized = { ...entry };
-  // These adapters have a closed provenance contract. Do not let a resolver
-  // path, config path, stderr excerpt, account/provider note, or auth detail
-  // enter the cache even if a probe implementation accidentally supplied one.
-  delete sanitized.binary_path;
-  delete sanitized.notes;
-  const sourceKind = sanitized.provenance?.source_kind;
-  sanitized.models_source = SAFE_PROBE_SOURCES[vendor].has(sourceKind) ? sourceKind : 'unknown';
+const SENSITIVE_LEGACY_FIELDS = new Set([
+  'binary_path', 'binaryPath', 'config_path', 'configPath', 'config_file', 'configFile',
+  'raw_path', 'rawPath', 'raw_log', 'rawLog', 'log_path', 'logPath',
+  'notes', 'note', 'source_note', 'sourceNote', 'source_path', 'sourcePath',
+  'modelsSource', 'raw_source', 'rawSource', 'error', 'stderr', 'stdout',
+  'auth_excerpt', 'authExcerpt', 'auth_error', 'authError',
+  'provider', 'provider_url', 'providerUrl', 'provider_path', 'providerPath',
+  'url', 'uri', 'endpoint', 'endpoint_url', 'endpointUrl',
+]);
+
+const SAFE_PROBE_SOURCE_KINDS = new Set([
+  'adapter-aliases', 'cli-catalog', 'config', 'static', 'unavailable', 'unknown',
+]);
+
+function sanitizeVendorRegistry(vendors) {
+  if (!vendors || typeof vendors !== 'object' || Array.isArray(vendors)) return {};
+  return Object.fromEntries(Object.entries(vendors).map(([name, entry]) => [name, sanitizeVendorEntry(entry)]));
+}
+
+function sanitizeVendorEntry(entry) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
+  const sanitized = sanitizeLegacyValue(entry, { vendorEntry: true });
+  if (Object.hasOwn(sanitized, 'models_source')) {
+    const sourceKind = sanitized.provenance?.source_kind;
+    sanitized.models_source = SAFE_PROBE_SOURCE_KINDS.has(sourceKind) ? sourceKind : 'unknown';
+  }
   return sanitized;
 }
 
-const SAFE_PROBE_SOURCES = {
-  claude: new Set(['adapter-aliases', 'static', 'unavailable']),
-  opencode: new Set(['cli-catalog', 'static', 'unavailable']),
-  kimi: new Set(['config', 'static', 'unavailable']),
-};
+function sanitizeLegacyValue(value, { vendorEntry = false } = {}) {
+  if (Array.isArray(value)) return value.map((item) => sanitizeLegacyValue(item));
+  if (!value || typeof value !== 'object') return value;
+  const sanitized = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (key === 'models_source' && vendorEntry) {
+      sanitized[key] = child;
+      continue;
+    }
+    if (key === 'models_source' || SENSITIVE_LEGACY_FIELDS.has(key)) continue;
+    sanitized[key] = sanitizeLegacyValue(child);
+  }
+  return sanitized;
+}
 
 function freshCache({ vendor = null, entry = null } = {}) {
   const vendors = {};
-  if (vendor && entry) vendors[vendor] = mergeOwnedVendorEntry({}, entry);
+  if (vendor && entry) vendors[vendor] = sanitizeVendorEntry(mergeVendorEntry({}, entry));
   return {
     version: CACHE_VERSION,
     host: hostname(),

@@ -121,7 +121,7 @@ export async function probe() {
   const notes = [];
 
   const resolved = resolveCommandOnPath('kimi');
-  const binaryPath = resolved && resolved.resolvedPath ? resolved.resolvedPath : null;
+  const binaryAvailable = Boolean(resolved && resolved.resolvedPath);
   let version = null;
 
   if (resolved && resolved.resolvedPath) {
@@ -153,7 +153,7 @@ export async function probe() {
           notes,
           provenance: {
             source_kind: 'config', source_label: 'kimi-configured-aliases',
-            binary_availability: binaryPath ? 'present' : 'missing', binary_basename: binaryPath ? 'kimi' : null,
+            binary_availability: binaryAvailable ? 'present' : 'missing', binary_basename: binaryAvailable ? 'kimi' : null,
           },
           diagnostic_code: 'none',
           duration_ms: Date.now() - t0,
@@ -238,7 +238,7 @@ export async function probe() {
     provenance: {
       source_kind: models.length > 0 ? 'config' : 'unavailable',
       source_label: models.length > 0 ? 'kimi-configured-aliases' : 'unavailable',
-      binary_availability: binaryPath ? 'present' : 'missing', binary_basename: binaryPath ? 'kimi' : null,
+      binary_availability: binaryAvailable ? 'present' : 'missing', binary_basename: binaryAvailable ? 'kimi' : null,
     },
     diagnostic_code: models.length > 0 ? 'none' : 'catalog-unavailable',
     duration_ms: Date.now() - t0,

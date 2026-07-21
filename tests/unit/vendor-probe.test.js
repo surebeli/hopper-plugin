@@ -181,6 +181,89 @@ test('kimi probe closes config and process diagnostics before result or cache st
   }
 });
 
+test('mimo and kimi probes close binary paths and raw process diagnostics before result or cache storage', async (t) => {
+  const { mkdtempSync, writeFileSync, readFileSync, rmSync, chmodSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join, delimiter } = await import('node:path');
+  const { probe: mimoProbe } = await import('../../cli/src/vendor-probe/mimo.js');
+  const { probe: kimiProbe } = await import('../../cli/src/vendor-probe/kimi.js');
+  const { cachePath, setVendorCache } = await import('../../cli/src/cache.js');
+
+  const tmp = mkdtempSync(join(tmpdir(), 'probe-private-diagnostics-'));
+  t.after(() => rmSync(tmp, { recursive: true, force: true }));
+  const isWindows = process.platform === 'win32';
+  const fakeMimo = join(tmp, isWindows ? 'mimo.cmd' : 'mimo');
+  const fakeKimi = join(tmp, isWindows ? 'kimi.cmd' : 'kimi');
+  const privateModelStderr = 'MIMO_PRIVATE_MODELS_STDERR';
+  const privateAuthExcerpt = 'MIMO_PRIVATE_AUTH_EXCERPT';
+  const privateKimiStderr = 'KIMI_PRIVATE_PROVIDER_STDERR';
+  if (isWindows) {
+    writeFileSync(fakeMimo, [
+      '@echo off',
+      'if "%1"=="--version" ( echo 1.2.3 & exit /b 0 )',
+      `if "%1"=="models" ( echo ${privateModelStderr} 1>&2 & exit /b 2 )`,
+      `if "%1"=="auth" ( echo ${privateAuthExcerpt} & exit /b 0 )`,
+      'exit /b 2',
+    ].join('\r\n'));
+    writeFileSync(fakeKimi, [
+      '@echo off',
+      'if "%1"=="--version" exit /b 0',
+      `if "%1"=="provider" if "%2"=="list" if "%3"=="--json" ( echo ${privateKimiStderr} 1>&2 & exit /b 2 )`,
+      'exit /b 2',
+    ].join('\r\n'));
+  } else {
+    writeFileSync(fakeMimo, [
+      '#!/bin/sh',
+      'if [ "$1" = "--version" ]; then printf "%s\\n" "1.2.3"; exit 0; fi',
+      `if [ "$1" = "models" ]; then printf '%s\\n' '${privateModelStderr}' >&2; exit 2; fi`,
+      `if [ "$1" = "auth" ]; then printf '%s\\n' '${privateAuthExcerpt}'; exit 0; fi`,
+      'exit 2',
+      '',
+    ].join('\n'));
+    writeFileSync(fakeKimi, [
+      '#!/bin/sh',
+      'if [ "$1" = "--version" ]; then exit 0; fi',
+      `if [ "$1" = "provider" ] && [ "$2" = "list" ] && [ "$3" = "--json" ]; then printf '%s\\n' '${privateKimiStderr}' >&2; exit 2; fi`,
+      'exit 2',
+      '',
+    ].join('\n'));
+    chmodSync(fakeMimo, 0o755);
+    chmodSync(fakeKimi, 0o755);
+  }
+
+  const savedPath = process.env.PATH;
+  const savedCacheDir = process.env.HOPPER_CACHE_DIR;
+  const savedKimiHome = process.env.KIMI_CODE_HOME;
+  process.env.PATH = `${tmp}${delimiter}${savedPath || ''}`;
+  process.env.HOPPER_CACHE_DIR = join(tmp, 'cache');
+  process.env.KIMI_CODE_HOME = join(tmp, 'empty-kimi-home');
+  try {
+    const results = { mimo: await mimoProbe(), kimi: await kimiProbe() };
+    for (const [vendor, result] of Object.entries(results)) setVendorCache(vendor, result);
+    const secrets = [tmp, privateModelStderr, privateAuthExcerpt, privateKimiStderr];
+    const assertClosed = (value) => {
+      if (typeof value === 'string') {
+        for (const secret of secrets) assert.ok(!value.includes(secret), `${secret} leaked from probe output`);
+      } else if (Array.isArray(value)) {
+        value.forEach(assertClosed);
+      } else if (value && typeof value === 'object') {
+        Object.values(value).forEach(assertClosed);
+      }
+    };
+    assertClosed(results);
+    assertClosed(JSON.parse(readFileSync(cachePath(), 'utf-8')));
+    assert.equal(Object.hasOwn(results.mimo, 'binary_path'), false);
+    assert.equal(Object.hasOwn(results.kimi, 'binary_path'), false);
+  } finally {
+    if (savedPath === undefined) delete process.env.PATH;
+    else process.env.PATH = savedPath;
+    if (savedCacheDir === undefined) delete process.env.HOPPER_CACHE_DIR;
+    else process.env.HOPPER_CACHE_DIR = savedCacheDir;
+    if (savedKimiHome === undefined) delete process.env.KIMI_CODE_HOME;
+    else process.env.KIMI_CODE_HOME = savedKimiHome;
+  }
+});
+
 test('all 8 adapters have a probe-module that exports probe()', async () => {
   for (const name of listAdapters()) {
     const mod = await import(`../../cli/src/vendor-probe/${name}.js`);

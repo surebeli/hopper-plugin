@@ -47,12 +47,14 @@ export async function probe() {
   if (!resolved || !resolved.resolvedPath) {
     return {
       introspection_supported: 'none',
-      binary_path: null,
       version: null,
       models: [],
-      models_source: 'mimo not on PATH',
+      models_source: 'unavailable',
       reasoning_levels: [],
-      notes: ['mimo binary not found on PATH'],
+      notes: ['MiMo binary was not available.'],
+      provenance: {
+        source_kind: 'unavailable', binary_availability: 'missing', binary_basename: null,
+      },
       duration_ms: Date.now() - t0,
     };
   }
@@ -79,28 +81,33 @@ export async function probe() {
     notes.push('mimo models timed out');
     modelsSource = 'timeout';
   } else {
-    notes.push(`mimo models exited ${modelsResult.exitCode}; stderr: ${modelsResult.stderr.slice(0, 200)}`);
+    notes.push(`MiMo model catalog was unavailable (exit ${modelsResult.exitCode}).`);
     modelsSource = `exit ${modelsResult.exitCode}`;
   }
 
   const authResult = await runOnce(cmd, [...prepend, 'auth', 'list']);
   if (authResult.exitCode === 0 && authResult.stdout.trim()) {
-    const clean = stripAnsi(authResult.stdout).slice(0, 500);
-    const providerCount = (clean.match(/\b(xiaomi|mimo|openai|anthropic|deepseek|google|mistral|groq)\b/gi) || []).length;
-    notes.push(`mimo auth list found ${providerCount} provider mention(s); see cache for excerpt`);
-    notes.push(`auth excerpt: ${clean.slice(0, 200).replace(/\n/g, ' | ')}`);
+    notes.push('MiMo authentication state was detected.');
   } else {
-    notes.push('mimo auth list unavailable (MiMo Auto may still work, or first-launch setup may be needed)');
+    notes.push('MiMo authentication state was unavailable.');
   }
 
   return {
     introspection_supported: 'full',
-    binary_path: resolved.resolvedPath,
     version,
     models,
     models_source: modelsSource,
     reasoning_levels: ['minimal', 'low', 'medium', 'high', 'xhigh'],
     notes,
+    provenance: {
+      source_kind: models.length > 0 ? 'cli-catalog' : 'unavailable',
+      binary_availability: 'present', binary_basename: closedBinaryBasename(resolved.resolvedPath),
+    },
     duration_ms: Date.now() - t0,
   };
+}
+
+function closedBinaryBasename(path) {
+  const basename = String(path || '').split(/[\\/]/).pop();
+  return basename && /^[A-Za-z0-9._-]+$/.test(basename) ? basename : 'mimo';
 }
