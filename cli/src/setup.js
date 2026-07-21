@@ -112,6 +112,9 @@ export async function buildVendorReadiness({ deep = false, only = null, now = ne
       dispatchDisabled: adapter && adapter.dispatchDisabled
         ? { reason: adapter.dispatchDisabled.reason, enableEnv: adapter.dispatchDisabled.enableEnv }
         : null,
+      inventory: projectInventoryEntry(name, cache || {
+        provenance: { source_kind: 'static', binary_availability: 'unknown', binary_basename: null },
+      }, cache ? 'ok-v1' : 'missing'),
       error,
       compat: null,
     };

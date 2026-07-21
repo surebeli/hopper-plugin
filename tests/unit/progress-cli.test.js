@@ -80,14 +80,15 @@ test('--progress prints current phase, paths, and the last five progress events'
     assert.match(result.stdout, /Task:\s+T-PROGRESS-A/);
     assert.match(result.stdout, /Status:\s+in-progress/);
     assert.match(result.stdout, /Phase:\s+running/);
-    assert.match(result.stdout, /Last progress:\s+event 6/);
     assert.match(result.stdout, /Recent events/);
+    assert.match(result.stdout, /Requested selector:/);
+    assert.match(result.stdout, /Effective selector:/);
+    assert.match(result.stdout, /binaryAvailability=/);
     assert.ok(!result.stdout.includes('event 1'), result.stdout);
-    assert.match(result.stdout, /event 2/);
-    assert.match(result.stdout, /event 6/);
-    assert.match(result.stdout, /T-PROGRESS-A-output\.md/);
-    assert.match(result.stdout, /T-PROGRESS-A-output\.log/);
-    assert.match(result.stdout, /T-PROGRESS-A-progress\.log/);
+    assert.ok(!result.stdout.includes('event 6'), result.stdout);
+    assert.ok(!result.stdout.includes('T-PROGRESS-A-output.md'), result.stdout);
+    assert.ok(!result.stdout.includes('T-PROGRESS-A-output.log'), result.stdout);
+    assert.ok(!result.stdout.includes('T-PROGRESS-A-progress.log'), result.stdout);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -135,8 +136,9 @@ test('--progress prints terminal event details for completed task', () => {
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /Status:\s+done/);
     assert.match(result.stdout, /Terminal:\s+yes/);
-    assert.match(result.stdout, /Task completed successfully\./);
-    assert.match(result.stdout, /adapter_status=success/);
+    assert.match(result.stdout, /done\/terminal/);
+    assert.ok(!result.stdout.includes('Task completed successfully.'), result.stdout);
+    assert.ok(!result.stdout.includes('adapter_status=success'), result.stdout);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -178,9 +180,11 @@ test('--progress and --result render the same event-first crash-window diagnosis
     const result = runResult(hopperDir, taskId);
     assert.equal(progress.status, 0, progress.stderr);
     assert.match(progress.stdout, /Status:\s+finalizing/);
-    assert.match(progress.stdout, /event-first done/);
+    assert.match(progress.stdout, /done\/terminal/);
+    assert.ok(!progress.stdout.includes('event-first done'), progress.stdout);
     assert.match(result.stdout, /FINALIZING/);
-    assert.match(result.stdout, /event-first done/);
+    assert.match(result.stdout, /done\/terminal/);
+    assert.ok(!result.stdout.includes('event-first done'), result.stdout);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -195,7 +199,86 @@ test('--progress prints recent valid events even when the existing handoff has n
     const result = runProgress(hopperDir, taskId);
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /Status:\s+unknown/);
-    assert.match(result.stdout, /still useful/);
+    assert.match(result.stdout, /running\/finding/);
+    assert.ok(!result.stdout.includes('still useful'), result.stdout);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('--progress redacts raw handoff paths, parser fields, and event prose while retaining canonical attestation fields', () => {
+  const { tmp, hopperDir } = setup();
+  try {
+    const taskId = 'T-PROGRESS-PRIVATE';
+    const outputPath = join(hopperDir, 'handoffs', `${taskId}-output.md`);
+    const forbidden = [
+      'C:\\PRIVATE_LOGS\\output.log', 'C:\\PRIVATE_LOGS\\progress.log', 'RAW_STDERR_PRIVATE',
+      'AUTH_PROSE_PRIVATE', 'PRIVATE_PROVIDER_NAME', 'https://private.example.invalid/model',
+      'sk-private-secret-token', 'SOURCE_NOTE_PRIVATE', 'CACHE_ERROR_PRIVATE',
+      'raw_log', 'progress_log', 'sourceNote', 'cacheError', 'modelsSource',
+    ];
+    writeFrontmatter(outputPath, {
+      task_id: taskId,
+      adapter: 'codex', status: 'done', phase: 'done', terminal_event_emitted: true,
+      requested_selector: 'safe-requested', effective_selector: 'safe-effective',
+      effective_selector_source: 'user-argv', selector_kind: 'concrete',
+      observed_models_json: JSON.stringify(['safe-observed']),
+      resolution_status: 'exact', resolution_detail: 'concrete-runtime-exact',
+      catalog_source_kind: 'static', catalog_source_label: 'SOURCE_NOTE_PRIVATE',
+      catalog_observed_at: '2026-07-22T00:00:00.000Z', catalog_freshness: 'fresh',
+      binary_availability: 'present', binary_basename: 'codex',
+      raw_log: 'C:\\PRIVATE_LOGS\\output.log', progress_log: 'C:\\PRIVATE_LOGS\\progress.log',
+      sourceNote: 'SOURCE_NOTE_PRIVATE https://private.example.invalid/model',
+      modelsSource: 'modelsSource', cacheError: 'CACHE_ERROR_PRIVATE',
+      notes: 'AUTH_PROSE_PRIVATE sk-private-secret-token', stderr: 'RAW_STDERR_PRIVATE',
+      provider: 'PRIVATE_PROVIDER_NAME', _body: 'RAW_STDERR_PRIVATE',
+    });
+    appendProgressEvent({
+      hopperDir, taskId,
+      event: {
+        vendor: 'codex', phase: 'done', kind: 'terminal', terminal: true, status: 'done', source: 'runner',
+        message: 'RAW_STDERR_PRIVATE', provider: 'PRIVATE_PROVIDER_NAME',
+        sourceNote: 'SOURCE_NOTE_PRIVATE', cacheError: 'CACHE_ERROR_PRIVATE',
+      },
+    });
+    const result = runProgress(hopperDir, taskId);
+    assert.equal(result.status, 0, result.stderr);
+    for (const value of forbidden) assert.ok(!`${result.stdout}\n${result.stderr}`.includes(value), value);
+    assert.match(result.stdout, /Requested selector:\s+safe-requested/);
+    assert.match(result.stdout, /Effective selector:\s+safe-effective/);
+    assert.match(result.stdout, /Source:\s+user-argv/);
+    assert.match(result.stdout, /Kind:\s+concrete/);
+    assert.match(result.stdout, /Observed:\s+safe-observed/);
+    assert.match(result.stdout, /Resolution:\s+exact/);
+    assert.match(result.stdout, /binaryAvailability=present/);
+    assert.match(result.stdout, /binaryBasename=codex/);
+    assert.match(result.stdout, /sourceLabel=adapter-static-selectors/);
+    assert.match(result.stdout, /done\/terminal/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('--progress treats an explicit terminal observed_models empty array as authoritative over frontmatter evidence', () => {
+  const { tmp, hopperDir } = setup();
+  try {
+    const taskId = 'T-PROGRESS-OBSERVED-EMPTY';
+    const outputPath = join(hopperDir, 'handoffs', `${taskId}-output.md`);
+    writeFrontmatter(outputPath, {
+      task_id: taskId, adapter: 'codex', status: 'done', phase: 'done', terminal_event_emitted: true,
+      observed_models_json: JSON.stringify(['frontmatter-observed']), _body: '',
+    });
+    appendProgressEvent({
+      hopperDir, taskId,
+      event: {
+        vendor: 'codex', phase: 'done', kind: 'terminal', terminal: true, status: 'done',
+        source: 'runner', message: 'ignored by public renderer', observed_models: [],
+      },
+    });
+    const result = runProgress(hopperDir, taskId);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Observed:\s+\(none\)/);
+    assert.ok(!result.stdout.includes('frontmatter-observed'), result.stdout);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

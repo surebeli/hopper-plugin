@@ -9,7 +9,7 @@ import { resolveDispatch, resolveAdhocDispatch, planSwarm, getStatus, executeWit
 import { listTaskTypes } from '../src/tasks.js';
 import { listAdapters, getAdapter, installCheckForAdapter, capabilitiesForAdapter, probeVendor } from '../src/vendors/index.js';
 import { readCacheWithOutcome, getVendorCache, setVendorCache, recoverCache, isStale, staleness } from '../src/cache.js';
-import { projectInventoryEntry } from '../src/inventory-contract.js';
+import { projectInventoryEntry, renderSafeInventory } from '../src/inventory-contract.js';
 import { writeOutput } from '../src/output.js';
 import { scaffoldHopper, scaffoldGovernance } from '../src/scaffold.js';
 import { renderRulesMarkdown } from '../src/rules.js';
@@ -1257,55 +1257,33 @@ function runProgress(hopperDir, taskId) {
   const handoffDir = join(hopperDir, 'handoffs');
   const outputMdPath = join(handoffDir, `${taskId}-output.md`);
   if (!existsSync(outputMdPath)) {
-    console.error(`Error: no output file at ${outputMdPath}. Has this task been dispatched?`);
+    console.error(`Error: no output file for task '${taskId}'. Has this task been dispatched?`);
     process.exit(1);
   }
 
   const canonical = readCanonicalAttestation({ hopperDir, taskId, outputMdPath });
-  const fm = canonical.frontmatter;
-  const events = canonical.recentEvents;
+  renderPublicAttestation(canonical.public, { title: `${taskId} - PROGRESS` });
+}
 
-  const now = Date.now();
-  const startMs = Date.parse(fm.start_time || '');
-  const endMs = Date.parse(fm.end_time || '');
-  const elapsedMs = Number.isFinite(startMs)
-    ? (Number.isFinite(endMs) ? endMs - startMs : now - startMs)
-    : NaN;
-  const durationMs = Number.isFinite(fm.duration_ms) ? fm.duration_ms : elapsedMs;
-  const rawLogPath = pathFromFrontmatter(handoffDir, fm.raw_log || fm.log, `${taskId}-output.log`);
-  const progressLogPath = pathFromFrontmatter(handoffDir, fm.progress_log, `${taskId}-progress.log`);
-
-  console.log(`=== ${taskId} - PROGRESS ===`);
-  console.log(`Task:          ${taskId}`);
-  console.log(`Vendor:        ${canonical.adapter}`);
-  console.log(`Status:        ${canonical.displayStatus}`);
-  console.log(`Phase:         ${canonical.phase}`);
-  console.log(`PID:           ${fm.pid || 'n/a'}${fm.pid ? ` (${isAlive(fm.pid) ? 'alive' : 'not alive'})` : ''}`);
-  console.log(`Started:       ${fm.start_time || 'n/a'}`);
-  if (fm.end_time) console.log(`Ended:         ${fm.end_time}`);
-  console.log(`Elapsed:       ${formatMs(elapsedMs)}`);
-  if (canonical.displayStatus !== 'in-progress') console.log(`Duration:      ${formatMs(durationMs)}`);
-  console.log(`Last progress: ${fm.last_progress || '(none)'}`);
-  if (fm.last_progress_at) console.log(`Last update:   ${fm.last_progress_at}`);
-  console.log(`Progress seq:  ${fm.progress_seq ?? '(none)'}`);
-  console.log(`Terminal:      ${canonical.terminalEvent || fm.terminal_event_emitted ? 'yes' : 'no'}`);
-  console.log(`Attestation:   ${canonical.attestation_consistency}; resolution=${canonical.resolution.status}`);
-  if (canonical.displayStatus === 'finalizing') console.log('Diagnostic:    terminal JSONL is durable; frontmatter finalization is pending.');
-  if (canonical.displayStatus === 'partial') console.log('Diagnostic:    terminal attestation sources conflict or are incomplete; no reader state was written.');
-  console.log('');
-  console.log('Paths:');
-  console.log(`  Output:      ${outputMdPath}`);
-  console.log(`  Raw log:     ${rawLogPath}`);
-  console.log(`  Progress:    ${progressLogPath}`);
-  console.log('');
+function renderPublicAttestation(record, { title }) {
+  console.log(`=== ${title} ===`);
+  console.log(`Task:               ${record.taskId}`);
+  console.log(`Vendor:             ${record.adapter}`);
+  console.log(`Status:             ${record.displayStatus}`);
+  console.log(`Phase:              ${record.phase}`);
+  console.log(`Requested selector: ${record.selector.requested ?? 'n/a'}`);
+  console.log(`Effective selector: ${record.selector.effective ?? 'n/a'}`);
+  console.log(`Source:             ${record.selector.source ?? 'user-argv'}`);
+  console.log(`Kind:               ${record.selector.kind}`);
+  console.log(`Observed:           ${record.observedModels.length ? record.observedModels.join(', ') : '(none)'}`);
+  console.log(`Resolution:         ${record.resolution.status}`);
+  console.log(`Attestation:        ${record.attestationConsistency}`);
+  console.log(`Terminal:           ${record.terminal ? 'yes' : 'no'}`);
+  console.log(`Inventory:          ${renderSafeInventory(record.safeCatalog)}`);
   console.log('Recent events:');
-  if (events.length === 0) {
-    console.log('  (none)');
-  } else {
-    for (const event of events) {
-      const marker = event.terminal ? ' terminal' : '';
-      console.log(`  #${event.seq} ${event.ts} ${event.phase}/${event.kind}${marker}: ${event.message}${progressEventMeta(event)}`);
-    }
+  if (record.recentEvents.length === 0) console.log('  (none)');
+  for (const event of record.recentEvents) {
+    console.log(`  #${event.seq ?? '?'} ${event.phase}/${event.kind}${event.terminal ? ' terminal' : ''} status=${event.status}`);
   }
 }
 
@@ -1473,35 +1451,29 @@ function runResult(hopperDir, taskId, { full = false } = {}) {
     const archived = findArchivedOutputMd(hopperDir, taskId);
     if (archived) {
       outputMdPath = archived;
-      console.error(`(reading from archive: ${archived})`);
+      console.error('(reading from archive)');
     } else {
-      console.error(`Error: no output file at ${outputMdPath} (and none in .hopper/archive/). Has this task been dispatched?`);
+      console.error(`Error: no output file for task '${taskId}' (and none in archive). Has this task been dispatched?`);
       process.exit(1);
     }
   }
 
   const canonical = readCanonicalAttestation({ hopperDir, taskId, outputMdPath });
-  const fm = canonical.frontmatter;
 
   // In-progress: tell the user explicitly and suggest --watch.
   if (canonical.displayStatus === 'in-progress') {
-    console.error(`Task ${taskId} is still in-progress (PID ${fm.pid}, started ${fm.start_time}).`);
+    console.error(`Task ${taskId} is still in-progress.`);
     console.error(`Run \`hopper-dispatch --watch ${taskId}\` to follow until done.`);
     process.exit(2);
   }
 
   // Terminal, crash-window, and unknown records all render safely from the
   // same event-first snapshot as --progress; only a true in-progress task exits 2.
-  console.log(`=== ${taskId} — ${canonical.displayStatus.toUpperCase()} ===`);
-  console.log(`Vendor:    ${canonical.adapter}`);
-  console.log(`Status:    ${canonical.displayStatus}${fm.adapter_status ? ' (' + fm.adapter_status + ')' : ''}`);
-  console.log(`Attestation: ${canonical.attestation_consistency}; resolution=${canonical.resolution.status}`);
-  if (canonical.displayStatus === 'finalizing') console.log('Diagnostic: terminal JSONL is durable; frontmatter finalization is pending.');
-  if (canonical.displayStatus === 'partial') console.log('Diagnostic: terminal attestation sources conflict or are incomplete; no reader state was written.');
-  if (canonical.terminalEvent) console.log(`Terminal event: ${canonical.terminalEvent.message}`);
-  if (fm.duration_ms != null) console.log(`Duration:  ${(fm.duration_ms / 1000).toFixed(1)}s (${fm.duration_ms}ms)`);
-  if (fm.exit_code != null) console.log(`Exit code: ${fm.exit_code}`);
-  if (fm.timed_out) console.log(`Timed out: yes`);
+  renderPublicAttestation(canonical.public, { title: `${taskId} — ${canonical.displayStatus.toUpperCase()}` });
+  if (!full) {
+    console.log('Raw output is available only with `--full`.');
+    process.exit(canonical.displayStatus === 'done' ? 0 : 1);
+  }
   console.log('');
 
   // Output.md body: read the whole file, strip frontmatter + leading auto-text,
@@ -1525,7 +1497,7 @@ function runResult(hopperDir, taskId, { full = false } = {}) {
   // sidecar, the output.md body already IS the complete text (it fit under the cap).
   const rawSidecar = outputMdPath.replace(/-output\.md$/, '-output-raw.txt');
   let sidecarText = '';
-  if (full && existsSync(rawSidecar)) {
+  if (existsSync(rawSidecar)) {
     try { sidecarText = readFileSync(rawSidecar, 'utf-8').trim(); } catch (_) { sidecarText = ''; }
   }
   if (sidecarText) {
@@ -1537,22 +1509,18 @@ function runResult(hopperDir, taskId, { full = false } = {}) {
     // --full with an empty/unreadable sidecar falls through to the body rather than
     // printing an empty FULL OUTPUT block (review finding #3). When there is genuinely
     // no sidecar, the body IS complete (the text fit under the preview cap).
-    if (full && existsSync(rawSidecar)) console.log('(--full: sidecar was empty/unreadable — showing the output.md body instead)');
-    else if (full) console.log('(--full: no sidecar — the output.md body below IS the complete text)');
+    if (existsSync(rawSidecar)) console.log('(--full: sidecar was empty/unreadable — showing the output.md body instead)');
+    else console.log('(--full: no sidecar — the output.md body below IS the complete text)');
     console.log('--- OUTPUT.MD BODY ---');
     console.log(body);
     console.log('--- END BODY ---');
     console.log('');
-    if (!full && existsSync(rawSidecar)) {
-      console.log(`Note: shown as a preview (truncated). Full text: \`hopper-dispatch --result ${taskId} --full\`.`);
-      console.log('');
-    }
   } else {
     console.log('(output.md body is empty — vendor likely streamed to .log; printing log tail below.)');
     console.log('');
   }
 
-  // Log tail: useful for vendors (codex, copilot in some cases) that write
+  // --full is the explicit raw-output boundary for vendors that write
   // their verdict to stdout rather than the output.md body.
   const logPath = outputMdPath.replace(/\.md$/, '.log');
   const LOG_TAIL_BYTES = 4000;
@@ -1688,6 +1656,16 @@ async function runSetup({ only = null, deep = false } = {}) {
   }
   const rows = await buildVendorReadiness({ only, deep });
   const sum = summarizeReadiness(rows);
+  const runtime = buildRuntimeReport({ version: VERSION });
+  console.log(`hopper-dispatch v${VERSION} — setup & readiness`);
+  console.log(`Runtime: node=${runtime.nodeOk ? 'supported' : 'unsupported'} platform=${runtime.platform}`);
+  console.log(`Vendors: ${sum.ready}/${sum.total} installed+authed`);
+  for (const row of rows) {
+    const auth = row.authOk ? (row.authSoftWarn ? 'advisory' : 'verified') : 'unverified';
+    console.log(`${row.name}: status=${row.status} auth=${auth} ${renderSafeInventory(row.inventory)}`);
+  }
+  console.log('Use --probe for an explicit inventory refresh.');
+  return;
   const cell = (s, w) => String(s == null ? '—' : s).slice(0, w).padEnd(w);
 
   // ── Runtime / prerequisites (is the host itself viable?) ──────────────────
@@ -1833,6 +1811,41 @@ async function runCheck(target, { compat = false } = {}) {
       results.push({ name: v, r: null, err });
     }
   }
+  const compatibility = new Map();
+  if (compat) {
+    for (const vendor of vendors) {
+      try {
+        const result = compatCheckForAdapter(vendor);
+        compatibility.set(vendor, result.ran
+          ? (result.missing.length === 0 ? 'compatible' : 'incompatible')
+          : 'unavailable');
+      } catch (_) {
+        compatibility.set(vendor, 'unavailable');
+      }
+    }
+  }
+
+  console.log(`hopper-dispatch v${VERSION} — vendor install + auth check`);
+  for (const { name: vendor, r } of results) {
+    const inventory = projectInventoryEntry(vendor, {
+      provenance: {
+        source_kind: 'static',
+        binary_availability: r?.binaryFound ? 'present' : (r ? 'missing' : 'unknown'),
+        binary_basename: r?.command ?? null,
+      },
+      diagnostic_code: r ? 'none' : 'capability-failed',
+    }, 'ok-v1');
+    const status = r && ['READY', 'AUTH_NEEDED', 'NOT_INSTALLED', 'UNKNOWN'].includes(r.overallStatus)
+      ? r.overallStatus
+      : 'UNKNOWN';
+    const auth = r?.authOk ? (r.authSoftWarn ? 'advisory' : 'verified') : 'unverified';
+    const compatSummary = compat ? ` compatibility=${compatibility.get(vendor)}` : '';
+    console.log(`${vendor}: status=${status} auth=${auth}${compatSummary} ${renderSafeInventory(inventory)}`);
+  }
+  console.log(compat
+    ? 'Compatibility probes ran; raw help output is withheld from public output.'
+    : 'No vendor subprocess is spawned for this check.');
+  return;
 
   // Per codex Phase 6a strict audit P2 #2 + recheck F2 #2 tightening:
   // redact home-dir in resolved paths to avoid leaking username + install
@@ -1940,29 +1953,6 @@ function runCapabilities(vendor) {
     console.error(`Vendor '${vendor}' has no capabilities() metadata yet (Phase 6a adapter pending).`);
     process.exit(1);
   }
-  console.log(`hopper-dispatch v${VERSION} — capabilities for ${vendor}`);
-  console.log('');
-  console.log(`  --model      ${caps.modelArg.accepted}`);
-  if (caps.modelArg.knownGood.length > 0) {
-    console.log(`               Known good: ${caps.modelArg.knownGood.join(', ')}`);
-  }
-  console.log('');
-  console.log(`  --reasoning  ${caps.reasoningArg.accepted}`);
-  if (caps.reasoningArg.knownGood.length > 0) {
-    console.log(`               Values: ${caps.reasoningArg.knownGood.join(' | ')}`);
-  }
-  console.log('');
-  console.log('  Features:');
-  for (const [feat, info] of Object.entries(caps.features)) {
-    const mark = info.supported ? 'YES' : 'NO ';
-    console.log(`    ${feat.padEnd(16)} ${mark}  ${info.mechanism}`);
-  }
-  console.log('');
-  console.log(`  Capability data stale after: ${caps.staleAfter}`);
-  console.log(`  Re-verify quarterly. Source: docs/research/ — see notes above.`);
-  console.log('');
-  console.log('No vendor subprocess is spawned for this lookup (static data only).');
-
   const cacheOutcome = readCacheWithOutcome();
   if (cacheOutcome.outcome === 'malformed' || cacheOutcome.outcome === 'version-mismatch') {
     console.error(`Inventory cache diagnostic: ${cacheOutcome.diagnostic_code}`);
@@ -1971,31 +1961,14 @@ function runCapabilities(vendor) {
     return;
   }
 
-  // Public cache output is projection-only: never echo raw paths, source
-  // strings, notes, or parser errors from the private entry.
   const cached = cacheOutcome.cache?.vendors?.[vendor] || null;
-  if (cached) {
-    const inventory = projectInventoryEntry(vendor, cached, cacheOutcome.outcome);
-    console.log('');
-    console.log(`  Cached probe data (${staleness(cached.probed_at)}${isStale(cached.probed_at) ? ' — STALE' : ''}):`);
-    console.log(`    introspection_supported:  ${cached.introspection_supported}`);
-    if (cached.version) console.log(`    version:                  ${cached.version}`);
-    console.log(`    binary:                   ${inventory.binaryAvailability}${inventory.binaryBasename ? ` (${inventory.binaryBasename})` : ''}`);
-    console.log(`    catalog:                  ${inventory.sourceKind} (${inventory.sourceLabel})`);
-    console.log(`    diagnostic:               ${inventory.diagnosticCode} (${inventory.diagnosticState})`);
-    if (cached.models && cached.models.length > 0) {
-      const preview = cached.models.slice(0, 8).join(', ');
-      const more = cached.models.length > 8 ? ` (+${cached.models.length - 8} more)` : '';
-      console.log(`    models (${cached.models.length}):              ${preview}${more}`);
-    }
-    if (cached.reasoning_levels && cached.reasoning_levels.length > 0) {
-      console.log(`    reasoning_levels:         ${cached.reasoning_levels.join(' | ')}`);
-    }
-    console.log(`    duration_ms:              ${cached.duration_ms}`);
-  } else {
-    console.log('');
-    console.log(`  No cached probe data. Run \`hopper-dispatch --probe ${vendor}\` for live introspection.`);
-  }
+  const inventory = projectInventoryEntry(vendor, cached || {
+    provenance: { source_kind: 'static', binary_availability: 'unknown', binary_basename: null },
+  }, cacheOutcome.outcome);
+  console.log(`hopper-dispatch v${VERSION} — capabilities for ${vendor}`);
+  console.log(`Inventory: ${renderSafeInventory(inventory)}`);
+  console.log('Selector metadata: declared');
+  console.log('No vendor subprocess is spawned for this lookup (static data only).');
 }
 
 /**
@@ -2007,8 +1980,12 @@ function runCapabilities(vendor) {
 function runCheckModel(vendor, model, { json = false } = {}) {
   const caps = capabilitiesForAdapter(vendor);
   const knownGood = (caps && caps.modelArg && caps.modelArg.knownGood) || [];
-  const cached = getVendorCache(vendor);
+  const cacheOutcome = readCacheWithOutcome();
+  const cached = cacheOutcome.cache?.vendors?.[vendor] || null;
   const catalog = (cached && Array.isArray(cached.models)) ? cached.models : null;
+  const inventory = projectInventoryEntry(vendor, cached || {
+    provenance: { source_kind: 'static', binary_availability: 'unknown', binary_basename: null },
+  }, cacheOutcome.outcome);
 
   const result = evaluateModelCheck(vendor, model, knownGood, catalog);
 
@@ -2018,11 +1995,10 @@ function runCheckModel(vendor, model, { json = false } = {}) {
       model: result.model,
       normalized: result.normalized,
       verdict: result.verdict,
-      verified_list: result.verifiedList,
-      catalog: result.catalog,
-      cache_missing: result.cacheMissing,
+      selector_valid: result.selector_valid,
+      runtime_attestation: result.runtime_attestation,
       exit_code: result.exitCode,
-      hint: result.hint.join(' '),
+      inventory,
     }));
     process.exit(result.exitCode);
   }
@@ -2030,9 +2006,9 @@ function runCheckModel(vendor, model, { json = false } = {}) {
   console.log(`hopper-dispatch v${VERSION} — check-model ${vendor} '${model}'`);
   if (result.normalized !== result.model) console.log(`  normalized: ${result.normalized}`);
   console.log(`  verdict: ${result.verdict}  (exit ${result.exitCode})`);
-  console.log('');
-  for (const line of result.hint) console.log(`  ${line}`);
-  console.log('');
+  console.log(`  selector_valid: ${result.selector_valid}`);
+  console.log(`  runtime_attestation: ${result.runtime_attestation}`);
+  console.log(`  inventory: ${renderSafeInventory(inventory)}`);
   console.log('No vendor subprocess is spawned for this check (static known-good + probe-cache read only).');
   process.exit(result.exitCode);
 }
@@ -2142,25 +2118,12 @@ function runModels(target) {
   }
 
   console.log(`hopper-dispatch v${VERSION} — cached models per vendor`);
-  console.log(`Cache: ${cache.probed_at_global} (global) | host: ${cache.host}`);
-  console.log('');
 
   for (const v of vendors) {
     const entry = cache.vendors[v];
     if (!entry) continue;
     const inventory = projectInventoryEntry(v, entry, outcome);
-    const stale = isStale(entry.probed_at) ? ' [STALE]' : '';
-    console.log(`${v} (${entry.introspection_supported}, ${staleness(entry.probed_at)})${stale}`);
-    console.log(`  catalog: ${inventory.sourceKind} (${inventory.sourceLabel}) | binary: ${inventory.binaryAvailability}${inventory.binaryBasename ? ` (${inventory.binaryBasename})` : ''} | diagnostic: ${inventory.diagnosticCode}`);
-    if (entry.models && entry.models.length > 0) {
-      for (const m of entry.models) console.log(`  - ${m}`);
-    } else {
-      console.log(`  (no models in cache; source: ${inventory.sourceLabel})`);
-    }
-    if (entry.reasoning_levels && entry.reasoning_levels.length > 0) {
-      console.log(`  reasoning: ${entry.reasoning_levels.join(' | ')}`);
-    }
-    console.log('');
+    console.log(`${v}: ${renderSafeInventory(inventory)}`);
   }
 }
 

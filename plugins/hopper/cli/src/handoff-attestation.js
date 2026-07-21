@@ -8,6 +8,7 @@ import { readFrontmatter, writeFrontmatter } from './background.js';
 import { appendProgressEvent, readProgressEvents } from './progress.js';
 import { resolveAttestation } from './model-attestation.js';
 import { validateTaskId } from './validation.js';
+import { projectInventoryEntry } from './inventory-contract.js';
 
 const TERMINAL_STATUSES = new Set(['done', 'failed', 'cancelled', 'orphaned', 'timeout']);
 const DISPLAY_STATUSES = new Set([...TERMINAL_STATUSES, 'in-progress']);
@@ -16,6 +17,15 @@ const SELECTOR_KINDS = new Set(['alias', 'concrete', 'auto', 'unknown']);
 const SAFE_CATALOG_FIELDS = Object.freeze([
   'catalog_source_kind', 'catalog_source_label', 'catalog_observed_at',
   'catalog_freshness', 'binary_availability', 'binary_basename',
+]);
+const PUBLIC_VENDORS = new Set(['agy', 'claude', 'codex', 'copilot', 'grok', 'kimi', 'mimo', 'opencode']);
+const PUBLIC_PHASES = new Set(['starting', 'running', 'done', 'failed', 'cancelled', 'orphaned', 'timeout', 'unknown']);
+const PUBLIC_EVENT_KINDS = new Set(['finding', 'progress', 'terminal', 'process_alive', 'status', 'unknown']);
+const PUBLIC_RESOLUTION_DETAILS = new Set([
+  'policy-effective-default', 'no-effective-selector', 'selector-kind-unknown', 'alias-runtime-resolved',
+  'alias-config-only-no-runtime', 'alias-no-runtime-metadata', 'concrete-config-only-no-runtime',
+  'concrete-runtime-unverifiable', 'concrete-no-runtime-metadata', 'concrete-runtime-exact',
+  'concrete-runtime-mismatch',
 ]);
 
 function nullableString(value) {
@@ -169,6 +179,39 @@ function safeCatalogFromFrontmatter(fm = {}) {
   return Object.fromEntries(SAFE_CATALOG_FIELDS.map((key) => [key, nullableNonEmptyString(fm[key])]));
 }
 
+function publicVendor(value) {
+  return PUBLIC_VENDORS.has(value) ? value : 'unknown';
+}
+
+function publicPhase(value) {
+  return PUBLIC_PHASES.has(value) ? value : 'unknown';
+}
+
+function publicEventKind(value) {
+  return PUBLIC_EVENT_KINDS.has(value) ? value : 'unknown';
+}
+
+function publicCatalog(vendor, fm) {
+  return projectInventoryEntry(vendor, {
+    provenance: {
+      source_kind: fm.catalog_source_kind,
+      binary_availability: fm.binary_availability,
+      binary_basename: fm.binary_basename,
+    },
+    diagnostic_code: fm.diagnostic_code,
+  }, 'ok-v1');
+}
+
+function publicRecentEvents(events) {
+  return events.map((event) => ({
+    seq: Number.isInteger(event.seq) ? event.seq : null,
+    phase: publicPhase(event.phase),
+    kind: publicEventKind(event.kind),
+    terminal: event.terminal === true,
+    status: normalizeDisplayStatus(event.status),
+  }));
+}
+
 function isUsableEvent(event, taskId) {
   return event && typeof event === 'object'
     && event.task_id === taskId
@@ -248,32 +291,65 @@ export function readCanonicalAttestation({ hopperDir, taskId, outputMdPath } = {
     attestationConsistency = 'frontmatter-only';
   }
 
-  const evidence = terminalEvent ? normalizeObservedModels(terminalEvent.observed_models) : parseObservedModelsJson(fm.observed_models_json);
-  const selectorSource = terminalEvent ?? fm;
-  const resolutionSource = terminalEvent ?? fm;
+  const evidence = Array.isArray(terminalEvent?.observed_models)
+    ? normalizeObservedModels(terminalEvent.observed_models)
+    : parseObservedModelsJson(fm.observed_models_json);
+  const selectorSource = {
+    requested_selector: terminalEvent?.requested_selector ?? fm.requested_selector,
+    effective_selector: terminalEvent?.effective_selector ?? fm.effective_selector,
+    selector_kind: terminalEvent?.selector_kind ?? fm.selector_kind,
+    effective_selector_source: terminalEvent?.effective_selector_source ?? fm.effective_selector_source,
+  };
+  const resolutionSource = {
+    resolution_status: terminalEvent?.resolution_status ?? fm.resolution_status,
+    resolution_detail: terminalEvent?.resolution_detail ?? fm.resolution_detail,
+  };
+  const adapter = publicVendor(nullableNonEmptyString(terminalEvent?.vendor ?? fm.adapter));
+  const selector = {
+    requested: nullableNonEmptyString(selectorSource.requested_selector),
+    effective: nullableNonEmptyString(selectorSource.effective_selector),
+    kind: normalizeSelectorKind(selectorSource.selector_kind),
+  };
+  const resolution = {
+    status: normalizeResolutionStatus(resolutionSource.resolution_status),
+    detail: PUBLIC_RESOLUTION_DETAILS.has(resolutionSource.resolution_detail) ? resolutionSource.resolution_detail : null,
+  };
+  const phase = publicPhase(nullableNonEmptyString(terminalEvent?.phase ?? fm.phase) ?? displayStatus);
+  const safeCatalog = safeCatalogFromFrontmatter(fm);
   return {
     taskId,
     outputMdPath: path,
     frontmatter: fm,
     frontmatterState,
     displayStatus,
-    phase: nullableNonEmptyString(terminalEvent?.phase ?? fm.phase) ?? displayStatus,
-    adapter: nullableNonEmptyString(terminalEvent?.vendor ?? fm.adapter) ?? 'unknown',
-    selector: {
-      requested: nullableNonEmptyString(selectorSource.requested_selector),
-      effective: nullableNonEmptyString(selectorSource.effective_selector),
-      kind: normalizeSelectorKind(selectorSource.selector_kind),
-    },
+    phase,
+    adapter,
+    selector,
     observedModels: evidence,
-    resolution: {
-      status: normalizeResolutionStatus(resolutionSource.resolution_status),
-      detail: nullableNonEmptyString(resolutionSource.resolution_detail),
-    },
-    safeCatalog: safeCatalogFromFrontmatter(fm),
+    resolution,
+    safeCatalog,
     recentEvents,
     terminalEvent,
     terminalEventCount: terminals.length,
     attestation_consistency: attestationConsistency,
+    public: {
+      taskId,
+      adapter,
+      displayStatus,
+      phase,
+      selector: {
+        ...selector,
+        source: ['user-argv', 'policy', 'vendor-default'].includes(selectorSource.effective_selector_source)
+          ? selectorSource.effective_selector_source
+          : 'vendor-default',
+      },
+      observedModels: evidence,
+      resolution,
+      safeCatalog: publicCatalog(adapter, fm),
+      recentEvents: publicRecentEvents(recentEvents),
+      terminal: terminalEvent !== null,
+      attestationConsistency,
+    },
   };
 }
 

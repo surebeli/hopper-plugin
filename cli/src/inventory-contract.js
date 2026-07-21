@@ -6,9 +6,14 @@
 
 const DECLARED_VENDORS = new Set(['agy', 'claude', 'codex', 'copilot', 'grok', 'kimi', 'mimo', 'opencode']);
 const BINARY_BASENAMES = new Map([
+  ['agy', 'agy'],
   ['claude', 'claude'],
+  ['codex', 'codex'],
+  ['copilot', 'copilot'],
+  ['grok', 'grok'],
   ['opencode', 'opencode'],
   ['kimi', 'kimi'],
+  ['mimo', 'mimo'],
 ]);
 const DIAGNOSTIC_CODES = new Set([
   'none',
@@ -91,4 +96,33 @@ export function projectInventoryEntry(vendor, entry, outcome = 'ok-v1') {
     diagnosticCode,
     diagnosticState: diagnosticState(diagnosticCode),
   };
+}
+
+/**
+ * The sole textual renderer for public inventory data. Callers pass the closed
+ * projection returned by projectInventoryEntry(); this renderer re-normalizes
+ * every value so an accidental future caller cannot interpolate a private
+ * cache/install field into a CLI line.
+ */
+export function renderSafeInventory(inventory) {
+  const value = inventory && typeof inventory === 'object' ? inventory : {};
+  const safe = {
+    binaryAvailability: binaryAvailability(value.binaryAvailability),
+    binaryBasename: typeof value.binaryBasename === 'string'
+      && [...BINARY_BASENAMES.values()].includes(value.binaryBasename)
+      ? value.binaryBasename
+      : null,
+    sourceKind: ['static', 'unavailable', 'adapter-aliases', 'cli-catalog', 'config', 'unknown'].includes(value.sourceKind)
+      ? value.sourceKind
+      : 'unknown',
+    sourceLabel: typeof value.sourceLabel === 'string' && [
+      'adapter-static-selectors', 'unavailable', 'claude-selector-metadata',
+      'opencode-cli-catalog', 'kimi-configured-aliases', 'unknown',
+    ].includes(value.sourceLabel) ? value.sourceLabel : 'unknown',
+    diagnosticCode: normalizeDiagnostic(value.diagnosticCode),
+    diagnosticState: ['none', 'unavailable', 'degraded', 'unknown'].includes(value.diagnosticState)
+      ? value.diagnosticState
+      : diagnosticState(normalizeDiagnostic(value.diagnosticCode)),
+  };
+  return Object.entries(safe).map(([key, field]) => `${key}=${field ?? 'null'}`).join(' ');
 }

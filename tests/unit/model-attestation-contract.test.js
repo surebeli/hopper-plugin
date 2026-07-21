@@ -2,6 +2,11 @@
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import {
   parseStrictProviderModel,
   compareRuntimeIdentity,
@@ -13,6 +18,8 @@ import {
 } from '../../cli/src/model-attestation.js';
 import { projectInventoryEntry } from '../../cli/src/inventory-contract.js';
 import { parseProbeCacheRecoveryArgs } from '../../cli/bin/hopper-dispatch';
+
+const DISPATCH = resolvePath(fileURLToPath(import.meta.url), '..', '..', '..', 'cli', 'bin', 'hopper-dispatch');
 
 const NOW = '2026-07-21T12:00:00.000Z';
 const CLAUDE_BINDING = Object.freeze({
@@ -353,4 +360,88 @@ test('cache recovery parser accepts only one declared probe vendor and never imp
   assert.deepEqual(parseProbeCacheRecoveryArgs(['--probe', 'claude'], ['claude', 'kimi']), {
     target: 'claude', recoverCache: false, error: null,
   });
+});
+
+test('public discovery commands render cache and install state through the closed inventory projection', () => {
+  const root = mkdtempSync(join(tmpdir(), 'hopper-private-discovery-'));
+  const cacheDir = join(root, 'cache');
+  const hopperDir = join(root, 'PRIVATE_WORKSPACE_PATH', '.hopper');
+  const privateBinDir = join(root, 'PRIVATE_BINARY_DIRECTORY');
+  const forbidden = [
+    root, 'C:\\PRIVATE_BINARY\\claude.exe', 'C:\\PRIVATE_CONFIG\\claude.json',
+    'RAW_STDERR_PRIVATE', 'AUTH_PROSE_PRIVATE', 'PRIVATE_PROVIDER_NAME',
+    'https://private.example.invalid/model', 'sk-private-secret-token',
+    'SOURCE_NOTE_PRIVATE', 'CACHE_ERROR_PRIVATE', 'models_source', 'modelsSource', 'sourceNote', 'cacheError',
+  ];
+  try {
+    mkdirSync(cacheDir, { recursive: true });
+    mkdirSync(hopperDir, { recursive: true });
+    mkdirSync(privateBinDir, { recursive: true });
+    const command = process.platform === 'win32' ? 'claude.cmd' : 'claude';
+    writeFileSync(join(privateBinDir, command), process.platform === 'win32' ? '@exit /b 0\r\n' : '#!/bin/sh\nexit 0\n', 'utf-8');
+    writeFileSync(join(cacheDir, 'vendor-capabilities.json'), JSON.stringify({
+      version: 1,
+      host: 'PRIVATE_PROVIDER_NAME',
+      probed_at_global: '2026-07-22T00:00:00.000Z',
+      vendors: {
+        claude: {
+          introspection_supported: 'full', version: 'PRIVATE_PROVIDER_NAME', duration_ms: 999,
+          models: ['private-cache-model'], models_source: 'C:\\PRIVATE_CONFIG\\claude.json', modelsSource: 'modelsSource',
+          sourceNote: 'SOURCE_NOTE_PRIVATE https://private.example.invalid/model',
+          notes: ['AUTH_PROSE_PRIVATE sk-private-secret-token'], cacheError: 'CACHE_ERROR_PRIVATE', stderr: 'RAW_STDERR_PRIVATE',
+          provider: 'PRIVATE_PROVIDER_NAME', binary_path: 'C:\\PRIVATE_BINARY\\claude.exe',
+          provenance: { source_kind: 'adapter-aliases', binary_availability: 'present', binary_basename: 'claude' },
+          diagnostic_code: 'none',
+        },
+      },
+    }), 'utf-8');
+
+    for (const args of [['--models', 'claude'], ['--capabilities', 'claude'], ['--setup', 'claude'], ['--check', 'claude']]) {
+      const pathValue = `${privateBinDir}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH || process.env.Path || ''}`;
+      const result = spawnSync(process.execPath, [DISPATCH, ...args], {
+        encoding: 'utf-8',
+        env: { ...process.env, HOPPER_CACHE_DIR: cacheDir, HOPPER_DIR: hopperDir, PATH: pathValue, Path: pathValue },
+      });
+      assert.equal(result.status, 0, `${args.join(' ')}\n${result.stderr}`);
+      const output = `${result.stdout}\n${result.stderr}`;
+      for (const value of forbidden) assert.ok(!output.includes(value), `${args.join(' ')} leaked ${value}`);
+      assert.match(output, /binaryAvailability=/, `${args.join(' ')} must render safe binary availability`);
+      assert.match(output, /binaryBasename=claude/, `${args.join(' ')} must render a validated basename only`);
+      assert.match(output, /sourceKind=/, `${args.join(' ')} must render a closed source kind`);
+      assert.match(output, /sourceLabel=/, `${args.join(' ')} must render a closed source label`);
+      assert.match(output, /diagnosticCode=/, `${args.join(' ')} must render a closed diagnostic code`);
+      assert.match(output, /diagnosticState=/, `${args.join(' ')} must render a closed diagnostic state`);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('--check --compat still runs its explicit help probe while withholding the raw help output', () => {
+  const root = mkdtempSync(join(tmpdir(), 'hopper-compat-probe-'));
+  const bin = join(root, 'PRIVATE_COMPAT_BIN');
+  const counter = join(root, 'PRIVATE_COMPAT_COUNTER');
+  try {
+    mkdirSync(bin, { recursive: true });
+    const command = process.platform === 'win32' ? 'claude.cmd' : 'claude';
+    const shim = join(bin, command);
+    if (process.platform === 'win32') {
+      writeFileSync(shim, '@echo off\r\necho --print --output-format --model --permission-mode --add-dir> "%HOPPER_COMPAT_COUNTER%"\r\n', 'utf-8');
+    } else {
+      writeFileSync(shim, '#!/bin/sh\nprintf "%s" "--print --output-format --model --permission-mode --add-dir" > "$HOPPER_COMPAT_COUNTER"\n', 'utf-8');
+      chmodSync(shim, 0o755);
+    }
+    const pathValue = `${bin}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH || process.env.Path || ''}`;
+    const result = spawnSync(process.execPath, [DISPATCH, '--check', 'claude', '--compat'], {
+      encoding: 'utf-8',
+      env: { ...process.env, HOPPER_COMPAT_COUNTER: counter, PATH: pathValue, Path: pathValue },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(existsSync(counter), '--compat must run the explicit vendor --help probe');
+    assert.match(result.stdout, /compatibility=(?:compatible|incompatible|unavailable)/);
+    assert.match(result.stdout, /raw help output is withheld/i);
+    assert.ok(!`${result.stdout}\n${result.stderr}`.includes('PRIVATE_COMPAT_COUNTER'));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

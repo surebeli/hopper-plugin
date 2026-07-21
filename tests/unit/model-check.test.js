@@ -9,7 +9,14 @@
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { evaluateModelCheck, detectSplicedEffort, CHECK_MODEL_EXIT } from '../../cli/src/model-check.js';
+
+const DISPATCH = resolve(fileURLToPath(import.meta.url), '..', '..', '..', 'cli', 'bin', 'hopper-dispatch');
 
 // ─── three-tier verdict + exit codes ───
 
@@ -168,4 +175,69 @@ test('model-check.js source contains no spawn/exec call site (zero-spawn --check
   const noImports = noStrings.replace(/^\s*import\s*\{[^}]*\}\s*from[^;\n]+;?/gm, '');
   assert.ok(!/\bspawn\s*\(/.test(noImports), 'model-check.js: contains spawn() call site');
   assert.ok(!/\bexec(Sync|FileSync|File)?\s*\(/.test(noImports), 'model-check.js: contains exec/execSync/execFile call site');
+});
+
+test('--check-model --json keeps legacy verdict/exit while returning only closed selector and inventory evidence', () => {
+  const cacheDir = mkdtempSync(join(tmpdir(), 'hopper-private-check-model-'));
+  const forbidden = [
+    'C:\\PRIVATE_BINARY\\claude.exe', 'C:\\PRIVATE_CONFIG\\claude.json',
+    'RAW_STDERR_PRIVATE', 'AUTH_PROSE_PRIVATE', 'PRIVATE_PROVIDER_NAME',
+    'https://private.example.invalid/model', 'sk-private-secret-token',
+    'SOURCE_NOTE_PRIVATE', 'CACHE_ERROR_PRIVATE', 'modelsSource', 'sourceNote', 'cacheError',
+  ];
+  try {
+    mkdirSync(cacheDir, { recursive: true });
+    writeFileSync(join(cacheDir, 'vendor-capabilities.json'), JSON.stringify({
+      version: 1,
+      host: 'PRIVATE_PROVIDER_NAME',
+      probed_at_global: '2026-07-22T00:00:00.000Z',
+      vendors: {
+        claude: {
+          models: ['fable', 'catalog-only-fixture'],
+          models_source: 'C:\\PRIVATE_CONFIG\\claude.json',
+          modelsSource: 'modelsSource',
+          sourceNote: 'SOURCE_NOTE_PRIVATE https://private.example.invalid/model',
+          notes: ['AUTH_PROSE_PRIVATE sk-private-secret-token'],
+          cacheError: 'CACHE_ERROR_PRIVATE',
+          stderr: 'RAW_STDERR_PRIVATE',
+          provider: 'PRIVATE_PROVIDER_NAME',
+          binary_path: 'C:\\PRIVATE_BINARY\\claude.exe',
+          provenance: {
+            source_kind: 'adapter-aliases', binary_availability: 'present', binary_basename: 'claude',
+          },
+          diagnostic_code: 'none',
+        },
+      },
+    }), 'utf-8');
+
+    const cases = [
+      ['fable', 0, 'verified'],
+      ['catalog-only-fixture', 2, 'catalog-only'],
+      ['missing-fixture', 1, 'not-found'],
+      ['fable-xhigh', 1, 'effort-spliced'],
+    ];
+    for (const [model, exitCode, selectorValid] of cases) {
+      const result = spawnSync(process.execPath, [DISPATCH, '--check-model', 'claude', model, '--json'], {
+        encoding: 'utf-8', env: { ...process.env, HOPPER_CACHE_DIR: cacheDir },
+      });
+      assert.equal(result.status, exitCode, result.stderr);
+      for (const value of forbidden) assert.ok(!`${result.stdout}\n${result.stderr}`.includes(value), value);
+      const json = JSON.parse(result.stdout);
+      assert.equal(json.verdict, selectorValid);
+      assert.equal(json.selector_valid, selectorValid);
+      assert.equal(json.runtime_attestation, 'not-run');
+      assert.equal(json.exit_code, exitCode);
+      assert.deepEqual(Object.keys(json.inventory).sort(), [
+        'binaryAvailability', 'binaryBasename', 'diagnosticCode', 'diagnosticState', 'sourceKind', 'sourceLabel',
+      ]);
+      assert.equal(json.inventory.binaryBasename, 'claude');
+      assert.equal(json.inventory.sourceLabel, 'claude-selector-metadata');
+      assert.equal(json.inventory.diagnosticCode, 'none');
+      assert.ok(!('catalog' in json), 'private cache catalog must not cross the JSON boundary');
+      assert.ok(!('verified_list' in json), 'private static list must not cross the JSON boundary');
+      assert.ok(!('hint' in json), 'free-form hints must not cross the JSON boundary');
+    }
+  } finally {
+    rmSync(cacheDir, { recursive: true, force: true });
+  }
 });
