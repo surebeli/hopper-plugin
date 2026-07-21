@@ -229,7 +229,8 @@ export const codexAdapter = {
       // ISSUE-codex-vendor-model-effort (2026-06): adapter now forwards opts.model
       // as `-m <MODEL>`. ChatGPT-account auth accepts BARE names only — provider-
       // prefixed ids (openai-codex/gpt-5.1-codex) are rejected (openai/codex#12295).
-      // Catalog is subscription-dependent; list via `codex debug models --bundled`.
+      // Catalog is subscription-dependent; `hopper-dispatch --probe codex`
+      // reconciles `codex debug models` with Codex's account-aware cache.
       // gpt-5.6-sol / gpt-5.6-terra / gpt-5.6-luna: V-verified 2026-07-17 via live
       // micro-test on codex CLI 0.144.5; requires codex CLI >= 0.144 (older CLIs 400
       // with 'requires a newer version of Codex' — observed live on 0.142.5). This is
@@ -250,14 +251,14 @@ export const codexAdapter = {
         'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.3-codex-spark',
       ],
       // V3 drift-suppression: names whose absence-from / presence-in the live
-      // `codex debug models --bundled` catalog is EXPECTED, so doctor --deep does
+      // `codex debug models` catalog is EXPECTED, so doctor --deep does
       // not flag them. `gpt-5.3-codex-spark` is ChatGPT-Pro-only (absent from the
       // free bundle → would false-STALE). `codex-auto-review` is an internal
       // review model and `gpt-5.2` is an older/superseded model — both ship in the
       // bundle but are intentionally NOT promoted as dispatch defaults (→ false-NEW).
       // A genuinely-new model codex ships will still surface as NEW (the useful signal).
       driftExpected: ['gpt-5.3-codex-spark', 'codex-auto-review', 'gpt-5.2'],
-      sourceNote: 'codex exec -m <MODEL>; adapter forwards opts.model verbatim (ISSUE-codex-vendor-model-effort, 2026-06; V1-verified 2026-06). ChatGPT-account auth accepts BARE model names only (gpt-5.5 / gpt-5.4 / gpt-5.4-mini / gpt-5.3-codex); provider-prefixed names rejected (openai/codex#12295). gpt-5.3-codex-spark is a ChatGPT-Pro-only research preview (conditional — not on every account). gpt-5.6-sol / gpt-5.6-terra / gpt-5.6-luna: V-verified 2026-07-17 via live micro-test on codex CLI 0.144.5; requires codex CLI >= 0.144 (older CLIs 400 with "requires a newer version of Codex" — observed live on 0.142.5). Effort is SEPARATE from the model name: --reasoning -> -c model_reasoning_effort. Catalog: `codex debug models --bundled` (V3 doctor --deep reconciles it; see driftExpected).',
+      sourceNote: 'codex exec -m <MODEL>; adapter forwards opts.model verbatim (ISSUE-codex-vendor-model-effort, 2026-06; V1-verified 2026-06). ChatGPT-account auth accepts BARE model names only (gpt-5.5 / gpt-5.4 / gpt-5.4-mini / gpt-5.3-codex); provider-prefixed names rejected (openai/codex#12295). gpt-5.3-codex-spark is a ChatGPT-Pro-only research preview (conditional — not on every account). gpt-5.6-sol / gpt-5.6-terra / gpt-5.6-luna: V-verified 2026-07-17 via live micro-test on codex CLI 0.144.5; requires codex CLI >= 0.144 (older CLIs 400 with "requires a newer version of Codex" — observed live on 0.142.5). Effort is SEPARATE from the model name: --reasoning -> -c model_reasoning_effort. Account catalog: `hopper-dispatch --probe codex` combines `codex debug models` with `$CODEX_HOME` (or `~/.codex`) `models_cache.json`, rejecting stale, version-mismatched, or conflicting cache data (V3 doctor --deep reconciles it; see driftExpected).',
     },
     reasoningArg: {
       accepted: 'enumerated',
