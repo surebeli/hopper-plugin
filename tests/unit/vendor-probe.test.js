@@ -103,12 +103,81 @@ test('kimi probe uses provider list JSON when Kimi Code 0.14+ is available', asy
     assert.equal(r.version, '0.14.0');
     assert.deepEqual(r.models, ['kimi-code/kimi-for-coding', 'custom/fast']);
     assert.match(r.models_source, /provider list --json/);
-    assert.ok(r.notes.some((n) => /managed:kimi-code/.test(n)), 'provider note should be surfaced');
+    assert.ok(r.notes.includes('Kimi provider catalog returned configured aliases.'), 'provider note must use closed wording');
   } finally {
     if (savedPath === undefined) delete process.env.PATH;
     else process.env.PATH = savedPath;
     if (savedHome === undefined) delete process.env.KIMI_CODE_HOME;
     else process.env.KIMI_CODE_HOME = savedHome;
+  }
+});
+
+test('kimi probe closes config and process diagnostics before result or cache storage', async (t) => {
+  const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join, delimiter } = await import('node:path');
+  const { probe } = await import('../../cli/src/vendor-probe/kimi.js');
+  const { cachePath, setVendorCache } = await import('../../cli/src/cache.js');
+
+  const tmp = mkdtempSync(join(tmpdir(), 'kimi-private-probe-'));
+  t.after(() => rmSync(tmp, { recursive: true, force: true }));
+  const isWindows = process.platform === 'win32';
+  const fakeKimi = join(tmp, isWindows ? 'kimi.cmd' : 'kimi');
+  const privateConfigPath = join(tmp, 'private-config-home', 'config.toml');
+  const privateStderr = 'https://probe-private.invalid/private-provider/private-auth/private-stderr';
+  mkdirSync(privateConfigPath, { recursive: true });
+  if (isWindows) {
+    writeFileSync(fakeKimi, [
+      '@echo off',
+      'if "%1"=="--version" exit /b 0',
+      'if "%1"=="provider" if "%2"=="list" if "%3"=="--json" (',
+      `  echo ${privateStderr} 1>&2`,
+      '  exit /b 2',
+      ')',
+      'exit /b 2',
+    ].join('\r\n'));
+  } else {
+    writeFileSync(fakeKimi, [
+      '#!/bin/sh',
+      'if [ "$1" = "--version" ]; then exit 0; fi',
+      'if [ "$1" = "provider" ] && [ "$2" = "list" ] && [ "$3" = "--json" ]; then',
+      `  printf '%s\\n' '${privateStderr}' >&2`,
+      '  exit 2',
+      'fi',
+      'exit 2',
+      '',
+    ].join('\n'));
+    chmodSync(fakeKimi, 0o755);
+  }
+
+  const savedPath = process.env.PATH;
+  const savedHome = process.env.KIMI_CODE_HOME;
+  const savedCacheDir = process.env.HOPPER_CACHE_DIR;
+  process.env.PATH = `${tmp}${delimiter}${savedPath || ''}`;
+  process.env.KIMI_CODE_HOME = join(tmp, 'private-config-home');
+  process.env.HOPPER_CACHE_DIR = join(tmp, 'cache');
+  try {
+    const result = await probe();
+    setVendorCache('kimi', result);
+    const forbidden = [privateConfigPath, 'https://probe-private.invalid', 'private-provider', 'private-auth', 'private-stderr'];
+    const assertClosed = (value) => {
+      if (typeof value === 'string') {
+        for (const secret of forbidden) assert.doesNotMatch(value, new RegExp(secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+      } else if (Array.isArray(value)) {
+        value.forEach(assertClosed);
+      } else if (value && typeof value === 'object') {
+        Object.values(value).forEach(assertClosed);
+      }
+    };
+    assertClosed(result);
+    assertClosed(JSON.parse(readFileSync(cachePath(), 'utf-8')));
+  } finally {
+    if (savedPath === undefined) delete process.env.PATH;
+    else process.env.PATH = savedPath;
+    if (savedHome === undefined) delete process.env.KIMI_CODE_HOME;
+    else process.env.KIMI_CODE_HOME = savedHome;
+    if (savedCacheDir === undefined) delete process.env.HOPPER_CACHE_DIR;
+    else process.env.HOPPER_CACHE_DIR = savedCacheDir;
   }
 });
 

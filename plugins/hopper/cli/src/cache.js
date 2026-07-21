@@ -103,14 +103,27 @@ export function readCacheWithDiagnostics() {
 }
 
 /**
- * Write cache atomically via tmp + rename.
+ * Write cache atomically via an owner-only temp + rename.
+ *
+ * The same production filesystem and security seams as explicit recovery are
+ * accepted here so every cache payload is protected before its first byte is
+ * written. A failed hardening step is deliberately closed to a diagnostic
+ * code: the active cache must remain untouched.
  */
-export function writeCache(data) {
+export function writeCache(data, { fsOps = DEFAULT_FS_OPS, security = {} } = {}) {
   const path = cachePath();
-  if (!existsSync(dirname(path))) mkdirSync(dirname(path), { recursive: true });
+  if (!fsOps.existsSync(dirname(path))) fsOps.mkdirSync(dirname(path), { recursive: true });
   const tmp = `${path}.tmp.${process.pid}.${Date.now()}`;
-  writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
-  renameSync(tmp, path);
+  const mergedSecurity = { ...DEFAULT_SECURITY, ...security };
+  const temp = createOwnerOnlyExclusive(tmp, fsOps, mergedSecurity);
+  if (!temp.created) throw new Error('inventory-cache-write-owner-only-failed');
+  try {
+    fsOps.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
+    fsOps.renameSync(tmp, path);
+  } catch (_) {
+    bestEffortUnlink(tmp, fsOps);
+    throw new Error('inventory-cache-write-failed');
+  }
 }
 
 /**
@@ -166,9 +179,9 @@ function releaseLock(lockPath) {
  * so parallel `--probe codex` / `--probe opencode` invocations cannot drop each
  * other's entries.
  */
-export function setVendorCache(name, entry) {
+export function setVendorCache(name, entry, { fsOps = DEFAULT_FS_OPS, security = {} } = {}) {
   const path = cachePath();
-  if (!existsSync(dirname(path))) mkdirSync(dirname(path), { recursive: true });
+  if (!fsOps.existsSync(dirname(path))) fsOps.mkdirSync(dirname(path), { recursive: true });
   const lockPath = `${path}.lock`;
   acquireLock(lockPath, LOCK_ACQUIRE_TIMEOUT_MS);
   try {
@@ -183,7 +196,14 @@ export function setVendorCache(name, entry) {
     const oldEntry = c.vendors[name] && typeof c.vendors[name] === 'object' ? c.vendors[name] : {};
     c.vendors[name] = mergeOwnedVendorEntry(oldEntry, sanitizeProbeEntryForStorage(name, entry));
     c.probed_at_global = new Date().toISOString();
-    writeCache(c);
+    try {
+      writeCache(c, { fsOps, security });
+    } catch (err) {
+      const diagnostic_code = err && err.message === 'inventory-cache-write-owner-only-failed'
+        ? 'inventory-cache-write-owner-only-failed'
+        : 'inventory-cache-write-failed';
+      return { written: false, outcome: prior.outcome, diagnostic_code };
+    }
     return { written: true, outcome: prior.outcome, diagnostic_code: 'none' };
   } finally {
     releaseLock(lockPath);

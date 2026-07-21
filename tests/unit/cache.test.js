@@ -57,6 +57,50 @@ test('readCacheWithOutcome distinguishes missing, v1, malformed, and version mis
   });
 });
 
+test('ordinary cache create and update harden an empty temp before writing sensitive payloads', () => {
+  withTmpCache((tmp) => {
+    const path = cachePath();
+    const observed = [];
+    const security = {
+      prepareOwnerOnly(tempPath) {
+        observed.push(['prepare', tempPath, readFileSync(tempPath, 'utf-8')]);
+      },
+      assertOwnerOnly(tempPath) {
+        observed.push(['assert', tempPath, readFileSync(tempPath, 'utf-8')]);
+        return true;
+      },
+    };
+
+    writeCache({ version: CACHE_VERSION, host: 'first', probed_at_global: '', vendors: {} }, { security });
+    writeCache({ version: CACHE_VERSION, host: 'second', probed_at_global: '', vendors: {} }, { security });
+
+    assert.deepEqual(observed.map(([step, , bytes]) => [step, bytes]), [
+      ['prepare', ''], ['assert', ''], ['prepare', ''], ['assert', ''],
+    ]);
+    assert.equal(JSON.parse(readFileSync(path, 'utf-8')).host, 'second');
+    assert.deepEqual(readdirSync(tmp).filter((name) => name.includes('.tmp.')), []);
+  });
+});
+
+test('ordinary cache write fails closed before payload when owner-only hardening fails', () => {
+  withTmpCache((tmp) => {
+    const path = cachePath();
+    const active = '{"version":1,"host":"old","probed_at_global":"","vendors":{},"active":"must remain byte-identical"}';
+    writeFileSync(path, active, 'utf-8');
+
+    assert.deepEqual(
+      setVendorCache(
+        'kimi',
+        { models: ['replacement'] },
+        { security: { prepareOwnerOnly: () => { throw new Error('simulated ACL failure'); } } },
+      ),
+      { written: false, outcome: 'ok-v1', diagnostic_code: 'inventory-cache-write-owner-only-failed' },
+    );
+    assert.equal(readFileSync(path, 'utf-8'), active);
+    assert.deepEqual(readdirSync(tmp).filter((name) => name.includes('.tmp.')), []);
+  });
+});
+
 test('setVendorCache creates a v1 cache only when missing and additively preserves unknown root, vendor, and provenance fields', () => {
   withTmpCache(() => {
     writeCache({

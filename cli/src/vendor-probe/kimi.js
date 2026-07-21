@@ -141,12 +141,8 @@ export async function probe() {
       try {
         const parsed = parseKimiProviderListJson(providerResult.stdout);
         const modelsCaps = parsed.modelsCaps;
-        if (modelsCaps.length > 0) {
-          const capNotes = modelsCaps.map(({ name, caps }) => `${name}: [${caps.join(', ')}]`);
-          notes.push(`Per-model capabilities: ${capNotes.join(' | ').slice(0, 400)}`);
-        }
-        if (parsed.providers.length > 0) {
-          notes.push(`Configured providers: ${parsed.providers.join(', ').slice(0, 300)}`);
+        if (modelsCaps.length > 0 || parsed.providers.length > 0) {
+          notes.push('Kimi provider catalog returned configured aliases.');
         }
         return {
           introspection_supported: 'partial',
@@ -162,13 +158,13 @@ export async function probe() {
           diagnostic_code: 'none',
           duration_ms: Date.now() - t0,
         };
-      } catch (err) {
-        notes.push(`kimi provider list JSON parse failed: ${err.message}`);
+      } catch (_) {
+        notes.push('Kimi provider catalog response was unusable; using config fallback.');
       }
     } else if (providerResult.timedOut) {
-      notes.push('kimi provider list --json timed out; falling back to config file');
+      notes.push('Kimi provider catalog timed out; using config fallback.');
     } else {
-      notes.push(`kimi provider list --json exited ${providerResult.exitCode}; stderr: ${providerResult.stderr.slice(0, 200)}; falling back to config file`);
+      notes.push('Kimi provider catalog was unavailable; using config fallback.');
     }
   } else {
     notes.push('kimi binary not found on PATH; falling back to config file');
@@ -212,23 +208,22 @@ export async function probe() {
         }
       }
       break;
-    } catch (err) {
-      notes.push(`failed to parse ${path}: ${err.message}`);
+    } catch (_) {
+      notes.push('A Kimi config fallback could not be read.');
     }
   }
 
   if (models.length === 0 && notes.length === 0) {
-    notes.push('No ~/.kimi-code/config.toml (or $KIMI_CODE_HOME / legacy ~/.kimi/config.{toml,json}) found OR no [models.NAME] blocks defined. Run `kimi` then `/login`, or define aliases.');
+    notes.push('No configured Kimi model aliases were available. Run Kimi login or configure aliases.');
     modelsSource = 'unavailable';
   } else if (models.length === 0) {
-    notes.push('No configured Kimi model aliases found in config fallback. Run `kimi provider list --json` or `kimi` then `/login` to refresh Kimi Code configuration.');
+    notes.push('No configured Kimi model aliases were available. Run Kimi login or configure aliases.');
     modelsSource = modelsSource || 'unavailable';
   }
 
   // Capability summary as notes
   if (modelsCaps.length > 0) {
-    const capNotes = modelsCaps.map(({ name, caps }) => `${name}: [${caps.join(', ')}]`);
-    notes.push(`Per-model capabilities: ${capNotes.join(' | ').slice(0, 400)}`);
+    notes.push('Kimi config fallback included capability metadata.');
   }
 
   return {
