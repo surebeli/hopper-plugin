@@ -1,14 +1,18 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { readFrontmatter, writeFrontmatter } from '../../cli/src/background.js';
-import { readProgressEvents } from '../../cli/src/progress.js';
+import { appendProgressEvent, readProgressEvents } from '../../cli/src/progress.js';
 import {
   buildAttestationStartupSnapshot,
+  encodeObservedModelsJsonScalar,
   finalizeTerminalAttestation,
+  parseObservedModelsJson,
+  readCanonicalAttestation,
+  repairOrphanTerminalHandoff,
 } from '../../cli/src/handoff-attestation.js';
 
 const NOW = '2026-07-21T12:00:00.000Z';
@@ -216,6 +220,189 @@ test('existing terminal event refuses reentry and terminal writers never persist
     assert.equal(readProgressEvents({ hopperDir: state.hopperDir, taskId: state.taskId }).filter((event) => event.terminal).length, 1);
     const raw = readFileSync(state.outputMdPath, 'utf8');
     assert.doesNotMatch(raw, /^status: (?:finalizing|partial)$/m);
+  } finally {
+    rmSync(state.tmp, { recursive: true, force: true });
+  }
+});
+
+test('observed model JSON scalar round-trips YAML-sensitive text and normalizes hostile shapes', () => {
+  const models = [
+    'brackets [alpha]', 'colon: # hash', "single ' quote", 'double " quote',
+    'slash\\path', 'line\nbreak', '雪', '--- document marker', '... end marker',
+    'brackets [alpha]', '', 42,
+  ];
+  const encoded = encodeObservedModelsJsonScalar(models);
+  assert.match(encoded, /^"/);
+  assert.deepEqual(parseObservedModelsJson(JSON.parse(encoded)), [
+    'brackets [alpha]', 'colon: # hash', "single ' quote", 'double " quote',
+    'slash\\path', 'line\nbreak', '雪', '--- document marker', '... end marker',
+  ]);
+  for (const hostile of [null, {}, 'not-json', 'null', '{}', '42', '["ok", null, 7, "ok", "next", ""]']) {
+    assert.deepEqual(parseObservedModelsJson(hostile), [], String(hostile));
+  }
+});
+
+test('canonical reader derives status from one valid terminal event and exposes normalized attestation fields', () => {
+  const state = setup('T-reader-agree');
+  try {
+    writeFrontmatter(state.outputMdPath, {
+      task_id: state.taskId, adapter: 'claude', status: 'done', phase: 'done', terminal_event_emitted: true,
+      requested_selector: 'fable', effective_selector: 'fable', selector_kind: 'alias',
+      observed_models_json: JSON.stringify(['frontmatter-model']), resolution_status: 'alias-resolved',
+      catalog_source_kind: 'cache', catalog_source_label: 'trusted', catalog_observed_at: NOW,
+      catalog_freshness: 'fresh', binary_availability: 'present', binary_basename: 'claude', _body: '# body\n',
+    });
+    appendProgressEvent({
+      hopperDir: state.hopperDir, taskId: state.taskId,
+      event: {
+        vendor: 'claude', phase: 'done', kind: 'terminal', message: 'done', source: 'runner', terminal: true, status: 'done',
+        requested_selector: 'fable', effective_selector: 'fable', selector_kind: 'alias',
+        observed_models: ['event-model', 'event-model', '', 3], resolution_status: 'alias-resolved', resolution_detail: 'alias-runtime-resolved',
+      },
+    });
+    const record = readCanonicalAttestation(state);
+    assert.equal(record.displayStatus, 'done');
+    assert.equal(record.attestation_consistency, 'agreement');
+    assert.deepEqual(record.observedModels, ['event-model']);
+    assert.deepEqual(record.selector, { requested: 'fable', effective: 'fable', kind: 'alias' });
+    assert.equal(record.resolution.status, 'alias-resolved');
+    assert.deepEqual(record.safeCatalog, {
+      catalog_source_kind: 'cache', catalog_source_label: 'trusted', catalog_observed_at: NOW,
+      catalog_freshness: 'fresh', binary_availability: 'present', binary_basename: 'claude',
+    });
+    assert.equal(record.recentEvents.length, 1);
+  } finally {
+    rmSync(state.tmp, { recursive: true, force: true });
+  }
+});
+
+test('canonical reader safely degrades corrupt frontmatter values and event/frontmatter crash windows', () => {
+  const state = setup('T-reader-crash');
+  try {
+    writeFileSync(state.outputMdPath, [
+      '---', `task_id: ${state.taskId}`, 'status: in-progress', 'observed_models_json: ["flow"]', 'truncated: "unterminated', '---', '# body',
+    ].join('\n'), 'utf-8');
+    appendProgressEvent({
+      hopperDir: state.hopperDir, taskId: state.taskId,
+      event: { vendor: 'claude', phase: 'done', kind: 'terminal', message: 'done', source: 'runner', terminal: true, status: 'done', observed_models: ['event-model'] },
+    });
+    const finalizing = readCanonicalAttestation(state);
+    assert.equal(finalizing.displayStatus, 'finalizing');
+    assert.equal(finalizing.attestation_consistency, 'event-only');
+    assert.deepEqual(finalizing.observedModels, ['event-model']);
+
+    writeFrontmatter(state.outputMdPath, { task_id: state.taskId, status: 'failed', observed_models_json: '{}', resolution_status: 'nonsense', _body: '' });
+    const conflict = readCanonicalAttestation(state);
+    assert.equal(conflict.displayStatus, 'partial');
+    assert.equal(conflict.attestation_consistency, 'conflict');
+    assert.equal(conflict.resolution.status, 'unverified');
+
+    writeFileSync(state.outputMdPath, 'not frontmatter\n', 'utf-8');
+    const corrupt = readCanonicalAttestation(state);
+    assert.equal(corrupt.displayStatus, 'partial');
+    assert.equal(corrupt.attestation_consistency, 'event-only');
+  } finally {
+    rmSync(state.tmp, { recursive: true, force: true });
+  }
+});
+
+test('canonical reader treats frontmatter-only completion as complete and invalid status as unknown', () => {
+  const state = setup('T-reader-frontmatter');
+  try {
+    writeFrontmatter(state.outputMdPath, { task_id: state.taskId, status: 'done', terminal_event_emitted: true, observed_models_json: null, _body: '' });
+    const complete = readCanonicalAttestation(state);
+    assert.equal(complete.displayStatus, 'done');
+    assert.equal(complete.attestation_consistency, 'frontmatter-only');
+    assert.deepEqual(complete.observedModels, []);
+    writeFrontmatter(state.outputMdPath, { task_id: state.taskId, status: 'what-even-is-this', _body: '' });
+    const invalid = readCanonicalAttestation(state);
+    assert.equal(invalid.displayStatus, 'unknown');
+    assert.equal(invalid.resolution.status, 'unverified');
+  } finally {
+    rmSync(state.tmp, { recursive: true, force: true });
+  }
+});
+
+test('orphan frontmatter repair only commits one matching terminal event and safe catalog fields', () => {
+  const state = setup('T-repair');
+  try {
+    writeFrontmatter(state.outputMdPath, {
+      task_id: state.taskId, status: 'in-progress', adapter: 'forged-adapter', requested_selector: 'forged',
+      catalog_source_kind: 'cache', catalog_source_label: 'trusted', catalog_observed_at: NOW,
+      catalog_freshness: 'fresh', binary_availability: 'present', binary_basename: 'claude', unsafe_field: 'must-not-copy', _body: '# body\n',
+    });
+    appendProgressEvent({
+      hopperDir: state.hopperDir, taskId: state.taskId,
+      event: {
+        vendor: 'claude', phase: 'done', kind: 'terminal', message: 'done', source: 'runner', terminal: true, status: 'done',
+        requested_selector: 'fable', effective_selector: 'fable', selector_kind: 'alias', observed_models: ['claude-opus-4-6'],
+        model_attestation_source: 'runtime', model_attestation_observed_at: NOW, resolution_status: 'alias-resolved', resolution_detail: 'alias-runtime-resolved',
+      },
+    });
+    const repaired = repairOrphanTerminalHandoff(state);
+    assert.equal(repaired.repaired, true);
+    const fm = readFrontmatter(state.outputMdPath);
+    assert.equal(fm.status, 'done');
+    assert.equal(fm.adapter, 'claude');
+    assert.equal(fm.requested_selector, 'fable');
+    assert.equal(fm.catalog_source_label, 'trusted');
+    assert.equal(fm.unsafe_field, undefined);
+    assert.equal(readProgressEvents({ hopperDir: state.hopperDir, taskId: state.taskId }).filter((event) => event.terminal).length, 1);
+  } finally {
+    rmSync(state.tmp, { recursive: true, force: true });
+  }
+});
+
+test('orphan frontmatter repair refuses zero/multiple/mismatched terminal events and late completion', () => {
+  const state = setup('T-repair-guards');
+  try {
+    assert.equal(repairOrphanTerminalHandoff(state).repaired, false, 'zero terminal events');
+    appendProgressEvent({ hopperDir: state.hopperDir, taskId: state.taskId, event: { vendor: 'claude', phase: 'done', kind: 'terminal', message: 'done', source: 'runner', terminal: true, status: 'done' } });
+    appendProgressEvent({ hopperDir: state.hopperDir, taskId: state.taskId, event: { vendor: 'claude', phase: 'done', kind: 'terminal', message: 'again', source: 'runner', terminal: true, status: 'done' } });
+    assert.equal(repairOrphanTerminalHandoff(state).repaired, false, 'multiple terminal events');
+
+    const mismatch = setup('T-repair-mismatch');
+    try {
+      writeFileSync(join(mismatch.hopperDir, 'handoffs', `${mismatch.taskId}-progress.log`), JSON.stringify({ task_id: 'other', terminal: true, kind: 'terminal', status: 'done' }) + '\n', 'utf-8');
+      assert.equal(repairOrphanTerminalHandoff(mismatch).repaired, false, 'mismatched terminal event');
+    } finally {
+      rmSync(mismatch.tmp, { recursive: true, force: true });
+    }
+
+    const malformed = setup('T-repair-malformed');
+    try {
+      writeFileSync(malformed.outputMdPath, 'not frontmatter\n', 'utf-8');
+      appendProgressEvent({ hopperDir: malformed.hopperDir, taskId: malformed.taskId, event: { vendor: 'claude', phase: 'done', kind: 'terminal', message: 'done', source: 'runner', terminal: true, status: 'done' } });
+      assert.equal(repairOrphanTerminalHandoff(malformed).repaired, false, 'malformed frontmatter');
+      const unsafePath = join(malformed.tmp, 'outside-output.md');
+      writeFileSync(unsafePath, '---\ntask_id: T-repair-malformed\nstatus: in-progress\n---\n', 'utf-8');
+      assert.equal(repairOrphanTerminalHandoff({ ...malformed, outputMdPath: unsafePath }).repaired, false, 'unsafe output path');
+    } finally {
+      rmSync(malformed.tmp, { recursive: true, force: true });
+    }
+
+    let reads = 0;
+    const completeFm = { task_id: state.taskId, status: 'done', terminal_event_emitted: true, _body: '' };
+    const late = repairOrphanTerminalHandoff({
+      ...state,
+      io: {
+        readFrontmatter: () => (++reads > 1 ? completeFm : { task_id: state.taskId, status: 'in-progress', _body: '' }),
+        readProgressEvents: () => [{ task_id: state.taskId, terminal: true, kind: 'terminal', status: 'done', vendor: 'claude', phase: 'done', message: 'done', source: 'runner' }],
+        writeFrontmatter: () => assert.fail('late complete frontmatter must not be replaced'),
+      },
+    });
+    assert.equal(late.repaired, false);
+
+    let changedReads = 0;
+    const changed = repairOrphanTerminalHandoff({
+      ...state,
+      io: {
+        readFrontmatter: () => (++changedReads > 1 ? { task_id: 'other', status: 'in-progress', _body: '' } : { task_id: state.taskId, status: 'in-progress', _body: '' }),
+        readProgressEvents: () => [{ task_id: state.taskId, terminal: true, kind: 'terminal', status: 'done', vendor: 'claude', phase: 'done', message: 'done', source: 'runner' }],
+        writeFrontmatter: () => assert.fail('late changed frontmatter must not be replaced'),
+      },
+    });
+    assert.equal(changed.repaired, false);
   } finally {
     rmSync(state.tmp, { recursive: true, force: true });
   }

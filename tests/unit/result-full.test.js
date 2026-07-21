@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -77,5 +77,20 @@ test('T1: --result --full with NO sidecar falls back to the body (no empty FULL 
     assert.ok(!out.includes('FULL OUTPUT (sidecar'), 'no empty sidecar block printed');
     assert.match(out, /OUTPUT\.MD BODY/, 'falls back to the body');
     assert.match(out, /PREVIEW_BODY_MARKER/, 'body content present');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T1: --result safely renders an unknown frontmatter status without throwing', () => {
+  const { root, hopper, id } = setupTask({ withSidecar: false });
+  try {
+    const output = join(hopper, 'handoffs', `${id}-output.md`);
+    writeFileSync(output, `---\ntask_id: ${id}\nstatus: invalid-status\nobserved_models_json: {}\n---\nbody\n`, 'utf-8');
+    const result = spawnSync(process.execPath, [BIN, '--result', id], {
+      encoding: 'utf-8', env: { ...process.env, HOPPER_DIR: hopper },
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stdout, /UNKNOWN/);
+    assert.match(result.stdout, /unverified/i);
+    assert.doesNotMatch(result.stderr, /(?:TypeError|ReferenceError|\bat\s+runResult\b)/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

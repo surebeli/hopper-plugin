@@ -153,6 +153,27 @@ test('writeFrontmatter quotes strings containing colons or special chars', () =>
   }
 });
 
+test('frontmatter parser decodes the attestation JSON scalar but keeps flow collection values non-string', () => {
+  const { tmp } = makeTmpHopper();
+  try {
+    const path = join(tmp, 'x.md');
+    writeFileSync(path, [
+      '---',
+      'observed_models_json: "[\\"brackets [x]\\",\\"colon: #\\",\\"line\\\\nbreak\\"]"',
+      'flow_sequence: ["not", "a scalar"]',
+      'flow_object: {"not":"a scalar"}',
+      '---',
+      '',
+    ].join('\n'), 'utf-8');
+    const fm = readFrontmatter(path);
+    assert.equal(fm.observed_models_json, '["brackets [x]","colon: #","line\\nbreak"]');
+    assert.ok(Array.isArray(fm.flow_sequence));
+    assert.equal(typeof fm.flow_object, 'object');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('writeFrontmatter no leftover tmp file', () => {
   const { tmp } = makeTmpHopper();
   try {

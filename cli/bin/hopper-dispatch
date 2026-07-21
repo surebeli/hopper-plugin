@@ -39,9 +39,12 @@ import {
   hoursSince,
   resolveVendorCwd,
 } from '../src/background.js';
-import { buildAttestationStartupSnapshot, finalizeTerminalAttestation } from '../src/handoff-attestation.js';
+import {
+  buildAttestationStartupSnapshot,
+  finalizeTerminalAttestation,
+  readCanonicalAttestation,
+} from '../src/handoff-attestation.js';
 import { runArchive, findArchivedOutputMd } from '../src/archive.js';
-import { readProgressEvents } from '../src/progress.js';
 import { notify } from '../src/notify.js';
 import { resolveCommandWithKnownPaths } from '../src/path-resolve.js';
 import { resolvePromptDelivery } from '../src/prompt-delivery.js';
@@ -1232,13 +1235,9 @@ function runProgress(hopperDir, taskId) {
     process.exit(1);
   }
 
-  let fm;
-  try { fm = readFrontmatter(outputMdPath); }
-  catch (err) { console.error(`Error reading frontmatter: ${err.message}`); process.exit(1); }
-
-  let events = [];
-  try { events = readProgressEvents({ hopperDir, taskId, limit: 5 }); }
-  catch (err) { console.error(`Error reading progress events: ${err.message}`); process.exit(1); }
+  const canonical = readCanonicalAttestation({ hopperDir, taskId, outputMdPath });
+  const fm = canonical.frontmatter;
+  const events = canonical.recentEvents;
 
   const now = Date.now();
   const startMs = Date.parse(fm.start_time || '');
@@ -1252,18 +1251,21 @@ function runProgress(hopperDir, taskId) {
 
   console.log(`=== ${taskId} - PROGRESS ===`);
   console.log(`Task:          ${taskId}`);
-  console.log(`Vendor:        ${fm.adapter || 'unknown'}`);
-  console.log(`Status:        ${fm.status || 'unknown'}`);
-  console.log(`Phase:         ${fm.phase || fm.status || 'unknown'}`);
+  console.log(`Vendor:        ${canonical.adapter}`);
+  console.log(`Status:        ${canonical.displayStatus}`);
+  console.log(`Phase:         ${canonical.phase}`);
   console.log(`PID:           ${fm.pid || 'n/a'}${fm.pid ? ` (${isAlive(fm.pid) ? 'alive' : 'not alive'})` : ''}`);
   console.log(`Started:       ${fm.start_time || 'n/a'}`);
   if (fm.end_time) console.log(`Ended:         ${fm.end_time}`);
   console.log(`Elapsed:       ${formatMs(elapsedMs)}`);
-  if (fm.status !== 'in-progress') console.log(`Duration:      ${formatMs(durationMs)}`);
+  if (canonical.displayStatus !== 'in-progress') console.log(`Duration:      ${formatMs(durationMs)}`);
   console.log(`Last progress: ${fm.last_progress || '(none)'}`);
   if (fm.last_progress_at) console.log(`Last update:   ${fm.last_progress_at}`);
   console.log(`Progress seq:  ${fm.progress_seq ?? '(none)'}`);
-  console.log(`Terminal:      ${fm.terminal_event_emitted ? 'yes' : 'no'}`);
+  console.log(`Terminal:      ${canonical.terminalEvent || fm.terminal_event_emitted ? 'yes' : 'no'}`);
+  console.log(`Attestation:   ${canonical.attestation_consistency}; resolution=${canonical.resolution.status}`);
+  if (canonical.displayStatus === 'finalizing') console.log('Diagnostic:    terminal JSONL is durable; frontmatter finalization is pending.');
+  if (canonical.displayStatus === 'partial') console.log('Diagnostic:    terminal attestation sources conflict or are incomplete; no reader state was written.');
   console.log('');
   console.log('Paths:');
   console.log(`  Output:      ${outputMdPath}`);
@@ -1452,21 +1454,25 @@ function runResult(hopperDir, taskId, { full = false } = {}) {
     }
   }
 
-  let fm;
-  try { fm = readFrontmatter(outputMdPath); }
-  catch (err) { console.error(`Error reading frontmatter: ${err.message}`); process.exit(1); }
+  const canonical = readCanonicalAttestation({ hopperDir, taskId, outputMdPath });
+  const fm = canonical.frontmatter;
 
   // In-progress: tell the user explicitly and suggest --watch.
-  if (fm.status === 'in-progress') {
+  if (canonical.displayStatus === 'in-progress') {
     console.error(`Task ${taskId} is still in-progress (PID ${fm.pid}, started ${fm.start_time}).`);
     console.error(`Run \`hopper-dispatch --watch ${taskId}\` to follow until done.`);
     process.exit(2);
   }
 
-  // Terminal: print summary + body + log tail.
-  console.log(`=== ${taskId} — ${fm.status.toUpperCase()} ===`);
-  console.log(`Vendor:    ${fm.adapter}`);
-  console.log(`Status:    ${fm.status}${fm.adapter_status ? ' (' + fm.adapter_status + ')' : ''}`);
+  // Terminal, crash-window, and unknown records all render safely from the
+  // same event-first snapshot as --progress; only a true in-progress task exits 2.
+  console.log(`=== ${taskId} — ${canonical.displayStatus.toUpperCase()} ===`);
+  console.log(`Vendor:    ${canonical.adapter}`);
+  console.log(`Status:    ${canonical.displayStatus}${fm.adapter_status ? ' (' + fm.adapter_status + ')' : ''}`);
+  console.log(`Attestation: ${canonical.attestation_consistency}; resolution=${canonical.resolution.status}`);
+  if (canonical.displayStatus === 'finalizing') console.log('Diagnostic: terminal JSONL is durable; frontmatter finalization is pending.');
+  if (canonical.displayStatus === 'partial') console.log('Diagnostic: terminal attestation sources conflict or are incomplete; no reader state was written.');
+  if (canonical.terminalEvent) console.log(`Terminal event: ${canonical.terminalEvent.message}`);
   if (fm.duration_ms != null) console.log(`Duration:  ${(fm.duration_ms / 1000).toFixed(1)}s (${fm.duration_ms}ms)`);
   if (fm.exit_code != null) console.log(`Exit code: ${fm.exit_code}`);
   if (fm.timed_out) console.log(`Timed out: yes`);
@@ -1543,7 +1549,7 @@ function runResult(hopperDir, taskId, { full = false } = {}) {
     console.log('(no log file found)');
   }
 
-  process.exit(fm.status === 'done' ? 0 : 1);
+  process.exit(canonical.displayStatus === 'done' ? 0 : 1);
 }
 
 async function runWatch(hopperDir, taskId) {

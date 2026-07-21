@@ -2,11 +2,21 @@
 // This module is intentionally file-backed and zero-spawn: callers supply the
 // already-resolved selector/catalog snapshot and parsed vendor result.
 
+import { existsSync, lstatSync } from 'node:fs';
+import { join, resolve, sep } from 'node:path';
 import { readFrontmatter, writeFrontmatter } from './background.js';
 import { appendProgressEvent, readProgressEvents } from './progress.js';
 import { resolveAttestation } from './model-attestation.js';
+import { validateTaskId } from './validation.js';
 
-const TERMINAL_STATUSES = new Set(['done', 'failed', 'cancelled', 'orphaned']);
+const TERMINAL_STATUSES = new Set(['done', 'failed', 'cancelled', 'orphaned', 'timeout']);
+const DISPLAY_STATUSES = new Set([...TERMINAL_STATUSES, 'in-progress']);
+const RESOLUTION_STATUSES = new Set(['exact', 'mismatch', 'alias-resolved', 'config-only', 'unverified']);
+const SELECTOR_KINDS = new Set(['alias', 'concrete', 'auto', 'unknown']);
+const SAFE_CATALOG_FIELDS = Object.freeze([
+  'catalog_source_kind', 'catalog_source_label', 'catalog_observed_at',
+  'catalog_freshness', 'binary_availability', 'binary_basename',
+]);
 
 function nullableString(value) {
   return typeof value === 'string' ? value : null;
@@ -98,6 +108,249 @@ function fallbackBinding(snapshot, fm, completion) {
 
 function terminalStatus(value) {
   return TERMINAL_STATUSES.has(value) ? value : 'failed';
+}
+
+function nonEmptyString(value) {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function nullableNonEmptyString(value) {
+  return nonEmptyString(value) ? value : null;
+}
+
+function normalizeObservedModels(value) {
+  if (!Array.isArray(value)) return [];
+  const models = [];
+  for (const model of value) {
+    if (!nonEmptyString(model) || models.includes(model)) continue;
+    models.push(model);
+  }
+  return models;
+}
+
+/**
+ * Encode the JSON-array string as one JSON double-quoted YAML scalar. This is
+ * intentionally separate from the generic frontmatter scalar emitter: model
+ * evidence must survive YAML comments, document markers, escapes, and Unicode.
+ */
+export function encodeObservedModelsJsonScalar(value) {
+  return JSON.stringify(JSON.stringify(normalizeObservedModels(value)));
+}
+
+/**
+ * Parse only the serialized JSON-array string carried in observed_models_json.
+ * Non-strings, scalar JSON, objects, malformed JSON, and mixed lists are not
+ * evidence; strings are first-seen de-duplicated in file order.
+ */
+export function parseObservedModelsJson(value) {
+  if (typeof value !== 'string') return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed) || parsed.some((model) => !nonEmptyString(model))) return [];
+    return normalizeObservedModels(parsed);
+  } catch (_) {
+    return [];
+  }
+}
+
+function normalizeDisplayStatus(value) {
+  return DISPLAY_STATUSES.has(value) ? value : 'unknown';
+}
+
+function normalizeResolutionStatus(value) {
+  return RESOLUTION_STATUSES.has(value) ? value : 'unverified';
+}
+
+function normalizeSelectorKind(value) {
+  return SELECTOR_KINDS.has(value) ? value : 'unknown';
+}
+
+function safeCatalogFromFrontmatter(fm = {}) {
+  return Object.fromEntries(SAFE_CATALOG_FIELDS.map((key) => [key, nullableNonEmptyString(fm[key])]));
+}
+
+function isUsableEvent(event, taskId) {
+  return event && typeof event === 'object'
+    && event.task_id === taskId
+    && nonEmptyString(event.vendor)
+    && nonEmptyString(event.phase)
+    && nonEmptyString(event.kind)
+    && nonEmptyString(event.message)
+    && nonEmptyString(event.source)
+    && typeof event.terminal === 'boolean';
+}
+
+function isValidTerminalEvent(event, taskId) {
+  return isUsableEvent(event, taskId)
+    && event.terminal === true
+    && event.kind === 'terminal'
+    && TERMINAL_STATUSES.has(event.status);
+}
+
+function safeReadEvents(readEvents, hopperDir, taskId) {
+  try {
+    const events = readEvents({ hopperDir, taskId });
+    return Array.isArray(events) ? events.filter((event) => isUsableEvent(event, taskId)) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function canonicalOutputPath(hopperDir, taskId, outputMdPath) {
+  return outputMdPath ?? join(hopperDir, 'handoffs', `${taskId}-output.md`);
+}
+
+function readCanonicalFrontmatter(readFm, outputMdPath) {
+  if (!existsSync(outputMdPath)) return { fm: { _body: '' }, state: 'missing' };
+  try {
+    const fm = readFm(outputMdPath);
+    const hasFrontmatter = Object.keys(fm).some((key) => key !== '_body');
+    return { fm, state: hasFrontmatter ? 'present' : 'missing' };
+  } catch (_) {
+    return { fm: { _body: '' }, state: 'corrupt' };
+  }
+}
+
+/**
+ * Read one event-first terminal attestation record. `finalizing` and `partial`
+ * are reader-only crash-window labels and are never persisted by this reader.
+ */
+export function readCanonicalAttestation({ hopperDir, taskId, outputMdPath } = {}) {
+  const path = canonicalOutputPath(hopperDir, taskId, outputMdPath);
+  const { fm, state: frontmatterState } = readCanonicalFrontmatter(readFrontmatter, path);
+  const events = safeReadEvents(readProgressEvents, hopperDir, taskId);
+  const recentEvents = events.slice(-5);
+  const terminals = events.filter((event) => isValidTerminalEvent(event, taskId));
+  const terminalEvent = terminals.length === 1 ? terminals[0] : null;
+  const fmStatus = normalizeDisplayStatus(fm.status);
+  const fmTerminal = TERMINAL_STATUSES.has(fmStatus);
+  let displayStatus = fmStatus;
+  let attestationConsistency = 'none';
+
+  if (terminalEvent) {
+    if (fmTerminal && fmStatus === terminalEvent.status) {
+      attestationConsistency = 'agreement';
+      displayStatus = terminalEvent.status;
+    } else if (fmTerminal) {
+      attestationConsistency = 'conflict';
+      displayStatus = 'partial';
+    } else if (fmStatus === 'in-progress') {
+      attestationConsistency = 'event-only';
+      displayStatus = 'finalizing';
+    } else {
+      attestationConsistency = 'event-only';
+      displayStatus = 'partial';
+    }
+  } else if (terminals.length > 1) {
+    attestationConsistency = 'conflict';
+    displayStatus = 'partial';
+  } else if (fmTerminal) {
+    attestationConsistency = 'frontmatter-only';
+  }
+
+  const evidence = terminalEvent ? normalizeObservedModels(terminalEvent.observed_models) : parseObservedModelsJson(fm.observed_models_json);
+  const selectorSource = terminalEvent ?? fm;
+  const resolutionSource = terminalEvent ?? fm;
+  return {
+    taskId,
+    outputMdPath: path,
+    frontmatter: fm,
+    frontmatterState,
+    displayStatus,
+    phase: nullableNonEmptyString(terminalEvent?.phase ?? fm.phase) ?? displayStatus,
+    adapter: nullableNonEmptyString(terminalEvent?.vendor ?? fm.adapter) ?? 'unknown',
+    selector: {
+      requested: nullableNonEmptyString(selectorSource.requested_selector),
+      effective: nullableNonEmptyString(selectorSource.effective_selector),
+      kind: normalizeSelectorKind(selectorSource.selector_kind),
+    },
+    observedModels: evidence,
+    resolution: {
+      status: normalizeResolutionStatus(resolutionSource.resolution_status),
+      detail: nullableNonEmptyString(resolutionSource.resolution_detail),
+    },
+    safeCatalog: safeCatalogFromFrontmatter(fm),
+    recentEvents,
+    terminalEvent,
+    terminalEventCount: terminals.length,
+    attestation_consistency: attestationConsistency,
+  };
+}
+
+function isRepairPathSafe(hopperDir, taskId, outputMdPath) {
+  try {
+    validateTaskId(taskId);
+    const expected = resolve(hopperDir, 'handoffs', `${taskId}-output.md`);
+    if (resolve(outputMdPath) !== expected) return false;
+    const handoffs = resolve(hopperDir, 'handoffs');
+    if (!expected.startsWith(handoffs + sep)) return false;
+    return existsSync(outputMdPath) && !lstatSync(outputMdPath).isSymbolicLink();
+  } catch (_) {
+    return false;
+  }
+}
+
+function repairablePartialFrontmatter(fm, taskId) {
+  return fm && typeof fm === 'object'
+    && fm.task_id === taskId
+    && fm.status === 'in-progress'
+    && fm.terminal_event_emitted !== true;
+}
+
+function repairFrontmatterFromEvent(fm, taskId, event) {
+  const observedModels = normalizeObservedModels(event.observed_models);
+  return {
+    task_id: taskId,
+    adapter: nullableNonEmptyString(event.vendor) ?? 'unknown',
+    status: event.status,
+    phase: nullableNonEmptyString(event.phase) ?? event.status,
+    end_time: nullableNonEmptyString(event.ts),
+    last_progress_at: nullableNonEmptyString(event.ts),
+    last_progress: nullableNonEmptyString(event.message),
+    progress_seq: Number.isInteger(event.seq) ? event.seq : undefined,
+    terminal_event_emitted: true,
+    requested_selector: nullableNonEmptyString(event.requested_selector),
+    effective_selector: nullableNonEmptyString(event.effective_selector),
+    effective_selector_source: nullableNonEmptyString(event.effective_selector_source),
+    selector_kind: normalizeSelectorKind(event.selector_kind),
+    observed_models_json: JSON.stringify(observedModels),
+    model_attestation_source: nullableNonEmptyString(event.model_attestation_source),
+    model_attestation_observed_at: nullableNonEmptyString(event.model_attestation_observed_at),
+    resolution_status: normalizeResolutionStatus(event.resolution_status),
+    resolution_detail: nullableNonEmptyString(event.resolution_detail),
+    diagnostic_code: nullableNonEmptyString(event.diagnostic_code),
+    ...safeCatalogFromFrontmatter(fm),
+    _body: typeof fm._body === 'string' ? fm._body : '',
+  };
+}
+
+/**
+ * Repair only the event-first crash window where exactly one safe terminal JSONL
+ * record exists but frontmatter is still in progress. It never appends JSONL and
+ * re-reads immediately before the atomic frontmatter replace.
+ */
+export function repairOrphanTerminalHandoff({ hopperDir, taskId, outputMdPath, io = {} } = {}) {
+  const path = canonicalOutputPath(hopperDir, taskId, outputMdPath);
+  const readFm = io.readFrontmatter ?? readFrontmatter;
+  const writeFm = io.writeFrontmatter ?? writeFrontmatter;
+  const readEvents = io.readProgressEvents ?? readProgressEvents;
+  if (!isRepairPathSafe(hopperDir, taskId, path)) return { repaired: false, reason: 'unsafe-path' };
+
+  let firstFm;
+  try { firstFm = readFm(path); } catch (_) { return { repaired: false, reason: 'malformed-frontmatter' }; }
+  if (!repairablePartialFrontmatter(firstFm, taskId)) return { repaired: false, reason: 'not-partial' };
+  const firstEvents = safeReadEvents(readEvents, hopperDir, taskId).filter((event) => isValidTerminalEvent(event, taskId));
+  if (firstEvents.length !== 1) return { repaired: false, reason: 'terminal-event-count' };
+
+  let latestFm;
+  try { latestFm = readFm(path); } catch (_) { return { repaired: false, reason: 'malformed-frontmatter' }; }
+  if (TERMINAL_STATUSES.has(normalizeDisplayStatus(latestFm.status))) return { repaired: false, reason: 'already-complete' };
+  if (!repairablePartialFrontmatter(latestFm, taskId)) return { repaired: false, reason: 'changed-frontmatter' };
+  const latestEvents = safeReadEvents(readEvents, hopperDir, taskId).filter((event) => isValidTerminalEvent(event, taskId));
+  if (latestEvents.length !== 1) return { repaired: false, reason: 'terminal-event-changed' };
+  const event = latestEvents[0];
+  writeFm(path, repairFrontmatterFromEvent(latestFm, taskId, event));
+  return { repaired: true, event };
 }
 
 function parsedModelAttestation(parsed) {

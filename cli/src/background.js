@@ -46,10 +46,7 @@ export function readFrontmatter(path) {
     const colonIdx = trimmed.indexOf(':');
     if (colonIdx < 0) continue;
     const key = trimmed.slice(0, colonIdx).trim();
-    let val = trimmed.slice(colonIdx + 1).trim();
-    // strip optional inline comment (not perfect; OK for our schema)
-    const hashIdx = val.indexOf(' #');
-    if (hashIdx >= 0) val = val.slice(0, hashIdx).trim();
+    const val = stripInlineComment(trimmed.slice(colonIdx + 1).trim());
     fm[key] = parseScalar(val);
   }
   return fm;
@@ -75,6 +72,11 @@ function parseScalar(s) {
   if (s.startsWith("'") && s.endsWith("'")) {
     return s.slice(1, -1);
   }
+  // Flow collections are deliberately non-scalar. The attestation reader
+  // rejects them as model evidence rather than treating YAML as JSON text.
+  if ((s.startsWith('[') && s.endsWith(']')) || (s.startsWith('{') && s.endsWith('}'))) {
+    try { return JSON.parse(s); } catch (_) { /* preserve hand-written YAML */ }
+  }
   return s;
 }
 
@@ -90,6 +92,29 @@ function emitScalar(v) {
     return v;
   }
   throw new Error(`Cannot emit scalar of type ${typeof v}: ${v}`);
+}
+
+// A ` #` sequence is an inline YAML comment only outside a quoted scalar.
+// Attestation JSON is deliberately double-quoted, so a literal hash remains
+// evidence rather than being truncated by the flat parser.
+function stripInlineComment(value) {
+  let quote = null;
+  let escaped = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === '#' && index > 0 && /\s/.test(value[index - 1])) return value.slice(0, index).trim();
+  }
+  return value;
 }
 
 function emitJsonStringScalar(v) {

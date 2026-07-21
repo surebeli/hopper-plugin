@@ -3,7 +3,7 @@
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,6 +26,13 @@ function setup() {
 
 function runProgress(hopperDir, taskId) {
   return spawnSync(process.execPath, [DISPATCH, '--progress', taskId], {
+    env: { ...process.env, HOPPER_DIR: hopperDir },
+    encoding: 'utf-8',
+  });
+}
+
+function runResult(hopperDir, taskId) {
+  return spawnSync(process.execPath, [DISPATCH, '--result', taskId], {
     env: { ...process.env, HOPPER_DIR: hopperDir },
     encoding: 'utf-8',
   });
@@ -152,6 +159,43 @@ test('--progress exits 2 for invalid task id', () => {
     const result = runProgress(hopperDir, '../bad');
     assert.equal(result.status, 2);
     assert.match(result.stderr, /invalid|unsafe|path traversal|task.id/i);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('--progress and --result render the same event-first crash-window diagnosis', () => {
+  const { tmp, hopperDir } = setup();
+  try {
+    const taskId = 'T-PROGRESS-CANONICAL';
+    const outputPath = join(hopperDir, 'handoffs', `${taskId}-output.md`);
+    writeFileSync(outputPath, `---\ntask_id: ${taskId}\nstatus: in-progress\n---\n# body\n`, 'utf-8');
+    appendProgressEvent({
+      hopperDir, taskId,
+      event: { vendor: 'codex', phase: 'done', kind: 'terminal', message: 'event-first done', source: 'runner', terminal: true, status: 'done' },
+    });
+    const progress = runProgress(hopperDir, taskId);
+    const result = runResult(hopperDir, taskId);
+    assert.equal(progress.status, 0, progress.stderr);
+    assert.match(progress.stdout, /Status:\s+finalizing/);
+    assert.match(progress.stdout, /event-first done/);
+    assert.match(result.stdout, /FINALIZING/);
+    assert.match(result.stdout, /event-first done/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('--progress prints recent valid events even when the existing handoff has no frontmatter', () => {
+  const { tmp, hopperDir } = setup();
+  try {
+    const taskId = 'T-PROGRESS-BAD-HANDOFF';
+    writeFileSync(join(hopperDir, 'handoffs', `${taskId}-output.md`), 'broken handoff body\n', 'utf-8');
+    appendProgressEvent({ hopperDir, taskId, event: event('still useful') });
+    const result = runProgress(hopperDir, taskId);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Status:\s+unknown/);
+    assert.match(result.stdout, /still useful/);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
