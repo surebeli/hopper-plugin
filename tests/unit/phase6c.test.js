@@ -186,9 +186,9 @@ test('kimi args() never emits --thinking/--no-thinking (0.x reasoning is config-
 // 6c follow-up — superseded by the more precise 6c-followup tests above which
 // assert --no-thinking emission for explicit-disable and no flags for omitted.)
 
-test('6c-followup --result: hopper-dispatch --result prints frontmatter summary for completed task', async (t) => {
-  // Create a fake completed task output.md + log; verify `--result` prints
-  // the body + log tail with the chat-friendly summary header.
+test('6c-followup --result: default output is private and --full explicitly releases body and log', async (t) => {
+  // Create a fake completed task output.md + log. The default renderer must
+  // expose only its closed public summary; --full is the raw-output boundary.
   const { mkdtempSync, writeFileSync, rmSync, mkdirSync } = await import('node:fs');
   const { spawnSync } = await import('node:child_process');
   const { tmpdir } = await import('node:os');
@@ -236,12 +236,19 @@ test('6c-followup --result: hopper-dispatch --result prints frontmatter summary 
   });
   assert.equal(result.status, 0, `--result should exit 0 for status=done; got ${result.status}; stderr: ${result.stderr}`);
   assert.match(result.stdout, /=== T-RESULT-TEST-1 — DONE ===/, 'must print summary header');
-  assert.match(result.stdout, /Vendor:\s+fakevendor/, 'must print vendor');
-  assert.match(result.stdout, /Duration:\s+90\.0s/, 'must print duration in seconds');
-  assert.match(result.stdout, /## Verdict: PASS/, 'must print output.md body content');
-  assert.ok(!result.stdout.includes('## Status (background completion)'),
-    `must strip runner-appended status section from body; got: ${result.stdout}`);
-  assert.match(result.stdout, /vendor stdout line 1/, 'must print log tail');
+  assert.match(result.stdout, /Vendor:\s+unknown/, 'unverified adapter must not become a public vendor claim');
+  assert.ok(!result.stdout.includes('fakevendor'), `must not expose unverified adapter: ${result.stdout}`);
+  assert.ok(!result.stdout.includes('## Verdict: PASS'), `must not print output.md body by default: ${result.stdout}`);
+  assert.ok(!result.stdout.includes('vendor stdout line 1'), `must not print log tail by default: ${result.stdout}`);
+  assert.match(result.stdout, /Raw output is available only with `--full`\./, 'must name the explicit raw-output boundary');
+
+  const full = spawnSync(process.execPath, [dispatchBin, '--result', taskId, '--full'], {
+    env: { ...process.env, HOPPER_DIR: tmp },
+    encoding: 'utf-8',
+  });
+  assert.equal(full.status, 0, `--result --full should exit 0 for status=done; got ${full.status}; stderr: ${full.stderr}`);
+  assert.match(full.stdout, /## Verdict: PASS/, 'must print output.md body after explicit opt-in');
+  assert.match(full.stdout, /vendor stdout line 1/, 'must print log tail after explicit opt-in');
 });
 
 test('6c-followup --result: in-progress task exits 2 with watch hint', async (t) => {
