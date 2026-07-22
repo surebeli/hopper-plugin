@@ -1,23 +1,19 @@
 tests/integration/runner-single-spawn.test.js
-  0000019f88161b3f 1-908
+  s_9b9532ed48c3cb::t_a77b4273fe614c 155,183,714-781
 ---
 {
   "schema_version": "authorship/3.0.0",
   "git_ai_version": "1.6.15",
   "base_commit_sha": "83bd754a0a4ffe0125b3aada3d1df872440b007e",
-  "prompts": {
-    "0000019f88161b3f": {
+  "prompts": {},
+  "sessions": {
+    "s_9b9532ed48c3cb": {
       "agent_id": {
         "tool": "codex",
-        "model": "gpt-5.6-sol",
-        "id": "ai-thread-codex-gpt-5.6-sol-1784694577983"
+        "id": "019f829e-39fc-7e93-a464-c73aba41ebea",
+        "model": "gpt-5.6-sol"
       },
-      "human_author": "litianyi",
-      "messages": [],
-      "total_additions": 908,
-      "total_deletions": 0,
-      "accepted_lines": 908,
-      "overriden_lines": 0
+      "human_author": "litianyi <litianyi@corp.netease.com>"
     }
   }
 }
