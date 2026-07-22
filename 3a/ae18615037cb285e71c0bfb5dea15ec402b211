@@ -1,0 +1,31 @@
+cli/src/inventory-contract.js
+  0000019f87ed0b3a 1-142
+dashboard/server/routes/actions.js
+  0000019f87ed0b3a 1-87
+dashboard/server/routes/task.js
+  0000019f87ed0b3a 1-93
+tests/unit/dashboard-task.test.js
+  0000019f87ed0b3a 1-429
+tests/unit/dashboard-vendors.test.js
+  0000019f87ed0b3a 1-386
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "3aae18615037cb285e71c0bfb5dea15ec402b211",
+  "prompts": {
+    "0000019f87ed0b3a": {
+      "agent_id": {
+        "tool": "codex",
+        "model": "gpt-5.6-sol",
+        "id": "ai-thread-codex-gpt-5.6-sol-1784691886906"
+      },
+      "human_author": "litianyi",
+      "messages": [],
+      "total_additions": 1137,
+      "total_deletions": 0,
+      "accepted_lines": 1137,
+      "overriden_lines": 0
+    }
+  }
+}
