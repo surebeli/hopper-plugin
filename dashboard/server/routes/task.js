@@ -13,6 +13,7 @@ const SECRET_LIKE_IDENTIFIERS = Object.freeze([
   /^glpat-[A-Za-z0-9_-]{20,}$/i,
   /^xapp-[A-Za-z0-9-]{20,}$/i,
   /^xox[baprs]-[A-Za-z0-9-]{20,}$/i,
+  /^xai-[A-Za-z0-9_-]{20,}$/i,
   /^(?:sk|pk|rk)[_-][A-Za-z0-9_-]{20,}$/i,
   /^(?:api[_-]?key|access[_-]?token|secret)[_-][A-Za-z0-9_-]{20,}$/i,
 ]);

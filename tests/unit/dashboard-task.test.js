@@ -196,6 +196,7 @@ test('dashboard task route denies credential-shaped prefixes without blocking sh
     `xapp-1-${'H'.repeat(32)}`,
     `xoxb-${'I'.repeat(32)}`,
     'sk-private-secret-token',
+    `xai-${'J'.repeat(24)}`,
   ];
   const shortLookalikes = [
     'gho_model',
@@ -204,6 +205,7 @@ test('dashboard task route denies credential-shaped prefixes without blocking sh
     'ghr-dev',
     'glpat-model',
     'xapp-preview',
+    'xai-model',
   ];
   mkdirSync(handoffs, { recursive: true });
   writeFileSync(join(handoffs, 'T-CREDENTIALS-output.md'), [
@@ -212,7 +214,7 @@ test('dashboard task route denies credential-shaped prefixes without blocking sh
     'adapter: claude',
     'status: done',
     'phase: done',
-    `requested_selector: ${tokens[1]}`,
+    `requested_selector: ${tokens[10]}`,
     `effective_selector: ${tokens[6]}`,
     'effective_selector_source: user-argv',
     'selector_kind: concrete',
