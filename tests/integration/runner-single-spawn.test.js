@@ -27,13 +27,14 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSync, rmSync, chmodSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSync, rmSync, chmodSync, renameSync } from 'node:fs';
 import { tmpdir, platform } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFrontmatter, writeFrontmatter } from '../../cli/src/background.js';
 import { readCanonicalAttestation } from '../../cli/src/handoff-attestation.js';
 import { readProgressEvents } from '../../cli/src/progress.js';
+import { acquireVendorLock } from '../../cli/src/subprocess.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -822,6 +823,67 @@ test('spawn error emits no late process_alive after more than one liveness inter
     assert.equal(afterInterval.filter((event) => event.kind === 'process_alive').length, 0,
       'spawn error must never produce a late process_alive event');
   } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('codex spawn error closes runner outputs and releases its serialized lock before terminal exit', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-codex-spawn-error-'));
+  const envKeys = ['TMPDIR', 'TMP', 'TEMP'];
+  const savedTemp = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    const codexHome = join(tmp, 'codex-home');
+    const lockDir = join(tmp, 'locks');
+    const emptyPath = join(tmp, 'empty-path');
+    mkdirSync(join(hopperDir, 'handoffs'), { recursive: true });
+    mkdirSync(codexHome);
+    mkdirSync(lockDir);
+    mkdirSync(emptyPath);
+    for (const key of envKeys) process.env[key] = lockDir;
+    assert.equal(resolve(tmpdir()), resolve(lockDir), 'test lock location must be isolated');
+    const lockPath = join(lockDir, 'hopper-codex.lock');
+    const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === 'path') || 'PATH';
+
+    const { outputMdPath, logPath, result } = await runRunnerWithAdapter({
+      taskId: 'T-codex-spawn-error-cleanup',
+      hopperDir,
+      adapterName: 'codex',
+      adapterArgv: ['exec', '-'],
+      extraEnv: {
+        [pathKey]: emptyPath,
+        CODEX_HOME: codexHome,
+        HOPPER_DIR: hopperDir,
+        TMPDIR: lockDir,
+        TMP: lockDir,
+        TEMP: lockDir,
+      },
+    });
+
+    assert.equal(result.code, 1);
+    assert.equal(result.stderr.trim(), 'hopper-runner: adapter-unknown-failed');
+    const frontmatter = readFrontmatter(outputMdPath);
+    assert.equal(frontmatter.status, 'failed');
+    assert.equal(frontmatter.terminal_event_emitted, true);
+
+    const outputBefore = readFileSync(outputMdPath, 'utf8');
+    const logBefore = readFileSync(logPath, 'utf8');
+    const settledLogPath = join(tmp, 'settled-output.log');
+    renameSync(logPath, settledLogPath);
+    assert.equal(readFileSync(settledLogPath, 'utf8'), logBefore, 'both runner output FDs must be settled at terminalization');
+
+    assert.equal(existsSync(lockPath), false, 'spawn failure must not leave the codex serialization lock behind');
+    const releaseSecondLock = await acquireVendorLock('codex');
+    assert.equal(existsSync(lockPath), true, 'a second dispatch must acquire the lock immediately');
+    releaseSecondLock();
+    assert.equal(existsSync(lockPath), false, 'the second dispatch must release its lock without a stale timeout');
+    assert.equal(readFileSync(outputMdPath, 'utf8'), outputBefore, 'terminal output must not receive late writes');
+    assert.equal(readFileSync(settledLogPath, 'utf8'), logBefore, 'terminal log must not receive late writes');
+  } finally {
+    for (const key of envKeys) {
+      if (savedTemp[key] === undefined) delete process.env[key];
+      else process.env[key] = savedTemp[key];
+    }
     rmSync(tmp, { recursive: true, force: true });
   }
 });

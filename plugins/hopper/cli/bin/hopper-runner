@@ -635,17 +635,14 @@ async function main() {
     process.exit(status === 'done' ? 0 : (code === null ? 1 : (code === 0 ? 1 : code)));
   });
 
-  vendor.on('error', (err) => {
+  vendor.on('error', () => {
     clearTimeout(killTimer);
     if (idlePoll) clearInterval(idlePoll);
     if (bufferedLivenessTimer) clearInterval(bufferedLivenessTimer);
-    fail(outputMdPath, 'vendor spawn error', { taskId, hopperDir, adapterName, diagnosticCode: 'adapter-unknown-failed' });
+    releaseVendorLockOnce();
     try { closeSync(fdOut); } catch (_) {}
     try { closeSync(fdErr); } catch (_) {}
-  });
-
-  vendor.on('error', () => {
-    releaseVendorLockOnce();
+    fail(outputMdPath, 'vendor spawn error', { taskId, hopperDir, adapterName, diagnosticCode: 'adapter-unknown-failed' });
   });
 }
 
