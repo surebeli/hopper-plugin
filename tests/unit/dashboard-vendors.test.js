@@ -14,6 +14,24 @@ function closeServer(server) {
   return new Promise((resolveClose) => server.close(resolveClose));
 }
 
+const CLOSED_PROBE_KEYS = ['diagnosticCode', 'diagnosticState', 'status', 'vendor'].sort();
+const RAW_PROBE_SENTINELS = [
+  'RAW_STDOUT_PRIVATE',
+  'RAW_STDERR_PRIVATE',
+  'C:\\PRIVATE\\probe.log',
+  'sk-private-probe-token',
+  'PRIVATE_CHILD_ERROR',
+];
+
+function assertClosedProbePayload(payload, expected) {
+  assert.deepEqual(Object.keys(payload).sort(), CLOSED_PROBE_KEYS);
+  assert.deepEqual(payload, expected);
+  const serialized = JSON.stringify(payload);
+  for (const sentinel of RAW_PROBE_SENTINELS) {
+    assert.equal(serialized.includes(sentinel), false, `probe response leaked ${sentinel}`);
+  }
+}
+
 const V2_VENDOR_KEYS = [
   'binaryAvailability',
   'binaryBasename',
@@ -247,7 +265,8 @@ test('probe action returns 409 while same vendor is already running', async () =
       child.stdout = new PassThrough();
       child.stderr = new PassThrough();
       release = () => {
-        child.stdout.end('probe done');
+        child.stdout.end('RAW_STDOUT_PRIVATE C:\\PRIVATE\\probe.log sk-private-probe-token');
+        child.stderr.end('RAW_STDERR_PRIVATE');
         child.emit('exit', 0, null);
       };
       return child;
@@ -274,7 +293,9 @@ test('probe action returns 409 while same vendor is already running', async () =
 
     assert.equal(duplicate.status, 409);
     assert.equal(firstResponse.status, 200);
-    assert.equal((await firstResponse.json()).stdout, 'probe done');
+    assertClosedProbePayload(await firstResponse.json(), {
+      vendor: 'codex', status: 'done', diagnosticCode: 'none', diagnosticState: 'none',
+    });
   } finally {
     await closeServer(server);
   }
@@ -297,9 +318,6 @@ test('probe action times out and kills hung child', async () => {
       return child;
     },
   }));
-  app.use((err, _req, res, _next) => {
-    res.status(err.status || 500).json({ error: err.message });
-  });
   const server = app.listen(0, '127.0.0.1');
   await new Promise((resolveListen) => server.once('listening', resolveListen));
   const { port } = server.address();
@@ -313,8 +331,55 @@ test('probe action times out and kills hung child', async () => {
     const body = await response.json();
 
     assert.equal(response.status, 504);
-    assert.equal(body.error, 'probe timed out after 60s');
+    assertClosedProbePayload(body, {
+      vendor: 'codex', status: 'failed', diagnosticCode: 'probe-failed', diagnosticState: 'unavailable',
+    });
     assert.equal(killed, true);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test('probe action maps nonzero exit, child error, and malformed vendor to closed diagnostics', async () => {
+  const app = express();
+  app.use(express.json());
+  app.use('/api/action', createActionsRouter({
+    spawnProbeImpl: (vendor) => {
+      if (vendor === 'malformed') {
+        const err = new Error('PRIVATE_CHILD_ERROR C:\\PRIVATE\\probe.log sk-private-probe-token');
+        err.code = 'EINVAL';
+        throw err;
+      }
+      const child = new EventEmitter();
+      child.stdout = new PassThrough();
+      child.stderr = new PassThrough();
+      queueMicrotask(() => {
+        child.stdout.end('RAW_STDOUT_PRIVATE C:\\PRIVATE\\probe.log');
+        child.stderr.end('RAW_STDERR_PRIVATE sk-private-probe-token');
+        if (vendor === 'opencode') child.emit('error', new Error('PRIVATE_CHILD_ERROR'));
+        else child.emit('exit', 9, 'SIGPRIVATE');
+      });
+      return child;
+    },
+  }));
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolveListen) => server.once('listening', resolveListen));
+  const { port } = server.address();
+
+  try {
+    for (const vendor of ['kimi', 'opencode', 'malformed']) {
+      const response = await fetch(`http://127.0.0.1:${port}/api/action/probe`, {
+        body: JSON.stringify({ vendor }),
+        headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+      });
+      assert.equal(response.status, vendor === 'malformed' ? 400 : 500, vendor);
+      assertClosedProbePayload(await response.json(), {
+        vendor: vendor === 'malformed' ? 'unknown' : vendor,
+        status: 'failed', diagnosticCode: vendor === 'malformed' ? 'unknown' : 'probe-failed',
+        diagnosticState: vendor === 'malformed' ? 'unknown' : 'unavailable',
+      });
+    }
   } finally {
     await closeServer(server);
   }

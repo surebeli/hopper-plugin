@@ -70,6 +70,20 @@ function diagnosticState(code) {
   return 'degraded';
 }
 
+/**
+ * Closed diagnostic projection for the dashboard's explicit probe action.
+ * Child process errors, stream contents, and exit details remain local to the
+ * probe operation; this function intentionally returns only UI-safe states.
+ */
+export function projectProbeDiagnostic(outcome) {
+  const diagnosticCode = outcome === 'success'
+    ? 'none'
+    : outcome === 'malformed-vendor'
+      ? 'unknown'
+      : 'probe-failed';
+  return { diagnosticCode, diagnosticState: diagnosticState(diagnosticCode) };
+}
+
 function binaryAvailability(value) {
   return ['present', 'missing', 'unknown'].includes(value) ? value : 'unknown';
 }

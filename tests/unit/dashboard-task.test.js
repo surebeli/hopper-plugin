@@ -8,6 +8,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { QueryClient } from '@tanstack/react-query';
 import { createServer as createViteServer } from 'vite';
 import { createApp } from '../../dashboard/server/index.js';
+import { readTaskDetail } from '../../dashboard/server/routes/task.js';
 
 let vite;
 
@@ -28,7 +29,28 @@ after(async () => {
   await vite.close();
 });
 
-test('dashboard task route returns frontmatter and body', async () => {
+function assertNoRawTaskData(value, path = '$') {
+  const forbidden = [
+    'RAW_BODY_PRIVATE', 'RAW_PROGRESS_PRIVATE', 'RAW_LOG_PRIVATE', 'RAW_SIDECAR_PRIVATE',
+    'C:\\PRIVATE\\handoffs\\result.log', 'sk-private-task-token', 'PRIVATE_PROVIDER',
+  ];
+  if (typeof value === 'string') {
+    for (const sentinel of forbidden) assert.equal(value.includes(sentinel), false, `${path} leaked ${sentinel}`);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertNoRawTaskData(item, `${path}[${index}]`));
+    return;
+  }
+  if (value && typeof value === 'object') {
+    for (const [key, nested] of Object.entries(value)) {
+      assert.equal(['_body', 'body', 'frontmatter', 'log', 'progress_log', 'raw_log', 'message', 'vendor_session_id'].includes(key), false, `${path}.${key} is not public task data`);
+      assertNoRawTaskData(nested, `${path}.${key}`);
+    }
+  }
+}
+
+test('dashboard task route projects canonical attestation data without frontmatter or body escape', async () => {
   const root = mkdtempSync(join(tmpdir(), 'hopper-dashboard-task-'));
   const handoffs = join(root, '.hopper', 'handoffs');
   mkdirSync(handoffs, { recursive: true });
@@ -36,20 +58,60 @@ test('dashboard task route returns frontmatter and body', async () => {
     join(handoffs, 'T-WEB-04-output.md'),
     [
       '---',
-      'task_id: T-WEB-04',
-      'adapter: codex',
-      'status: done',
-      'pid: 123',
-      '---',
-      '# Output',
+       'task_id: T-WEB-04',
+       'adapter: codex',
+       'status: done',
+       'phase: done',
+       'terminal_event_emitted: true',
+       'requested_selector: safe-requested',
+       'effective_selector: safe-effective',
+       'effective_selector_source: user-argv',
+       'selector_kind: concrete',
+       'observed_models_json: "[\\"safe-observed\\"]"',
+       'resolution_status: exact',
+       'resolution_detail: concrete-runtime-exact',
+       'catalog_source_kind: static',
+       'catalog_source_label: C:\\PRIVATE\\handoffs\\result.log',
+       'binary_availability: present',
+       'binary_basename: codex',
+       'pid: 123',
+       'raw_log: C:\\PRIVATE\\handoffs\\result.log',
+       'prompt: RAW_BODY_PRIVATE sk-private-task-token',
+       'vendor_session_id: PRIVATE_PROVIDER',
+       '---',
+       '# Output RAW_BODY_PRIVATE',
       '',
       '| A | B |',
       '|---|---|',
       '| 1 | 2 |',
     ].join('\n'),
   );
+  writeFileSync(join(handoffs, 'T-WEB-04-progress.log'), [
+    JSON.stringify({ seq: 1, task_id: 'T-WEB-04', vendor: 'codex', phase: 'running', kind: 'progress', message: 'RAW_PROGRESS_PRIVATE', source: 'runner', terminal: false }),
+    JSON.stringify({ seq: 2, task_id: 'T-WEB-04', vendor: 'codex', phase: 'done', kind: 'terminal', message: 'RAW_LOG_PRIVATE', source: 'runner', terminal: true, status: 'done' }),
+  ].join('\n'));
 
-  const app = createApp({ dev: true, hopperDir: join(root, '.hopper') });
+  const hopperDir = join(root, '.hopper');
+  const expected = {
+    id: 'T-WEB-04',
+    status: 'done',
+    terminal: true,
+    selector: { requested: 'safe-requested', effective: 'safe-effective', kind: 'concrete', source: 'user-argv' },
+    observedModels: ['safe-observed'],
+    resolution: { status: 'exact', detail: 'concrete-runtime-exact' },
+    inventory: {
+      binaryAvailability: 'present', binaryBasename: 'codex', sourceKind: 'static',
+      sourceLabel: 'adapter-static-selectors', diagnosticCode: 'none', diagnosticState: 'none',
+    },
+    events: [
+      { seq: 1, phase: 'running', kind: 'progress', terminal: false, status: 'unknown' },
+      { seq: 2, phase: 'done', kind: 'terminal', terminal: true, status: 'done' },
+    ],
+  };
+  assert.deepEqual(readTaskDetail(hopperDir, 'T-WEB-04'), expected);
+  assertNoRawTaskData(expected);
+
+  const app = createApp({ dev: true, hopperDir });
   const server = app.listen(0, '127.0.0.1');
   await new Promise((resolveListen) => server.once('listening', resolveListen));
   const { port } = server.address();
@@ -58,10 +120,8 @@ test('dashboard task route returns frontmatter and body', async () => {
     const response = await fetch(`http://127.0.0.1:${port}/api/task/T-WEB-04`);
     const json = await response.json();
     assert.equal(response.status, 200);
-    assert.equal(json.id, 'T-WEB-04');
-    assert.equal(json.frontmatter.task_id, 'T-WEB-04');
-    assert.equal(json.frontmatter.pid, 123);
-    assert.match(json.body, /\| A \| B \|/);
+    assert.deepEqual(json, expected);
+    assertNoRawTaskData(json);
   } finally {
     await closeServer(server);
   }
@@ -71,11 +131,11 @@ test('dashboard task progress route returns limited progress events in append or
   const root = mkdtempSync(join(tmpdir(), 'hopper-dashboard-task-progress-'));
   const handoffs = join(root, '.hopper', 'handoffs');
   mkdirSync(handoffs, { recursive: true });
-  writeFileSync(join(handoffs, 'T-PROG-progress.log'), [
-    '{"seq":1,"task_id":"T-PROG","message":"one"}',
+    writeFileSync(join(handoffs, 'T-PROG-progress.log'), [
+    '{"seq":1,"task_id":"T-PROG","vendor":"codex","phase":"running","kind":"progress","message":"RAW_PROGRESS_PRIVATE","source":"runner","terminal":false}',
     'malformed json',
-    '{"seq":2,"task_id":"T-PROG","message":"two"}',
-    '{"seq":3,"task_id":"T-PROG","message":"three"}',
+    '{"seq":2,"task_id":"T-PROG","vendor":"codex","phase":"running","kind":"progress","message":"RAW_PROGRESS_PRIVATE","source":"runner","terminal":false}',
+    '{"seq":3,"task_id":"T-PROG","vendor":"codex","phase":"done","kind":"terminal","message":"RAW_PROGRESS_PRIVATE","source":"runner","terminal":true,"status":"done"}',
     '',
   ].join('\n'));
 
@@ -90,6 +150,7 @@ test('dashboard task progress route returns limited progress events in append or
     assert.equal(response.status, 200);
     assert.equal(json.id, 'T-PROG');
     assert.deepEqual(json.events.map((event) => event.seq), [2, 3]);
+    assertNoRawTaskData(json);
   } finally {
     await closeServer(server);
   }

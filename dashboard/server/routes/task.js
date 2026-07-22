@@ -1,8 +1,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { Router } from 'express';
-import { readFrontmatter } from '../../../cli/src/background.js';
-import { readProgressEvents } from '../../../cli/src/progress.js';
+import { readCanonicalAttestation } from '../../../cli/src/handoff-attestation.js';
 import { findHopperDir } from '../lib/hopper-dir.js';
 
 export function createTaskRouter({ hopperDir } = {}) {
@@ -25,8 +24,9 @@ export function createTaskRouter({ hopperDir } = {}) {
         return;
       }
       const requested = Number(req.query.limit);
-      const limit = Math.min(Number.isFinite(requested) && requested > 0 ? requested : 20, 200);
-      const events = readProgressEvents({ hopperDir: root, taskId: req.params.id, limit });
+      const limit = Math.min(Number.isFinite(requested) && requested > 0 ? requested : 20, 5);
+      const canonical = readCanonicalAttestation({ hopperDir: root, taskId: req.params.id });
+      const events = canonical.public.recentEvents.slice(-limit);
       res.json({ id: req.params.id, events });
     } catch (err) {
       next(err);
@@ -70,8 +70,18 @@ export function readTaskDetail(hopperDir, id) {
     err.code = 'ENOENT';
     throw err;
   }
-  const { _body = '', ...frontmatter } = readFrontmatter(path);
-  return { id, frontmatter, body: _body };
+  const canonical = readCanonicalAttestation({ hopperDir, taskId: id, outputMdPath: path });
+  const publicRecord = canonical.public;
+  return {
+    id: publicRecord.taskId,
+    status: publicRecord.displayStatus,
+    terminal: publicRecord.terminal,
+    selector: publicRecord.selector,
+    observedModels: publicRecord.observedModels,
+    resolution: publicRecord.resolution,
+    inventory: publicRecord.safeCatalog,
+    events: publicRecord.recentEvents,
+  };
 }
 
 function isSafeTaskId(id) {
