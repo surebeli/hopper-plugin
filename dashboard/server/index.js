@@ -7,7 +7,7 @@ import { createCostRouter } from './routes/cost.js';
 import { createSseHub, createSseRouter } from './events/sse.js';
 import { createWatcher } from './events/watcher.js';
 import { findHopperDir } from './lib/hopper-dir.js';
-import { createLogTailer, createProgressTailer } from './lib/tail.js';
+import { createProgressTailer } from './lib/tail.js';
 import { createQueueRouter } from './routes/queue.js';
 import { createTaskRouter } from './routes/task.js';
 import vendorsRouter from './routes/vendors.js';
@@ -45,13 +45,11 @@ export function parseServerArgs(argv = process.argv.slice(2)) {
   return opts;
 }
 
-export function createApp({ dev = false, distDir = DEFAULT_DIST, hopperDir = null, sseHub = createSseHub(), logTailer = null, progressTailer = null } = {}) {
+export function createApp({ dev = false, distDir = DEFAULT_DIST, hopperDir = null, sseHub = createSseHub(), progressTailer = null } = {}) {
   const app = express();
   const root = hopperDir || findHopperDir();
-  const tailer = logTailer || createLogTailer({ hopperDir: root });
   const progress = progressTailer || createProgressTailer({ hopperDir: root });
   app.locals.sseHub = sseHub;
-  app.locals.logTailer = tailer;
   app.locals.progressTailer = progress;
   app.disable('x-powered-by');
   app.use(express.json());
@@ -64,7 +62,7 @@ export function createApp({ dev = false, distDir = DEFAULT_DIST, hopperDir = nul
   app.use('/api/vendors', vendorsRouter);
   app.use('/api/cost', createCostRouter({ hopperDir: root }));
   app.use('/api/action', actionsRouter);
-  app.use('/events', createSseRouter(sseHub, { logTailer: tailer }));
+  app.use('/events', createSseRouter(sseHub));
 
   if (dev) {
     app.get('/', (_req, res) => res.type('text').send('hopper dashboard api online'));
@@ -106,7 +104,6 @@ export function startServer({
         watcher = watcherFactory({
           hopperDir: root,
           hub: app.locals.sseHub,
-          logTailer: app.locals.logTailer,
           progressTailer: app.locals.progressTailer,
         });
       }

@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
 import { createApp, startServer } from '../../dashboard/server/index.js';
 import { createSseHub } from '../../dashboard/server/events/sse.js';
-import { createWatcher, mapFileEvent, taskIdFromLog } from '../../dashboard/server/events/watcher.js';
+import { createWatcher, mapFileEvent } from '../../dashboard/server/events/watcher.js';
 
 function fakeRes() {
   const res = new EventEmitter();
@@ -57,12 +57,12 @@ test('SSE hub supports retry, multi-client publish, and close', () => {
   assert.equal(second.ended, true);
 });
 
-test('dashboard exposes seven SSE subscription routes', async () => {
+test('dashboard exposes only six closed SSE subscription routes', async () => {
   const app = createApp({ dev: true, sseHub: createSseHub({ heartbeatMs: 0 }) });
   const server = app.listen(0, '127.0.0.1');
   await new Promise((resolveListen) => server.once('listening', resolveListen));
   const { port } = server.address();
-  const paths = ['/events/queue', '/events/task/T-1', '/events/log/T-1', '/events/progress/T-1', '/events/cost', '/events/agents', '/events/liveness'];
+  const paths = ['/events/queue', '/events/task/T-1', '/events/progress/T-1', '/events/cost', '/events/agents', '/events/liveness'];
 
   try {
     for (const path of paths) {
@@ -74,13 +74,20 @@ test('dashboard exposes seven SSE subscription routes', async () => {
       assert.match(text, /event: connected/);
       assert.match(text, /retry: 1000/);
     }
+    const logController = new AbortController();
+    try {
+      const logResponse = await fetch(`http://127.0.0.1:${port}/events/log/T-1`, { signal: logController.signal });
+      assert.equal(logResponse.status, 404);
+    } finally {
+      logController.abort();
+    }
   } finally {
     await closeServer(server);
     app.locals.sseHub.close();
   }
 });
 
-test('progress SSE route streams events arrays to a client subscriber', async () => {
+test('progress SSE route streams only closed event arrays to a client subscriber', async () => {
   const hub = createSseHub({ heartbeatMs: 0 });
   const app = createApp({ dev: true, sseHub: hub });
   const server = app.listen(0, '127.0.0.1');
@@ -96,15 +103,15 @@ test('progress SSE route streams events arrays to a client subscriber', async ()
       text += new TextDecoder().decode((await reader.read()).value);
     }
     hub.publish('progress/T-PROG', 'progress', {
-      channel: 'progress/T-PROG',
-      taskId: 'T-PROG',
-      events: [{ seq: 1, task_id: 'T-PROG', message: 'queued' }],
+      events: [{ seq: 1, phase: 'running', kind: 'progress', terminal: false, status: 'unknown' }],
     });
     while (!text.includes('\nevent: progress\n')) {
       text += new TextDecoder().decode((await reader.read()).value);
     }
     const json = text.split('\nevent: progress\n')[1].match(/data: (.*)\n/)[1];
-    assert.deepEqual(JSON.parse(json).events.map((event) => event.seq), [1]);
+    assert.deepEqual(JSON.parse(json), {
+      events: [{ seq: 1, phase: 'running', kind: 'progress', terminal: false, status: 'unknown' }],
+    });
   } finally {
     controller.abort();
     await closeServer(server);
@@ -135,7 +142,6 @@ test('watcher maps chokidar events to SSE channels', async () => {
   assert.deepEqual(events.map((item) => item.channel), [
     'queue',
     'task/T-WEB-03',
-    'log/T-WEB-03',
     'task/T-WEB-04',
     'task/T-WEB-04',
     'task/T-WEB-04',
@@ -149,7 +155,7 @@ test('watcher maps chokidar events to SSE channels', async () => {
   assert.equal(mock.watcher.closed, true);
 });
 
-test('watcher maps progress logs to progress channel before output logs', () => {
+test('watcher maps progress logs and ignores output logs', () => {
   const hopperDir = 'F:\\repo\\.hopper';
   const progress = mapFileEvent(hopperDir, 'change', join(hopperDir, 'handoffs', 'T-PROG-progress.log'));
   const output = mapFileEvent(hopperDir, 'change', join(hopperDir, 'handoffs', 'T-PROG-output.log'));
@@ -157,13 +163,10 @@ test('watcher maps progress logs to progress channel before output logs', () => 
   assert.equal(progress.channel, 'progress/T-PROG');
   assert.equal(progress.event, 'progress');
   assert.equal(progress.payload.taskId, 'T-PROG');
-  assert.equal(output.channel, 'log/T-PROG');
-  assert.equal(output.event, 'log');
-  assert.equal(taskIdFromLog(join(hopperDir, 'handoffs', 'T-PROG-output.log')), 'T-PROG');
-  assert.equal(taskIdFromLog(join(hopperDir, 'handoffs', 'T-PROG-progress.log')), 'T-PROG-progress');
+  assert.equal(output, null);
 });
 
-test('watcher publishes parsed progress JSONL chunks from a dedicated tailer', async () => {
+test('watcher publishes only closed progress event fields from a dedicated tailer', async () => {
   const hopperDir = 'F:\\repo\\.hopper';
   const events = [];
   const mock = createMockWatch();
@@ -175,9 +178,9 @@ test('watcher publishes parsed progress JSONL chunks from a dedicated tailer', a
         offset: 0,
         nextOffset: 96,
         chunk: [
-          '{"seq":1,"task_id":"T-PROG","message":"one"}',
+          '{"seq":1,"task_id":"T-PROG","vendor":"codex","phase":"running","kind":"progress","terminal":false,"status":"in-progress","message":"RAW_PROGRESS_PRIVATE C:\\\\PRIVATE\\\\progress.log sk-private-token","source":"runner","exit_code":99,"duration_ms":42}',
           'not json',
-          '{"seq":2,"task_id":"T-PROG","terminal":true,"message":"done"}',
+          '{"seq":2,"task_id":"T-PROG","vendor":"codex","phase":"done","kind":"terminal","terminal":true,"status":"done","message":"RAW_TERMINAL_PRIVATE","source":"runner","signal":"SIGPRIVATE"}',
           '',
         ].join('\n'),
       };
@@ -196,7 +199,13 @@ test('watcher publishes parsed progress JSONL chunks from a dedicated tailer', a
   assert.equal(events.length, 1);
   assert.equal(events[0].channel, 'progress/T-PROG');
   assert.equal(events[0].event, 'progress');
-  assert.deepEqual(events[0].payload.events.map((event) => event.seq), [1, 2]);
+  assert.deepEqual(events[0].payload, {
+    events: [
+      { seq: 1, phase: 'running', kind: 'progress', terminal: false, status: 'in-progress' },
+      { seq: 2, phase: 'done', kind: 'terminal', terminal: true, status: 'done' },
+    ],
+  });
+  assert.doesNotMatch(JSON.stringify(events[0]), /RAW_|PRIVATE|sk-private|message|task_id|vendor|source|exit_code|duration_ms|signal|path|offset/);
   await watcher.close();
 });
 

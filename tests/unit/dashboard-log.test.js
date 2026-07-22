@@ -95,23 +95,20 @@ test('log tailer cold-start after rotate reads only the current file', () => {
   assert.equal(tailer.readNew('T-COLD').chunk, 'current\n');
 });
 
-test('SSE log route honors reconnect offset', async () => {
+test('dashboard does not expose raw log SSE', async () => {
   const hopperDir = makeHopper();
   writeFileSync(join(hopperDir, 'handoffs', 'T-SSE-output.log'), 'alpha\nbeta\n');
   const app = createApp({ dev: true, hopperDir });
   const server = app.listen(0, '127.0.0.1');
   await new Promise((resolveListen) => server.once('listening', resolveListen));
   const { port } = server.address();
+  const controller = new AbortController();
 
   try {
-    const first = await readFirstLogEvent(port, '/events/log/T-SSE?offset=0');
-    const second = await readFirstLogEvent(port, `/events/log/T-SSE?offset=${first.nextOffset}`);
-    assert.equal(first.chunk, 'alpha\nbeta\n');
-    assert.equal(second.chunk, '');
-    appendFileSync(join(hopperDir, 'handoffs', 'T-SSE-output.log'), 'gamma\n');
-    const third = await readFirstLogEvent(port, `/events/log/T-SSE?offset=${first.nextOffset}`);
-    assert.equal(third.chunk, 'gamma\n');
+    const response = await fetch(`http://127.0.0.1:${port}/events/log/T-SSE?offset=0`, { signal: controller.signal });
+    assert.equal(response.status, 404);
   } finally {
+    controller.abort();
     await closeServer(server);
     app.locals.sseHub.close();
   }
@@ -128,16 +125,3 @@ test('ansiToHtml maps minimal 16-color foregrounds and preserves state', () => {
   assert.match(stillRed, /text-primary[^>]*>green/);
   assert.match(stillRed, /text-warning[^>]*>yellow/);
 });
-
-async function readFirstLogEvent(port, path) {
-  const controller = new AbortController();
-  const response = await fetch(`http://127.0.0.1:${port}${path}`, { signal: controller.signal });
-  const reader = response.body.getReader();
-  let text = '';
-  while (!text.includes('\nevent: log\n')) {
-    text += new TextDecoder().decode((await reader.read()).value);
-  }
-  controller.abort();
-  const json = text.split('\nevent: log\n')[1].match(/data: (.*)\n/)[1];
-  return JSON.parse(json);
-}

@@ -52,17 +52,10 @@ export function createSseHub({ heartbeatMs = 15000 } = {}) {
   return { add, close, publish, send, size };
 }
 
-export function createSseRouter(hub, { logTailer = null } = {}) {
+export function createSseRouter(hub) {
   const router = Router();
   router.get('/queue', (_req, res) => hub.add('queue', res));
   router.get('/task/:id', (req, res) => hub.add(`task/${req.params.id}`, res));
-  router.get('/log/:id', (req, res) => {
-    hub.add(`log/${req.params.id}`, res);
-    if (logTailer) {
-      const offset = Number(req.query.offset || 0);
-      hub.send(res, 'log', logTailer.readFrom(req.params.id, offset));
-    }
-  });
   router.get('/progress/:id', (req, res) => hub.add(`progress/${req.params.id}`, res));
   router.get('/cost', (_req, res) => hub.add('cost', res));
   router.get('/agents', (_req, res) => hub.add('agents', res));

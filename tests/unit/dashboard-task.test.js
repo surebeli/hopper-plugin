@@ -1,6 +1,6 @@
 import { after, before, test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import React from 'react';
@@ -127,6 +127,61 @@ test('dashboard task route projects canonical attestation data without frontmatt
   }
 });
 
+test('dashboard task route closes hostile selector and observed-model value domains', () => {
+  const root = mkdtempSync(join(tmpdir(), 'hopper-dashboard-task-identifiers-'));
+  const handoffs = join(root, '.hopper', 'handoffs');
+  const oversized = 'x'.repeat(256);
+  const observedModels = [
+    'fable',
+    'deepseek-v4-pro',
+    'tokenbox/deepseek-v4-pro',
+    'C:\\PRIVATE\\model',
+    '/home/private/model',
+    'https://private.example/model',
+    'sk-private-secret-token',
+    `control\u0001model`,
+    oversized,
+  ];
+  mkdirSync(handoffs, { recursive: true });
+  writeFileSync(join(handoffs, 'T-IDENT-output.md'), [
+    '---',
+    'task_id: T-IDENT',
+    'adapter: claude',
+    'status: done',
+    'phase: done',
+    'terminal_event_emitted: true',
+    'requested_selector: C:\\PRIVATE\\model',
+    'effective_selector: https://private.example/model',
+    'effective_selector_source: user-argv',
+    'selector_kind: concrete',
+    `observed_models_json: ${JSON.stringify(JSON.stringify(observedModels))}`,
+    'resolution_status: exact',
+    'resolution_detail: concrete-runtime-exact',
+    '---',
+    'PRIVATE BODY',
+  ].join('\n'));
+
+  const detail = readTaskDetail(join(root, '.hopper'), 'T-IDENT');
+  assert.deepEqual(detail.selector, {
+    requested: null,
+    effective: null,
+    kind: 'concrete',
+    source: 'user-argv',
+  });
+  assert.deepEqual(detail.observedModels, [
+    'fable',
+    'deepseek-v4-pro',
+    'tokenbox/deepseek-v4-pro',
+  ]);
+  const serialized = JSON.stringify(detail);
+  for (const sentinel of [
+    'C:\\PRIVATE\\model', '/home/private/model', 'https://private.example/model',
+    'sk-private-secret-token', 'control\\u0001model', oversized,
+  ]) {
+    assert.equal(serialized.includes(sentinel), false, `task DTO leaked ${JSON.stringify(sentinel)}`);
+  }
+});
+
 test('dashboard task progress route returns limited progress events in append order', async () => {
   const root = mkdtempSync(join(tmpdir(), 'hopper-dashboard-task-progress-'));
   const handoffs = join(root, '.hopper', 'handoffs');
@@ -188,103 +243,64 @@ test('dashboard task progress route returns 404 when progress log is absent', as
   }
 });
 
-test('TaskDetailPanel renders 21 frontmatter fields with missing-value fallback', async () => {
-  const { FrontmatterTable, frontmatterFields } = await vite.ssrLoadModule('/src/components/TaskDrawer.tsx');
-  const detail = {
-    id: 'T-WEB-04',
-    frontmatter: {
-      task_id: 'T-WEB-04',
-      adapter: 'codex',
-      status: 'done',
-      pid: 123,
-      start_time: '2026-05-22T01:00:00+08:00',
-      exit_code: 0,
-      duration_ms: 42,
-      mode: 'background',
-      log: './T-WEB-04-output.log',
-      started_by_pid: 456,
-    },
-    body: '# Done',
-  };
-  const html = renderToStaticMarkup(React.createElement(FrontmatterTable, { frontmatter: detail.frontmatter }));
+test('dashboard client task surfaces consume only the closed DTO', () => {
+  const typesSource = readFileSync(resolve('dashboard/client/src/lib/types.ts'), 'utf8');
+  const drawerSource = readFileSync(resolve('dashboard/client/src/components/TaskDrawer.tsx'), 'utf8');
+  const progressSource = readFileSync(resolve('dashboard/client/src/components/ProgressTimeline.tsx'), 'utf8');
+  const taskDetail = typesSource.match(/export interface TaskDetail\s*{([\s\S]*?)\n}/)?.[1] || '';
+  const progressEvent = typesSource.match(/export type ProgressEvent\s*=\s*{([\s\S]*?)\n};/)?.[1] || '';
+  const probeResponse = typesSource.match(/export interface ProbeResponse\s*{([\s\S]*?)\n}/)?.[1] || '';
 
-  assert.equal(frontmatterFields.length, 21);
-  for (const field of frontmatterFields) assert.match(html, new RegExp(field));
-  assert.match(html, /T-WEB-04/);
-  assert.match(html, /2026-05-22T01:00:00\+08:00/);
-  assert.match(html, /—/);
-  assert.doesNotMatch(html, /undefined|null/);
-});
-
-test('baseFrontmatterFields declares v1 progress fields in stable order', async () => {
-  const { baseFrontmatterFields } = await vite.ssrLoadModule('/src/components/TaskDrawer.tsx');
-  assert.deepEqual(baseFrontmatterFields, [
-    'task_id', 'adapter', 'status', 'phase',
-    'pid', 'start_time', 'end_time', 'exit_code',
-    'duration_ms', 'mode', 'host_native', 'session_id',
-    'log', 'progress_log', 'raw_log',
-    'last_progress', 'last_progress_at', 'progress_seq',
-    'terminal_event_emitted', 'vendor_session_id',
-    'started_by_pid',
+  assert.match(taskDetail, /status:/);
+  assert.match(taskDetail, /selector:/);
+  assert.match(taskDetail, /observedModels:/);
+  assert.match(taskDetail, /resolution:/);
+  assert.match(taskDetail, /inventory:/);
+  assert.match(taskDetail, /events:/);
+  assert.doesNotMatch(taskDetail, /frontmatter|body|log|path/i);
+  assert.deepEqual([...progressEvent.matchAll(/^\s*(\w+)\??:/gm)].map((match) => match[1]), [
+    'seq', 'phase', 'kind', 'terminal', 'status',
   ]);
+  assert.deepEqual([...probeResponse.matchAll(/^\s*(\w+)\??:/gm)].map((match) => match[1]), [
+    'vendor', 'status', 'diagnosticCode', 'diagnosticState',
+  ]);
+  assert.doesNotMatch(drawerSource, /LiveLog|frontmatter|\.body|renderMarkdown|dangerouslySetInnerHTML/);
+  assert.doesNotMatch(progressSource, /\.message|\.ts|exit_code|duration_ms|adapter_status|timed_out/);
+  assert.equal(existsSync(resolve('dashboard/client/src/components/LiveLog.tsx')), false);
 });
 
-test('TaskStatusStrip renders phase, last progress, terminal flag, and missing fallback', async () => {
-  const { TaskStatusStrip } = await vite.ssrLoadModule('/src/components/TaskDrawer.tsx');
-  const html = renderToStaticMarkup(React.createElement(TaskStatusStrip, {
-    frontmatter: {
-      status: 'done',
-      phase: 'done',
-      last_progress: 'Task completed successfully.',
-      last_progress_at: new Date(Date.now() - 2000).toISOString(),
-      terminal_event_emitted: true,
-    },
+test('TaskDetailPanel renders only safe Details and Progress tabs', async () => {
+  const { TaskDetailPanel } = await vite.ssrLoadModule('/src/components/TaskDrawer.tsx');
+  const html = renderToStaticMarkup(React.createElement(TaskDetailPanel, {
+    detail: taskDetailFixture(),
+    id: 'T-PROG',
   }));
-  const fallback = renderToStaticMarkup(React.createElement(TaskStatusStrip, { frontmatter: {} }));
+
+  assert.match(html, /Details/);
+  assert.match(html, /Progress/);
+  assert.match(html, /tokenbox\/deepseek-v4-pro/);
+  assert.match(html, /fable/);
+  assert.match(html, /concrete-runtime-exact/);
+  assert.doesNotMatch(html, /Output|Live log|Frontmatter|RAW_|PRIVATE|undefined|null/);
+});
+
+test('TaskStatusStrip renders closed status and terminal state with fallbacks', async () => {
+  const { TaskStatusStrip } = await vite.ssrLoadModule('/src/components/TaskDrawer.tsx');
+  const html = renderToStaticMarkup(React.createElement(TaskStatusStrip, { detail: taskDetailFixture() }));
+  const fallback = renderToStaticMarkup(React.createElement(TaskStatusStrip, {}));
 
   assert.match(html, /Status/);
   assert.match(html, /done/);
-  assert.match(html, /Phase/);
-  assert.match(html, /Task completed successfully\./);
   assert.match(html, /Terminal/);
   assert.match(html, /yes/);
   assert.match(fallback, /—/);
   assert.doesNotMatch(fallback, /undefined|null/);
 });
 
-test('TaskStatusStrip title uses raw last_progress text', async () => {
-  const { TaskStatusStrip } = await vite.ssrLoadModule('/src/components/TaskDrawer.tsx');
-  const rawLast = 'x'.repeat(120);
-  const html = renderToStaticMarkup(React.createElement(TaskStatusStrip, {
-    frontmatter: {
-      status: 'in-progress',
-      last_progress: rawLast,
-    },
-  }));
-
-  assert.match(html, new RegExp(`title="${rawLast}"`));
-  assert.doesNotMatch(html, new RegExp(`title="${rawLast.slice(0, 79)}…"`));
-});
-
-
-test('TaskDetailPanel includes Progress tab between Output and Live log', async () => {
-  const { TaskDetailPanel } = await vite.ssrLoadModule('/src/components/TaskDrawer.tsx');
-  const html = renderToStaticMarkup(React.createElement(TaskDetailPanel, {
-    detail: { id: 'T-PROG', frontmatter: {}, body: '# Done' },
-    id: 'T-PROG',
-  }));
-
-  assert.match(html, /Output/);
-  assert.match(html, /Progress/);
-  assert.match(html, /Live log/);
-  assert.ok(html.indexOf('Output') < html.indexOf('Progress'));
-  assert.ok(html.indexOf('Progress') < html.indexOf('Live log'));
-});
-
 test('Progress tab content owns overflow for long timelines', async () => {
   const { TaskDetailPanel } = await vite.ssrLoadModule('/src/components/TaskDrawer.tsx');
   const html = renderToStaticMarkup(React.createElement(TaskDetailPanel, {
-    detail: { id: 'T-PROG', frontmatter: {}, body: '# Done' },
+    detail: taskDetailFixture(),
     id: 'T-PROG',
   }));
 
@@ -294,12 +310,12 @@ test('Progress tab content owns overflow for long timelines', async () => {
 test('Progress timeline rows limit to five events and pin terminal event first', async () => {
   const { ProgressTimelineRows } = await vite.ssrLoadModule('/src/components/ProgressTimeline.tsx');
   const events = [
-    progressEvent(1, 'starting', 'lifecycle', 'queued'),
-    progressEvent(2, 'running', 'lifecycle', 'read files'),
-    progressEvent(3, 'running', 'finding', 'found path'),
-    progressEvent(4, 'running', 'command', 'ran tests'),
-    progressEvent(5, 'running', 'file', 'edited file'),
-    progressEvent(6, 'done', 'terminal', 'Task completed successfully.', true, { status: 'done', exit_code: 0, duration_ms: 42 }),
+    progressEvent(1, 'starting', 'lifecycle'),
+    progressEvent(2, 'running', 'lifecycle'),
+    progressEvent(3, 'running', 'finding'),
+    progressEvent(4, 'running', 'command'),
+    progressEvent(5, 'running', 'file'),
+    progressEvent(6, 'done', 'terminal', true, 'done'),
   ];
   const html = renderToStaticMarkup(React.createElement(ProgressTimelineRows, { events }));
 
@@ -309,20 +325,8 @@ test('Progress timeline rows limit to five events and pin terminal event first',
   assert.equal((html.match(/role="listitem"/g) || []).length, 5);
   assert.ok(html.indexOf('#6') < html.indexOf('#5'));
   assert.match(html, /done\/terminal/);
-  assert.match(html, /status=done/);
-  assert.match(html, /exit_code=0/);
-  assert.match(html, /duration_ms=42/);
-});
-
-test('Progress timeline rows truncate long messages and keep full title', async () => {
-  const { ProgressTimelineRows } = await vite.ssrLoadModule('/src/components/ProgressTimeline.tsx');
-  const longMessage = 'x'.repeat(160);
-  const html = renderToStaticMarkup(React.createElement(ProgressTimelineRows, {
-    events: [progressEvent(1, 'running', 'lifecycle', longMessage)],
-  }));
-
-  assert.match(html, new RegExp(`title="${longMessage}"`));
-  assert.doesNotMatch(html, new RegExp(`>${longMessage}<`));
+  assert.match(html, /done/);
+  assert.doesNotMatch(html, /RAW_PROGRESS_PRIVATE|message|exit_code|duration_ms|adapter_status|timed_out/);
 });
 
 test('Progress SSE payload merge updates query cache and dedups by seq', async () => {
@@ -330,64 +334,52 @@ test('Progress SSE payload merge updates query cache and dedups by seq', async (
   const client = new QueryClient();
   client.setQueryData(taskProgressKey('T-PROG'), {
     id: 'T-PROG',
-    events: [progressEvent(1, 'running', 'lifecycle', 'one'), progressEvent(2, 'running', 'lifecycle', 'two')],
+    events: [progressEvent(1, 'running', 'lifecycle'), progressEvent(2, 'running', 'lifecycle')],
   });
 
   client.setQueryData(taskProgressKey('T-PROG'), (prev) => mergeProgressEvents('T-PROG', prev, [
-    progressEvent(2, 'running', 'lifecycle', 'two updated'),
-    progressEvent(3, 'done', 'terminal', 'done', true),
+    progressEvent(2, 'finalizing', 'lifecycle'),
+    progressEvent(3, 'done', 'terminal', true, 'done'),
   ]));
 
   const cache = client.getQueryData(taskProgressKey('T-PROG'));
   assert.deepEqual(cache.events.map((event) => event.seq), [1, 2, 3]);
-  assert.equal(cache.events[1].message, 'two updated');
+  assert.equal(cache.events[1].phase, 'finalizing');
 });
 
-test('FrontmatterTable renders sidequest dynamic fields after base fields', async () => {
-  const { FrontmatterTable, effectiveFrontmatterFields } = await vite.ssrLoadModule('/src/components/TaskDrawer.tsx');
-  const frontmatter = {
-    task_id: 'T-WEB-08',
+function taskDetailFixture() {
+  return {
+    id: 'T-PROG',
     status: 'done',
-    spec_version: '2.1.3',
-    review_status: 'pending',
+    terminal: true,
+    selector: { requested: 'fable', effective: 'tokenbox/deepseek-v4-pro', kind: 'concrete', source: 'user-argv' },
+    observedModels: ['fable', 'deepseek-v4-pro'],
+    resolution: { status: 'exact', detail: 'concrete-runtime-exact' },
+    inventory: {
+      binaryAvailability: 'present', binaryBasename: 'claude', sourceKind: 'static',
+      sourceLabel: 'adapter-static-selectors', diagnosticCode: 'none', diagnosticState: 'none',
+    },
+    events: [],
   };
-  const fields = effectiveFrontmatterFields(frontmatter);
-  const html = renderToStaticMarkup(React.createElement(FrontmatterTable, { frontmatter }));
+}
 
-  assert.equal(fields.includes('spec_version'), true);
-  assert.equal(fields.includes('review_status'), true);
-  assert.equal(fields.indexOf('spec_version') > fields.indexOf('started_by_pid'), true);
-  assert.match(html, /spec_version/);
-  assert.match(html, /review_status/);
-  assert.match(html, /2\.1\.3/);
-});
-
-function progressEvent(seq, phase, kind, message, terminal = false, extra = {}) {
+function progressEvent(seq, phase, kind, terminal = false, status = 'unknown') {
   return {
     seq,
-    ts: new Date(2026, 4, 22, 12, 0, seq).toISOString(),
-    task_id: 'T-PROG',
-    vendor: 'codex',
     phase,
     kind,
-    message,
-    source: 'runner',
     terminal,
-    ...extra,
+    status,
+    // Hostile legacy extras must be ignored by the closed client DTO.
+    ts: new Date(2026, 4, 22, 12, 0, seq).toISOString(),
+    message: 'RAW_PROGRESS_PRIVATE',
+    exit_code: 99,
   };
 }
 
 function taskProgressKey(id) {
   return ['task', id, 'progress'];
 }
-
-test('LiveLog reconnect delay uses exponential backoff with cap', async () => {
-  const { logReconnectDelay } = await vite.ssrLoadModule('/src/components/LiveLog.tsx');
-  assert.equal(logReconnectDelay(0), 500);
-  assert.equal(logReconnectDelay(1), 1000);
-  assert.equal(logReconnectDelay(6), 30000);
-  assert.equal(logReconnectDelay(20), 30000);
-});
 
 test('probeErrorMessage formats vendor mutation failures', async () => {
   const { probeErrorMessage } = await vite.ssrLoadModule('/src/routes/VendorsRoute.tsx');
@@ -403,27 +395,4 @@ test('ErrorBoundary exposes dashboard error copy', async () => {
   assert.equal(copy.title, 'Dashboard error');
   assert.equal(copy.message, 'boom');
   assert.equal(copy.action, 'Reload page');
-});
-
-test('renderMarkdown outputs table, code line numbers, list, and link markup', async () => {
-  const { renderMarkdown } = await vite.ssrLoadModule('/src/components/TaskDrawer.tsx');
-  const html = renderMarkdown([
-    '| A | B |',
-    '|---|---|',
-    '| 1 | 2 |',
-    '',
-    '- item',
-    '',
-    '[link](https://example.com)',
-    '',
-    '```js',
-    'const value = 1;',
-    '```',
-  ].join('\n'));
-
-  assert.match(html, /<table>/);
-  assert.match(html, /<ul>/);
-  assert.match(html, /href="https:\/\/example.com"/);
-  assert.match(html, /hljs-line-number/);
-  assert.match(html, /const/);
 });

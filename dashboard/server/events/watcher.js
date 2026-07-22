@@ -1,10 +1,10 @@
 import chokidar from 'chokidar';
 import { basename, join, relative } from 'node:path';
+import { projectPublicProgressEvents } from '../routes/task.js';
 
 export function createWatcher({
   hopperDir,
   hub,
-  logTailer = null,
   progressTailer = null,
   livenessIntervalMs = 5000,
   watch = chokidar.watch,
@@ -20,16 +20,11 @@ export function createWatcher({
   watcher.on('all', (type, filePath) => {
     const mapped = mapFileEvent(hopperDir, type, filePath);
     if (!mapped) return;
-    if (mapped.event === 'log' && logTailer) {
-      const chunk = logTailer.readNew(mapped.payload.taskId);
-      if (chunk.chunk) hub.publish(mapped.channel, 'log', { ...mapped.payload, ...chunk });
-      return;
-    }
     if (mapped.event === 'progress' && progressTailer) {
       const chunk = progressTailer.readNew(mapped.payload.taskId);
       if (chunk.chunk) {
-        const events = parseProgressEvents(chunk.chunk);
-        if (events.length) hub.publish(mapped.channel, 'progress', { ...mapped.payload, ...chunk, events });
+        const events = projectPublicProgressEvents(parseProgressEvents(chunk.chunk));
+        if (events.length) hub.publish(mapped.channel, 'progress', { events });
       }
       return;
     }
@@ -53,7 +48,7 @@ export function watchTargets(hopperDir) {
   return [
     join(hopperDir, 'queue.md'),
     join(hopperDir, 'handoffs', '*.md'),
-    join(hopperDir, 'handoffs', '*.log'),
+    join(hopperDir, 'handoffs', '*-progress.log'),
     join(hopperDir, 'COST-LOG.md'),
     join(hopperDir, 'AGENTS.md'),
   ];
@@ -71,10 +66,6 @@ export function mapFileEvent(hopperDir, type, filePath) {
   if (rel.startsWith('handoffs/') && rel.endsWith('-progress.log')) {
     const taskId = basename(filePath, '-progress.log');
     return withChannel(`progress/${taskId}`, 'progress', { ...payload, taskId });
-  }
-  if (rel.startsWith('handoffs/') && rel.endsWith('-output.log')) {
-    const taskId = taskIdFromLog(filePath);
-    return withChannel(`log/${taskId}`, 'log', { ...payload, taskId });
   }
   return null;
 }
@@ -94,11 +85,6 @@ function taskIdFromHandoff(filePath) {
     .replace(/-REVIEW-.+$/, '')
     .replace(/-leader-feedback$/, '')
     .replace(/-output$/, '');
-}
-
-/** Only valid for *-output.log paths; mapFileEvent handles *-progress.log before calling this. */
-export function taskIdFromLog(filePath) {
-  return basename(filePath, '.log').replace(/-output$/, '');
 }
 
 function withChannel(channel, event, payload) {

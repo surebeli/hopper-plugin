@@ -10,30 +10,40 @@ export interface Task {
   vendor: string | null;
 }
 
-export type FrontmatterValue = string | number | boolean | null;
-
 export interface TaskDetail {
   id: string;
-  frontmatter: Record<string, FrontmatterValue>;
-  body: string;
+  status: TaskDetailStatus;
+  terminal: boolean;
+  selector: {
+    requested: string | null;
+    effective: string | null;
+    kind: 'alias' | 'concrete' | 'auto' | 'unknown';
+    source: 'user-argv' | 'policy' | 'vendor-default';
+  };
+  observedModels: string[];
+  resolution: {
+    status: 'exact' | 'mismatch' | 'alias-resolved' | 'config-only' | 'unverified';
+    detail: string | null;
+  };
+  inventory: {
+    binaryAvailability: VendorBinaryAvailability;
+    binaryBasename: VendorBinaryBasename;
+    sourceKind: VendorSourceKind;
+    sourceLabel: VendorSourceLabel;
+    diagnosticCode: VendorDiagnosticCode;
+    diagnosticState: VendorDiagnosticState;
+  };
+  events: ProgressEvent[];
 }
+
+export type TaskDetailStatus = TaskStatus | 'cancelled' | 'orphaned' | 'timeout' | 'partial' | 'finalizing' | 'unknown';
 
 export type ProgressEvent = {
   seq: number;
-  ts: string;
-  task_id: string;
-  vendor: string;
   phase: string;
   kind: string;
-  message: string;
-  source: string;
   terminal: boolean;
-  status?: string;
-  duration_ms?: number;
-  exit_code?: number;
-  signal?: string | null;
-  adapter_status?: string;
-  timed_out?: boolean | null;
+  status: string;
 };
 
 export interface TaskProgressResponse {
@@ -129,11 +139,9 @@ export function normalizeVendorDisplay(vendor: Partial<Vendor> | null | undefine
 
 export interface ProbeResponse {
   vendor: string;
-  status: 'done';
-  exitCode: number;
-  signal: string | null;
-  stdout: string;
-  stderr: string;
+  status: 'done' | 'failed';
+  diagnosticCode: VendorDiagnosticCode;
+  diagnosticState: VendorDiagnosticState;
 }
 
 export interface CostRow {
