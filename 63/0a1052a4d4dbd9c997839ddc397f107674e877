@@ -1,0 +1,39 @@
+cli/bin/hopper-dispatch
+  0000019f87f129aa 1-2149
+cli/bin/hopper-runner
+  0000019f87f129aa 1-618
+cli/src/vendors/kimi.js
+  0000019f87f129aa 1-168
+plugins/hopper/cli/bin/hopper-dispatch
+  0000019f87f129aa 1-2149
+plugins/hopper/cli/bin/hopper-runner
+  0000019f87f129aa 1-618
+plugins/hopper/cli/src/vendors/kimi.js
+  0000019f87f129aa 1-168
+tests/unit/dispatch-flags.test.js
+  0000019f87f129aa 1-521
+tests/unit/lifecycle-regression.test.js
+  0000019f87f129aa 1-405
+tests/unit/progress.test.js
+  0000019f87f129aa 1-235
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "630a1052a4d4dbd9c997839ddc397f107674e877",
+  "prompts": {
+    "0000019f87f129aa": {
+      "agent_id": {
+        "tool": "codex",
+        "model": "gpt-5.6-sol",
+        "id": "ai-thread-codex-gpt-5.6-sol-1784692156842"
+      },
+      "human_author": "litianyi",
+      "messages": [],
+      "total_additions": 7031,
+      "total_deletions": 0,
+      "accepted_lines": 7031,
+      "overriden_lines": 0
+    }
+  }
+}
