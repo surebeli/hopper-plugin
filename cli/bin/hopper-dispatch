@@ -57,7 +57,7 @@ import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
-const VERSION = '0.34.0';
+const VERSION = '0.34.1';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -998,6 +998,19 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {}, vend
   }
   const effectiveAdapterOpts = resolveAdapterOptsForTask(resolved, adapterOpts);
 
+  const adapter = getAdapter(resolved.vendor);
+  if (!adapter) {
+    bail(`Error: unknown vendor '${resolved.vendor}'`, 1);
+  }
+  try {
+    // Keep the Kimi fail-closed contract ahead of optional process-guard setup.
+    // Otherwise Windows/Linux report the unavailable macOS backend (exit 1) for
+    // a Kimi read-only request rather than the canonical no-spawn exit 2.
+    assertAdapterSandboxEnforceable(adapter, effectiveAdapterOpts);
+  } catch (err) {
+    bail(`Error: ${err.message}`, err.exitCode || 2);
+  }
+
   try {
     prepareSubjectRootGuard({ subjectRoot: effectiveAdapterOpts.subjectRoot, sandbox: effectiveAdapterOpts.sandbox });
   } catch (err) {
@@ -1014,16 +1027,6 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {}, vend
   // helper as sync dispatch; advisory only, never blocks.
   if (effectiveAdapterOpts.model) {
     try { warnIfModelUnknown(resolved.vendor, effectiveAdapterOpts.model); } catch (_) { /* never block */ }
-  }
-
-  const adapter = getAdapter(resolved.vendor);
-  if (!adapter) {
-    bail(`Error: unknown vendor '${resolved.vendor}'`, 1);
-  }
-  try {
-    assertAdapterSandboxEnforceable(adapter, effectiveAdapterOpts);
-  } catch (err) {
-    bail(`Error: ${err.message}`, err.exitCode || 2);
   }
 
   // Enforce host != vendor across all host adapters.

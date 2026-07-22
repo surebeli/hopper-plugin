@@ -484,6 +484,38 @@ test('Kimi fails closed before any sync or background spawn when read-only is ef
   }
 });
 
+test('Kimi read-only refusal explains that --write is not a permission override and wins over an unavailable subject-root backend', async () => {
+  const { root, hopperDir } = makeMinimalHopper('kimi', {
+    brief: 'read-only task: inspect routing',
+    taskType: 'code-impl',
+  });
+  const binDir = join(root, 'fake-bin');
+  const counterPath = join(root, 'kimi-spawn-count.txt');
+  installFakeKimi(binDir, counterPath);
+  try {
+    const r = runCli(['T-SAME', '--background', '--subject-root', root], {
+      hopperDir,
+      env: fakeKimiEnv(binDir, counterPath),
+    });
+
+    assert.equal(r.exitCode, 2, 'the Kimi read-only gate must run before any unsupported subject-root backend check');
+    assert.match(r.stderr, /E_KIMI_READ_ONLY_UNENFORCEABLE/);
+    assert.match(r.stderr, /Kimi .*no .*permission.*sandbox flag/i);
+    assert.match(r.stderr, /--write.*Hopper-only output-artifact option.*not .*Kimi/i);
+    assert.match(r.stderr, /does not change.*vendor permission/i);
+    assert.match(r.stderr, /non-read-only sandbox.*unverified.*Kimi prompt-mode permission/i);
+    assert.match(r.stderr, /read-only lane/i);
+    assert.match(r.stderr, /enforceable read-only vendor.*proven external process guard/i);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(existsSync(counterPath), false, 'fake Kimi must not spawn');
+    assert.equal(existsSync(join(hopperDir, 'handoffs', 'T-SAME-output.md')), false, 'no output artifact');
+    assert.equal(existsSync(join(hopperDir, 'handoffs', 'T-SAME-output.log')), false, 'no raw log artifact');
+    assert.equal(existsSync(join(hopperDir, 'handoffs', 'T-SAME-progress.log')), false, 'no progress artifact');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('CLI help mentions --model, --reasoning, --sandbox, and --subject-root', () => {
   const r = runCli(['--help']);
   assert.equal(r.exitCode, 0);

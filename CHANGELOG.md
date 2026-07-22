@@ -19,6 +19,17 @@ convention: any user-observable behavior change (new capability, fixed defect,
 changed default) bumps minor; patch is reserved for the rare non-functional
 tweak.
 
+## [0.34.1] - 2026-07-22
+
+### Fixed
+
+- **Corrected Kimi's read-only fail-closed order and diagnostic.** Kimi prompt
+  mode still has no permission or sandbox flag that can enforce read-only;
+  Hopper now returns `E_KIMI_READ_ONLY_UNENFORCEABLE` before optional
+  subject-root setup, with no vendor process, external guard, or output
+  artifact started. `--write` controls only Hopper's synchronous `output.md`
+  artifact and does not change Kimi or any vendor's permissions.
+
 ## [0.34.0] - 2026-07-22
 
 ### Fixed

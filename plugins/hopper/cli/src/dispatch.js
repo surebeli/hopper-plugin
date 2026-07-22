@@ -397,7 +397,12 @@ export function assertAdapterSandboxEnforceable(adapter, effectiveAdapterOpts) {
   const readOnlySandbox = adapter?.capabilities?.features?.permissions?.readOnlySandbox;
   if (adapter?.name !== 'kimi' || effectiveAdapterOpts?.sandbox !== 'read-only' || readOnlySandbox?.enforceable !== false) return;
   const failureCode = readOnlySandbox.failureCode;
-  const error = new Error(`${failureCode}: Kimi prompt mode cannot enforce a read-only sandbox.`);
+  const error = new Error(
+    `${failureCode}: Kimi prompt mode has no permission or sandbox flag that can enforce read-only. `
+    + '`--write` is a Hopper-only output-artifact option, not a Kimi launch or permission flag; it does not change vendor permissions or make read-only enforceable. '
+    + 'An explicit non-read-only sandbox would instead run with unverified Kimi prompt-mode permissions and is incompatible with a read-only lane. '
+    + 'Use an enforceable read-only vendor, or only a Hopper-supported proven external process guard. Kimi is rejected before any vendor process or external guard can run.',
+  );
   error.code = failureCode;
   error.exitCode = 2;
   throw error;
