@@ -1,0 +1,77 @@
+cli/bin/hopper-dispatch
+  0000019f889fcdbb 1-2094
+cli/bin/hopper-runner
+  0000019f889fcdbb 1-632
+cli/src/background.js
+  0000019f889fcdbb 1-813
+cli/src/handoff-attestation.js
+  0000019f889fcdbb 1-583
+cli/src/output.js
+  0000019f889fcdbb 1-436
+cli/src/progress.js
+  0000019f889fcdbb 1-177
+cli/src/public-identifiers.js
+  0000019f889fcdbb 1-65
+cli/src/validation.js
+  0000019f889fcdbb 1-300
+dashboard/README.md
+  0000019f889fcdbb 1-300
+dashboard/client/src/lib/types.ts
+  0000019f889fcdbb 1-180
+dashboard/server/events/watcher.js
+  0000019f889fcdbb 1-113
+dashboard/server/routes/actions.js
+  0000019f889fcdbb 1-138
+dashboard/server/routes/task.js
+  0000019f889fcdbb 1-121
+plugins/hopper/cli/bin/hopper-dispatch
+  0000019f889fcdbb 1-2094
+plugins/hopper/cli/bin/hopper-runner
+  0000019f889fcdbb 1-632
+plugins/hopper/cli/src/background.js
+  0000019f889fcdbb 1-813
+plugins/hopper/cli/src/handoff-attestation.js
+  0000019f889fcdbb 1-583
+plugins/hopper/cli/src/output.js
+  0000019f889fcdbb 1-436
+plugins/hopper/cli/src/progress.js
+  0000019f889fcdbb 1-177
+plugins/hopper/cli/src/public-identifiers.js
+  0000019f889fcdbb 1-65
+plugins/hopper/cli/src/validation.js
+  0000019f889fcdbb 1-300
+tests/unit/dashboard-sse.test.js
+  0000019f889fcdbb 1-256
+tests/unit/dashboard-task.test.js
+  0000019f889fcdbb 1-518
+tests/unit/dashboard-vendors.test.js
+  0000019f889fcdbb 1-591
+tests/unit/handoff-attestation.test.js
+  0000019f889fcdbb 1-470
+tests/unit/output-writer.test.js
+  0000019f889fcdbb 1-556
+tests/unit/progress-watch.test.js
+  0000019f889fcdbb 1-508
+tests/unit/public-identifiers.test.js
+  0000019f889fcdbb 1-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "f5608807a87d62e8eaf45feeb457cde48c18b7b0",
+  "prompts": {
+    "0000019f889fcdbb": {
+      "agent_id": {
+        "id": "ai-thread-codex-gpt-5.6-sol-1784703602107",
+        "model": "gpt-5.6-sol",
+        "tool": "codex"
+      },
+      "human_author": "litianyi",
+      "messages": [],
+      "total_additions": 13992,
+      "total_deletions": 0,
+      "accepted_lines": 13992,
+      "overriden_lines": 0
+    }
+  }
+}
