@@ -48,7 +48,7 @@ function writeTask(hopperDir, taskId, overrides = {}) {
   return path;
 }
 
-function markTerminal(hopperDir, taskId, status = 'done', seq = 1) {
+function markTerminal(hopperDir, taskId, status = 'done', seq = 1, overrides = {}) {
   const path = outputPath(hopperDir, taskId);
   const fm = readFrontmatter(path);
   writeFrontmatter(path, {
@@ -62,6 +62,7 @@ function markTerminal(hopperDir, taskId, status = 'done', seq = 1) {
     progress_seq: seq,
     terminal_event_emitted: true,
     _body: fm._body || '',
+    ...overrides,
   });
 }
 
@@ -238,9 +239,9 @@ test('two --watch-events subscribers both receive terminal event JSONL', async (
       assert.equal(event.phase, 'done');
       assert.equal(event.vendor, 'codex');
       assert.equal(event.seq, 1);
-      assert.match(event.output_md, /T-WATCH-TWO-output\.md$/);
-      assert.match(event.progress_log, /T-WATCH-TWO-progress\.log$/);
-      assert.match(event.raw_log, /T-WATCH-TWO-output\.log$/);
+      assert.match(event.at, /^\d{4}-\d{2}-\d{2}T/);
+      assert.deepEqual(Object.keys(event).sort(), ['adapter_diagnostic_code', 'at', 'phase', 'seq', 'status', 'task_id', 'type', 'vendor']);
+      assert.equal(event.adapter_diagnostic_code, 'none');
     }
     assert.equal(await waitForExit(first.child), 0, first.stderr());
     assert.equal(await waitForExit(second.child), 0, second.stderr());
@@ -427,12 +428,27 @@ test('HOPPER_NOTIFY=0 keeps watcher JSONL but skips notifier spawn', async () =>
   }
 });
 
-test('--watch-events implementation uses fs.watchFile over output.md only', () => {
-  const source = readFileSync(DISPATCH, 'utf-8');
-  assert.match(source, /watchFile\(/);
-  assert.doesNotMatch(source, /fs\.watch\(/);
-  assert.doesNotMatch(source, /chokidar/i);
-  assert.doesNotMatch(source, /watchFile\([^)]*progress/i);
+test('--watch renders only canonical status data and never raw log bytes', () => {
+  const { tmp, hopperDir } = setup();
+  const taskId = 'T-WATCH-NO-RAW';
+  const rawSentinel = 'WATCH_RAW_SECRET_C:\\private\\output.log';
+  try {
+    writeTask(hopperDir, taskId, {
+      status: 'failed', phase: 'failed', terminal_event_emitted: true,
+      adapter_diagnostic_code: 'adapter-auth-failed',
+    });
+    writeFileSync(join(hopperDir, 'handoffs', `${taskId}-output.log`), rawSentinel, 'utf-8');
+    const result = spawnSync(process.execPath, [DISPATCH, '--watch', taskId], {
+      env: { ...process.env, HOPPER_NOTIFY: '0', HOPPER_DIR: hopperDir },
+      encoding: 'utf-8', timeout: 2000,
+    });
+    assert.equal(result.status, 1, result.error?.message || result.stderr);
+    assert.match(result.stdout, /Adapter diagnostic: adapter-auth-failed/);
+    assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, new RegExp(rawSentinel));
+    assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /output\.log/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('watch and watch-events use their distinct terminal predicates', async () => {
@@ -448,10 +464,6 @@ test('watch and watch-events use their distinct terminal predicates', async () =
     assert.equal(isWatchEventsTerminalFrontmatter({ status, terminal_event_emitted: true }), false, `${status} is not terminal for --watch-events`);
   }
 
-  const source = readFileSync(DISPATCH, 'utf-8');
-  assert.match(source, /if \(isWatchTerminalFrontmatter\(initialFm\)\)/, '--watch initial state must use its fallback predicate');
-  assert.match(source, /if \(isWatchTerminalFrontmatter\(fm\)\)/, '--watch updates must use its fallback predicate');
-  assert.match(source, /if \(!isWatchEventsTerminalFrontmatter\(fm\)\) return;/, '--watch-events must require an emitted terminal event');
 });
 
 test('--watch exits for legacy terminal frontmatter without terminal_event_emitted', () => {
@@ -468,7 +480,7 @@ test('--watch exits for legacy terminal frontmatter without terminal_event_emitt
       timeout: 2000,
     });
     assert.equal(result.status, 1, result.error?.message || result.stderr);
-    assert.match(result.stderr, /TASK CANCELLED/);
+    assert.match(result.stdout, /Status:\s+cancelled/);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

@@ -582,6 +582,7 @@ async function main() {
           exitCode: code === null ? -1 : code,
           signal: signal || null,
           adapterStatus,
+          adapterDiagnosticCode,
           timedOut: timedOut || null,
           timeoutReason: timeoutReason || null,
           processCleanup: processCleanup.status,

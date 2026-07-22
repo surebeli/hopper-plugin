@@ -92,6 +92,7 @@ const OPTIONAL_EVENT_FIELDS = [
   'exit_code',
   'signal',
   'adapter_status',
+  'adapter_diagnostic_code',
   'timed_out',
   'last_stream_event',
   'last_reason',

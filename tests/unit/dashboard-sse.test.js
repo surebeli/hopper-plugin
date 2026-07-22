@@ -127,14 +127,14 @@ test('progress SSE route streams only closed event arrays to a client subscriber
       text += new TextDecoder().decode((await reader.read()).value);
     }
     hub.publish('progress/T-PROG', 'progress', {
-      events: [{ seq: 1, phase: 'running', kind: 'progress', terminal: false, status: 'unknown' }],
+      events: [{ seq: 1, phase: 'running', kind: 'progress', terminal: false, status: 'unknown', adapterDiagnosticCode: 'adapter-unknown-failed' }],
     });
     while (!text.includes('\nevent: progress\n')) {
       text += new TextDecoder().decode((await reader.read()).value);
     }
     const json = text.split('\nevent: progress\n')[1].match(/data: (.*)\n/)[1];
     assert.deepEqual(JSON.parse(json), {
-      events: [{ seq: 1, phase: 'running', kind: 'progress', terminal: false, status: 'unknown' }],
+      events: [{ seq: 1, phase: 'running', kind: 'progress', terminal: false, status: 'unknown', adapterDiagnosticCode: 'adapter-unknown-failed' }],
     });
   } finally {
     controller.abort();
@@ -173,7 +173,8 @@ test('watcher maps chokidar events to SSE channels', async () => {
     'agents',
   ]);
   assert.equal(events[0].event, 'queue');
-  assert.equal(events[1].payload.path, 'handoffs/T-WEB-03-output.md');
+  assert.deepEqual(events[1].payload, { kind: 'change', at: events[1].payload.at, taskId: 'T-WEB-03' });
+  assert.doesNotMatch(JSON.stringify(events), /path|handoffs\/|output\.log|C:\\PRIVATE/);
   assert.equal(mock.watcher.options.ignoreInitial, true);
   await watcher.close();
   assert.equal(mock.watcher.closed, true);
@@ -230,8 +231,8 @@ test('watcher publishes only closed progress event fields from a dedicated taile
   assert.equal(events[0].event, 'progress');
   assert.deepEqual(events[0].payload, {
     events: [
-      { seq: 1, phase: 'running', kind: 'progress', terminal: false, status: 'in-progress' },
-      { seq: 2, phase: 'done', kind: 'terminal', terminal: true, status: 'done' },
+      { seq: 1, phase: 'running', kind: 'progress', terminal: false, status: 'in-progress', adapterDiagnosticCode: 'adapter-unknown-failed' },
+      { seq: 2, phase: 'done', kind: 'terminal', terminal: true, status: 'done', adapterDiagnosticCode: 'none' },
     ],
   });
   assert.doesNotMatch(JSON.stringify(events[0]), /RAW_|PRIVATE|sk-private|message|task_id|vendor|source|exit_code|duration_ms|signal|path|offset/);

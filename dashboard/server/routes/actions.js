@@ -75,6 +75,8 @@ function runProbe(vendor, spawnProbeImpl, {
     }
     let settled = false;
     let timedOut = false;
+    let exited = false;
+    let recordedExitCode = null;
     let cleanupTimeout = null;
     let timeout = null;
     const drain = () => {};
@@ -95,14 +97,18 @@ function runProbe(vendor, spawnProbeImpl, {
     };
     const onExit = (exitCode) => {
       if (timedOut) return;
-      finish(exitCode === 0 ? 200 : 500, exitCode === 0 ? 'success' : 'failed');
+      exited = true;
+      recordedExitCode = exitCode;
     };
     const onClose = (exitCode) => {
       if (timedOut) {
         finish(504, 'failed');
         return;
       }
-      if (!settled) finish(exitCode === 0 ? 200 : 500, exitCode === 0 ? 'success' : 'failed');
+      if (!settled) {
+        const completedCode = exited ? recordedExitCode : exitCode;
+        finish(completedCode === 0 ? 200 : 500, completedCode === 0 ? 'success' : 'failed');
+      }
     };
     // Drain both streams to prevent child-process backpressure. Their raw bytes
     // are deliberately not retained or returned by this public API.

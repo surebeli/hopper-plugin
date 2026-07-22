@@ -58,9 +58,10 @@ behind). Reads `.hopper/handoffs/<task-id>-output.md`.
 - **Output tab**: markdown body rendered (tables, lists, code blocks with
   line numbers, ANSI-colored quotes)
 - **Progress tab**: recent progress JSONL events with pinned terminal event
-- **Live log tab**: SSE-streamed tail of `<task-id>-output.log` with ANSI
-  color preservation, append-only DOM (10000-line ring buffer), and
-  auto-follow with manual scroll-lock
+
+Raw vendor logs are not exposed through the dashboard. Use the local CLI's
+explicit `hopper-dispatch --result <task-id> --full` boundary when raw output
+is needed by an authorized local operator.
 
 Direct-link URLs work: `http://127.0.0.1:7777/task/T-WEB-04` opens the drawer
 on page load. Press `Esc` to close (URL returns to `/`).
@@ -176,7 +177,7 @@ client action  ──▶ POST /api/action/probe ──▶ spawn(hopper-dispatch 
   functions (whitelisted; see [SPEC §B.1](../docs/sidequests/web-dashboard/SPEC.md))
 - **Frontend**: React 18 + Vite + TypeScript + Tailwind + shadcn/ui + Radix
   primitives (4 packages, all whitelisted)
-- **Data**: 7 SSE channels (queue / task / progress / log / cost / agents / liveness)
+- **Data**: 6 SSE channels (queue / task / progress / cost / agents / liveness)
   backed by file watchers; Tanstack Query for cache invalidation
 - **Bundle**: code-split into main chunk (always loaded; 119 KB gzipped) +
   TaskDetailRoute lazy chunk (loaded on first drawer open; 65 KB gzipped)
@@ -187,7 +188,6 @@ Watched files (read-only):
 ```
 .hopper/queue.md              → /events/queue
 .hopper/handoffs/*.md         → /events/task/:id
-.hopper/handoffs/*-output.log → /events/log/:id
 .hopper/handoffs/*-progress.log → /events/progress/:id
 .hopper/COST-LOG.md           → /events/cost
 .hopper/AGENTS.md             → /events/agents

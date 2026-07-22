@@ -104,8 +104,8 @@ test('dashboard task route projects canonical attestation data without frontmatt
       sourceLabel: 'adapter-static-selectors', diagnosticCode: 'none', diagnosticState: 'none',
     },
     events: [
-      { seq: 1, phase: 'running', kind: 'progress', terminal: false, status: 'unknown' },
-      { seq: 2, phase: 'done', kind: 'terminal', terminal: true, status: 'done' },
+      { seq: 1, phase: 'running', kind: 'progress', terminal: false, status: 'unknown', adapterDiagnosticCode: 'adapter-unknown-failed' },
+      { seq: 2, phase: 'done', kind: 'terminal', terminal: true, status: 'done', adapterDiagnosticCode: 'none' },
     ],
   };
   assert.deepEqual(readTaskDetail(hopperDir, 'T-WEB-04'), expected);
@@ -379,7 +379,7 @@ test('dashboard client task surfaces consume only the closed DTO', () => {
   assert.match(taskDetail, /events:/);
   assert.doesNotMatch(taskDetail, /frontmatter|body|log|path/i);
   assert.deepEqual([...progressEvent.matchAll(/^\s*(\w+)\??:/gm)].map((match) => match[1]), [
-    'seq', 'phase', 'kind', 'terminal', 'status',
+    'seq', 'phase', 'kind', 'terminal', 'status', 'adapterDiagnosticCode',
   ]);
   assert.deepEqual([...probeResponse.matchAll(/^\s*(\w+)\??:/gm)].map((match) => match[1]), [
     'vendor', 'status', 'diagnosticCode', 'diagnosticState',

@@ -23,6 +23,7 @@ import { existsSync, lstatSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { validateTaskId as canonicalValidateTaskId } from './validation.js';
 import { publicAdapterDiagnostic } from './adapter-diagnostics.js';
+import { publicModelIdentifier } from './public-identifiers.js';
 
 const PREVIEW_CHAR_LIMIT = 4096;
 
@@ -196,6 +197,7 @@ export function renderOutputMarkdown({ task, vendor, output, raw, rawPath = null
   const today = todayDate();
   const statusBadge = output.status === 'success' ? '[OK]' : '[FAIL]';
   const safeVendor = sanitizeInline(vendor);
+  const safeModel = publicModelIdentifier(model, vendor);
   const safeTaskId = sanitizeInline(task.id);
   const safeTaskType = sanitizeInline(task.taskType);
   const safeBrief = task.brief ? sanitizeInline(task.brief) : '(no brief in queue.md)';
@@ -269,7 +271,7 @@ _(Recipient fills in after verdict; e.g. "proceed to T-XX" or "REWORK before T-X
 - Task ID: \`${safeTaskId}\`
 - Task-type: \`${safeTaskType}\`
 - Resolved vendor: \`${safeVendor}\`
-- Resolved model: \`${model ? sanitizeInline(model) : '(vendor default)'}\`
+- Resolved model: \`${safeModel ?? '(vendor default)'}\`
 - Output status: \`${output.status}\`
 - Subprocess exit: ${raw.exitCode}
 - Duration: ${raw.durationMs}ms

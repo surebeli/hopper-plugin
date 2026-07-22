@@ -44,6 +44,7 @@ export type ProgressEvent = {
   kind: string;
   terminal: boolean;
   status: string;
+  adapterDiagnosticCode: string;
 };
 
 export interface TaskProgressResponse {

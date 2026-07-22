@@ -14,6 +14,8 @@
 // fast-fail before subprocess invocation) but tests assert the patterns are
 // byte-equivalent.
 
+import { isSafeModelIdentifier } from './public-identifiers.js';
+
 /** Canonical task-id pattern. Matches what dispatch.md / hopper-codex / hopper-opencode enforce. */
 export const TASK_ID_PATTERN = /^[A-Za-z][A-Za-z0-9._-]{0,99}$/;
 
@@ -199,8 +201,8 @@ export function validateDispatchFlags(flags) {
 export function validateModelName(model) {
   if (typeof model !== 'string') throw new Error(`--model value must be string, got ${typeof model}`);
   if (model.length === 0) throw new Error('--model value must not be empty');
-  if (!MODEL_PATTERN.test(model)) {
-    throw new Error(`--model "${model}" contains unsafe characters. ` +
+  if (!MODEL_PATTERN.test(model) || !isSafeModelIdentifier(model)) {
+    throw new Error('--model contains unsafe characters or an unsafe model identifier. ' +
       `Allowed: ${MODEL_PATTERN.source} — letters/digits . _ / : plus space ( ) [ ] for ` +
       `display-label aliases; no shell metachars (; | & $ \` ' " < >) and no leading '-'.`);
   }

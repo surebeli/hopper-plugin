@@ -21,6 +21,7 @@ import { resolve, dirname, basename, join, sep } from 'node:path';
 import { validateTaskId } from './validation.js';
 import { appendProgressEvent, progressLogPath } from './progress.js';
 import { killProcessTree, verifyPidImage } from './subprocess.js';
+import { publicModelIdentifier } from './public-identifiers.js';
 
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/;
 
@@ -516,7 +517,7 @@ export function spawnDetached({ hopperDir, taskId, adapterName, adapterArgv, run
     // Point 5 (vendor-preset feedback 2026-06-15): record the model hopper passed
     // so a fallback from a canonical preset to the vendor's local default is
     // visible. Persists through the terminal write (frontmatter is spread).
-    model: (adapterOpts && adapterOpts.model) || '(vendor default)',
+    model: publicModelIdentifier(adapterOpts?.model, adapterName) || '(vendor default)',
     ...(startupSnapshot?.frontmatter || {}),
     status: 'in-progress',
     pid: null,

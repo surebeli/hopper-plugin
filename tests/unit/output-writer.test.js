@@ -546,3 +546,11 @@ test('renderOutputMarkdown: diagnostic rendering ignores raw error prose with em
   assert.match(md, /adapter-unknown-failed/);
   assert.doesNotMatch(md, /RAW_STDOUT_PRIVATE|RAW_STDERR_PRIVATE|rm -rf/);
 });
+
+test('renderOutputMarkdown omits an unsafe persisted model value from default metadata', () => {
+  const result = makeDispatchResult();
+  const secret = 'sk_live_0123456789abcdefghijklmnop';
+  const md = renderOutputMarkdown({ ...result, model: secret });
+  assert.match(md, /Resolved model: `\(vendor default\)`/);
+  assert.doesNotMatch(md, new RegExp(secret));
+});

@@ -9,6 +9,8 @@ import { appendProgressEvent, readProgressEvents } from './progress.js';
 import { resolveAttestation } from './model-attestation.js';
 import { validateTaskId } from './validation.js';
 import { projectInventoryEntry } from './inventory-contract.js';
+import { adapterDiagnostic, publicAdapterDiagnostic } from './adapter-diagnostics.js';
+import { publicModelIdentifier, publicModelIdentifiers } from './public-identifiers.js';
 
 const TERMINAL_STATUSES = new Set(['done', 'failed', 'cancelled', 'orphaned', 'timeout']);
 const DISPLAY_STATUSES = new Set([...TERMINAL_STATUSES, 'in-progress']);
@@ -61,12 +63,13 @@ export function buildAttestationStartupSnapshot({
   selectorMetadata = {},
   binding = null,
 } = {}) {
-  const safeRequested = nullableString(requestedSelector);
-  const safeEffective = nullableString(effectiveSelector);
+  const safeCatalog = catalogSnapshot(catalog);
+  const selectorVendor = safeCatalog.binding?.vendor ?? binding?.vendor ?? null;
+  const safeRequested = publicModelIdentifier(requestedSelector, selectorVendor);
+  const safeEffective = publicModelIdentifier(effectiveSelector, selectorVendor);
   const safeSource = ['user-argv', 'policy', 'vendor-default'].includes(effectiveSelectorSource)
     ? effectiveSelectorSource
     : 'vendor-default';
-  const safeCatalog = catalogSnapshot(catalog);
   const snapshot = {
     requestedSelector: safeRequested,
     effectiveSelector: safeEffective,
@@ -128,14 +131,8 @@ function nullableNonEmptyString(value) {
   return nonEmptyString(value) ? value : null;
 }
 
-function normalizeObservedModels(value) {
-  if (!Array.isArray(value)) return [];
-  const models = [];
-  for (const model of value) {
-    if (!nonEmptyString(model) || models.includes(model)) continue;
-    models.push(model);
-  }
-  return models;
+function normalizeObservedModels(value, vendor = null) {
+  return publicModelIdentifiers(value, vendor);
 }
 
 /**
@@ -143,8 +140,8 @@ function normalizeObservedModels(value) {
  * intentionally separate from the generic frontmatter scalar emitter: model
  * evidence must survive YAML comments, document markers, escapes, and Unicode.
  */
-export function encodeObservedModelsJsonScalar(value) {
-  return JSON.stringify(JSON.stringify(normalizeObservedModels(value)));
+export function encodeObservedModelsJsonScalar(value, vendor = null) {
+  return JSON.stringify(JSON.stringify(normalizeObservedModels(value, vendor)));
 }
 
 /**
@@ -152,12 +149,12 @@ export function encodeObservedModelsJsonScalar(value) {
  * Non-strings, scalar JSON, objects, malformed JSON, and mixed lists are not
  * evidence; strings are first-seen de-duplicated in file order.
  */
-export function parseObservedModelsJson(value) {
+export function parseObservedModelsJson(value, vendor = null) {
   if (typeof value !== 'string') return [];
   try {
     const parsed = JSON.parse(value);
     if (!Array.isArray(parsed) || parsed.some((model) => !nonEmptyString(model))) return [];
-    return normalizeObservedModels(parsed);
+    return normalizeObservedModels(parsed, vendor);
   } catch (_) {
     return [];
   }
@@ -209,6 +206,10 @@ function publicRecentEvents(events) {
     kind: publicEventKind(event.kind),
     terminal: event.terminal === true,
     status: normalizeDisplayStatus(event.status),
+    adapterDiagnosticCode: publicAdapterDiagnostic({
+      diagnosticCode: event.adapter_diagnostic_code ?? event.adapterDiagnosticCode,
+      status: event.adapter_status ?? (event.status === 'done' ? 'success' : 'unknown-fail'),
+    }),
   }));
 }
 
@@ -291,9 +292,10 @@ export function readCanonicalAttestation({ hopperDir, taskId, outputMdPath } = {
     attestationConsistency = 'frontmatter-only';
   }
 
+  const adapter = publicVendor(nullableNonEmptyString(terminalEvent?.vendor ?? fm.adapter));
   const evidence = Array.isArray(terminalEvent?.observed_models)
-    ? normalizeObservedModels(terminalEvent.observed_models)
-    : parseObservedModelsJson(fm.observed_models_json);
+    ? normalizeObservedModels(terminalEvent.observed_models, adapter)
+    : parseObservedModelsJson(fm.observed_models_json, adapter);
   const selectorSource = {
     requested_selector: terminalEvent?.requested_selector ?? fm.requested_selector,
     effective_selector: terminalEvent?.effective_selector ?? fm.effective_selector,
@@ -304,10 +306,9 @@ export function readCanonicalAttestation({ hopperDir, taskId, outputMdPath } = {
     resolution_status: terminalEvent?.resolution_status ?? fm.resolution_status,
     resolution_detail: terminalEvent?.resolution_detail ?? fm.resolution_detail,
   };
-  const adapter = publicVendor(nullableNonEmptyString(terminalEvent?.vendor ?? fm.adapter));
   const selector = {
-    requested: nullableNonEmptyString(selectorSource.requested_selector),
-    effective: nullableNonEmptyString(selectorSource.effective_selector),
+    requested: publicModelIdentifier(selectorSource.requested_selector, adapter),
+    effective: publicModelIdentifier(selectorSource.effective_selector, adapter),
     kind: normalizeSelectorKind(selectorSource.selector_kind),
   };
   const resolution = {
@@ -315,6 +316,10 @@ export function readCanonicalAttestation({ hopperDir, taskId, outputMdPath } = {
     detail: PUBLIC_RESOLUTION_DETAILS.has(resolutionSource.resolution_detail) ? resolutionSource.resolution_detail : null,
   };
   const phase = publicPhase(nullableNonEmptyString(terminalEvent?.phase ?? fm.phase) ?? displayStatus);
+  const adapterDiagnosticCode = publicAdapterDiagnostic({
+    diagnosticCode: terminalEvent?.adapter_diagnostic_code ?? fm.adapter_diagnostic_code,
+    status: terminalEvent?.adapter_status ?? fm.adapter_status ?? (displayStatus === 'done' ? 'success' : 'unknown-fail'),
+  });
   const safeCatalog = safeCatalogFromFrontmatter(fm);
   return {
     taskId,
@@ -324,6 +329,7 @@ export function readCanonicalAttestation({ hopperDir, taskId, outputMdPath } = {
     displayStatus,
     phase,
     adapter,
+    adapterDiagnosticCode,
     selector,
     observedModels: evidence,
     resolution,
@@ -335,6 +341,7 @@ export function readCanonicalAttestation({ hopperDir, taskId, outputMdPath } = {
     public: {
       taskId,
       adapter,
+      adapterDiagnosticCode,
       displayStatus,
       phase,
       selector: {
@@ -374,7 +381,7 @@ function repairablePartialFrontmatter(fm, taskId) {
 }
 
 function repairFrontmatterFromEvent(fm, taskId, event) {
-  const observedModels = normalizeObservedModels(event.observed_models);
+  const observedModels = normalizeObservedModels(event.observed_models, publicVendor(event.vendor));
   return {
     task_id: taskId,
     adapter: nullableNonEmptyString(event.vendor) ?? 'unknown',
@@ -395,6 +402,10 @@ function repairFrontmatterFromEvent(fm, taskId, event) {
     resolution_status: normalizeResolutionStatus(event.resolution_status),
     resolution_detail: nullableNonEmptyString(event.resolution_detail),
     diagnostic_code: nullableNonEmptyString(event.diagnostic_code),
+    adapter_diagnostic_code: publicAdapterDiagnostic({
+      diagnosticCode: event.adapter_diagnostic_code ?? event.adapterDiagnosticCode,
+      status: event.adapter_status ?? (event.status === 'done' ? 'success' : 'unknown-fail'),
+    }),
     ...safeCatalogFromFrontmatter(fm),
     _body: typeof fm._body === 'string' ? fm._body : '',
   };
@@ -454,12 +465,14 @@ function completionValue(completion, camel, snake, fallback = undefined) {
 function buildCanonicalTerminalRecord({ fm, startupSnapshot, parsed, completion, now }) {
   const snapshot = startupSnapshot ?? startupSnapshotFromFrontmatter(fm);
   const evidence = parsedModelAttestation(parsed);
+  const vendor = scalar(completion.vendor ?? fm.adapter);
+  const observedModels = normalizeObservedModels(evidence.observedModels, vendor);
   const resolved = resolveAttestation({
     effectiveSelector: snapshot.effectiveSelector,
     effectiveSelectorSource: snapshot.effectiveSelectorSource,
     binding: fallbackBinding(snapshot, fm, completion),
     selectorMetadata: snapshot.selectorMetadata,
-    observedModels: evidence.observedModels,
+    observedModels,
     catalogSourceKind: snapshot.catalog.sourceKind,
     runtimeDiagnosticCode: completion.runtimeDiagnosticCode ?? completion.runtime_diagnostic_code ?? 'none',
     now,
@@ -467,6 +480,11 @@ function buildCanonicalTerminalRecord({ fm, startupSnapshot, parsed, completion,
   const status = terminalStatus(completion.status);
   const phase = scalar(completion.phase, status);
   const message = scalar(completion.message, status === 'done' ? 'Task completed successfully.' : 'Task failed.');
+  const adapterDiagnosticCode = adapterDiagnostic(
+    completion.adapterDiagnosticCode
+      ?? completion.adapter_diagnostic_code
+      ?? publicAdapterDiagnostic(parsed),
+  );
   const event = {
     vendor: scalar(completion.vendor ?? fm.adapter),
     phase,
@@ -479,6 +497,7 @@ function buildCanonicalTerminalRecord({ fm, startupSnapshot, parsed, completion,
     exit_code: completionValue(completion, 'exitCode', 'exit_code'),
     signal: completion.signal ?? null,
     adapter_status: completionValue(completion, 'adapterStatus', 'adapter_status'),
+    adapter_diagnostic_code: adapterDiagnosticCode,
     timed_out: completionValue(completion, 'timedOut', 'timed_out'),
     timeout_reason: completionValue(completion, 'timeoutReason', 'timeout_reason'),
     process_cleanup: completionValue(completion, 'processCleanup', 'process_cleanup'),
@@ -501,6 +520,7 @@ function buildCanonicalTerminalRecord({ fm, startupSnapshot, parsed, completion,
     resolution_status: resolved.resolutionStatus,
     resolution_detail: resolved.resolutionDetail,
     diagnostic_code: resolved.diagnosticCode,
+    adapter_diagnostic_code: adapterDiagnosticCode,
   };
   return { snapshot, resolved, status, phase, message, event, attestationFrontmatter };
 }

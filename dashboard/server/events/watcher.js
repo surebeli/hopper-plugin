@@ -1,6 +1,9 @@
 import chokidar from 'chokidar';
 import { basename, join, relative } from 'node:path';
 import { projectPublicProgressEvents } from '../routes/task.js';
+import { validateTaskId } from '../../../cli/src/validation.js';
+
+const PUBLIC_FILE_EVENT_KINDS = new Set(['add', 'change', 'unlink']);
 
 export function createWatcher({
   hopperDir,
@@ -56,39 +59,43 @@ export function watchTargets(hopperDir) {
 
 export function mapFileEvent(hopperDir, type, filePath) {
   const rel = relative(hopperDir, filePath).replace(/\\/g, '/');
-  const payload = { type, path: rel, at: new Date().toISOString() };
+  const payload = { kind: PUBLIC_FILE_EVENT_KINDS.has(type) ? type : 'unknown', at: new Date().toISOString() };
   if (rel === 'queue.md') return withChannel('queue', 'queue', payload);
   if (rel === 'COST-LOG.md') return withChannel('cost', 'cost', payload);
   if (rel === 'AGENTS.md') return withChannel('agents', 'agents', payload);
   if (rel.startsWith('handoffs/') && rel.endsWith('.md')) {
-    return withChannel(`task/${taskIdFromHandoff(filePath)}`, 'task', payload);
+    const taskId = taskIdFromHandoff(filePath);
+    return taskId ? withChannel(`task/${taskId}`, 'task', { ...payload, taskId }) : null;
   }
   if (rel.startsWith('handoffs/') && rel.endsWith('-progress.log')) {
     const taskId = basename(filePath, '-progress.log');
-    return withChannel(`progress/${taskId}`, 'progress', { ...payload, taskId });
+    return safeTaskId(taskId) ? withChannel(`progress/${taskId}`, 'progress', { ...payload, taskId }) : null;
   }
   return null;
 }
 
 function publishLiveness(hub) {
   hub.publish('liveness', 'liveness', {
-    channel: 'liveness',
-    type: 'tick',
-    pid: process.pid,
+    kind: 'tick',
     at: new Date().toISOString(),
   });
 }
 
 function taskIdFromHandoff(filePath) {
   const name = basename(filePath, '.md');
-  return name
+  const taskId = name
     .replace(/-REVIEW-.+$/, '')
     .replace(/-leader-feedback$/, '')
     .replace(/-output$/, '');
+  return safeTaskId(taskId) ? taskId : null;
+}
+
+function safeTaskId(taskId) {
+  try { validateTaskId(taskId); return true; } catch (_) { return false; }
 }
 
 function withChannel(channel, event, payload) {
-  return { channel, event, payload: { channel, ...payload } };
+  return { channel, event, payload };
 }
 
 function parseProgressEvents(chunk) {

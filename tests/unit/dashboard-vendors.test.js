@@ -289,6 +289,7 @@ test('probe action returns 409 while same vendor is already running', async () =
         child.stdout.end('RAW_STDOUT_PRIVATE C:\\PRIVATE\\probe.log sk-private-probe-token');
         child.stderr.end('RAW_STDERR_PRIVATE');
         child.emit('exit', 0, null);
+        child.emit('close', 0, null);
       };
       return child;
     },
@@ -318,6 +319,69 @@ test('probe action returns 409 while same vendor is already running', async () =
       vendor: 'codex', status: 'done', diagnosticCode: 'none', diagnosticState: 'none',
     });
   } finally {
+    await closeServer(server);
+  }
+});
+
+test('successful probe remains busy after exit until close drains inherited stdio exactly once', async () => {
+  const delayedChild = createProbeChild(4141);
+  let spawnCount = 0;
+  let firstResolved = false;
+  const app = express();
+  app.use(express.json());
+  app.use('/api/action', createActionsRouter({
+    probeTimeoutMs: 200,
+    spawnProbeImpl: () => {
+      spawnCount += 1;
+      if (spawnCount === 1) return delayedChild;
+      const child = createProbeChild(4141 + spawnCount);
+      queueMicrotask(() => {
+        child.stdout.end();
+        child.stderr.end();
+        child.emit('exit', 0, null);
+        child.emit('close', 0, null);
+      });
+      return child;
+    },
+  }));
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolveListen) => server.once('listening', resolveListen));
+  const { port } = server.address();
+
+  try {
+    const first = fetch(`http://127.0.0.1:${port}/api/action/probe`, {
+      body: JSON.stringify({ vendor: 'codex' }), headers: { 'Content-Type': 'application/json' }, method: 'POST',
+    }).then((response) => { firstResolved = true; return response; });
+    await waitFor(() => delayedChild.listenerCount('close') === 1);
+    delayedChild.emit('exit', 0, null);
+    await new Promise((resolveTick) => setImmediate(resolveTick));
+
+    assert.equal(firstResolved, false, 'exit cannot settle before stdio close');
+    assert.equal(delayedChild.listenerCount('close'), 1, 'close listener remains armed');
+    assert.equal(delayedChild.stdout.listenerCount('data'), 1, 'stdout drain remains armed');
+    assert.equal(delayedChild.stderr.listenerCount('data'), 1, 'stderr drain remains armed');
+    const duplicate = await fetch(`http://127.0.0.1:${port}/api/action/probe`, {
+      body: JSON.stringify({ vendor: 'codex' }), headers: { 'Content-Type': 'application/json' }, method: 'POST',
+    });
+    assert.equal(duplicate.status, 409);
+
+    delayedChild.stdout.end('RAW_STDOUT_PRIVATE');
+    delayedChild.stderr.end('RAW_STDERR_PRIVATE');
+    delayedChild.emit('close', 0, null);
+    const response = await first;
+    assert.equal(response.status, 200);
+    assertClosedProbePayload(await response.json(), {
+      vendor: 'codex', status: 'done', diagnosticCode: 'none', diagnosticState: 'none',
+    });
+    delayedChild.emit('close', 0, null);
+
+    const retry = await fetch(`http://127.0.0.1:${port}/api/action/probe`, {
+      body: JSON.stringify({ vendor: 'codex' }), headers: { 'Content-Type': 'application/json' }, method: 'POST',
+    });
+    assert.equal(retry.status, 200);
+    assert.equal(spawnCount, 2);
+  } finally {
+    delayedChild.emit('close', 0, null);
     await closeServer(server);
   }
 });
@@ -495,7 +559,10 @@ test('probe action maps nonzero exit, child error, and malformed vendor to close
         child.stdout.end('RAW_STDOUT_PRIVATE C:\\PRIVATE\\probe.log');
         child.stderr.end('RAW_STDERR_PRIVATE sk-private-probe-token');
         if (vendor === 'opencode') child.emit('error', new Error('PRIVATE_CHILD_ERROR'));
-        else child.emit('exit', 9, 'SIGPRIVATE');
+        else {
+          child.emit('exit', 9, 'SIGPRIVATE');
+          child.emit('close', 9, 'SIGPRIVATE');
+        }
       });
       return child;
     },

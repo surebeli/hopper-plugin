@@ -50,6 +50,7 @@ import { notify } from '../src/notify.js';
 import { resolveCommandWithKnownPaths } from '../src/path-resolve.js';
 import { resolvePromptDelivery } from '../src/prompt-delivery.js';
 import { publicAdapterDiagnostic } from '../src/adapter-diagnostics.js';
+import { publicModelIdentifier } from '../src/public-identifiers.js';
 import { watchFile, unwatchFile, readFileSync, existsSync, openSync, readSync, closeSync, statSync, readdirSync } from 'node:fs';
 import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -91,13 +92,13 @@ function printUsage() {
   console.log('  hopper-dispatch <task-id> --model <name>        Override vendor model (e.g. gpt-5.5, claude-opus-4-7)');
   console.log('  hopper-dispatch <task-id> --reasoning <level>   Override reasoning effort (minimal|low|medium|high|xhigh)');
   console.log('  hopper-dispatch <task-id> --sandbox <mode>      Override vendor permission (read-only|workspace-write|danger-full-access)');
-  console.log('  hopper-dispatch --watch <task-id>               Tail-follow a background job until exit');
+  console.log('  hopper-dispatch --watch <task-id>               Follow closed task status/progress until terminal exit');
   console.log('  hopper-dispatch --progress <task-id>            Show background task phase + recent progress events');
   console.log('  hopper-dispatch --watch-events [--once] [--replay]  Stream NEW terminal task events as JSONL. The existing handoffs/');
   console.log('                                                  backlog is baselined (NOT replayed) so a (re)started watcher does not');
   console.log('                                                  re-fire history. --once: emit the first event then exit. --replay: also');
   console.log('                                                  emit the existing terminal backlog on start (the pre-fix behavior).');
-  console.log('  hopper-dispatch --result <task-id> [--full]     Print completed task result (verdict body + log tail); --full prints the complete sidecar text (for long review/research output)');
+  console.log('  hopper-dispatch --result <task-id> [--full]     Print a closed completed-task result; --full is the explicit raw sidecar/log boundary');
   console.log('  hopper-dispatch --jobs                          List all in-progress background jobs');
   console.log('  hopper-dispatch --reap                          Re-classify stale (>24h or dead-PID) jobs as orphaned');
   console.log('  hopper-dispatch --archive [--older-than <days>] [--keep <N>] [--only-status <s,..>] [--dry-run]');
@@ -919,7 +920,7 @@ async function runDispatch(hopperDir, taskId, { write = false, force = false, ad
         writeFrontmatter(written.path, {
           task_id: result.task.id,
           adapter: result.vendor,
-          model: effectiveAdapterOpts.model || '(vendor default)',
+          model: publicModelIdentifier(effectiveAdapterOpts.model, result.vendor) || '(vendor default)',
           ...startupSnapshot.frontmatter,
           status: 'in-progress',
           mode: 'sync',
@@ -944,6 +945,7 @@ async function runDispatch(hopperDir, taskId, { write = false, force = false, ad
             durationMs: result.raw.durationMs ?? elapsedMs,
             exitCode: result.raw.exitCode,
             adapterStatus: result.output.status,
+            adapterDiagnosticCode: publicAdapterDiagnostic(result.output),
           },
         });
         console.log('');
@@ -1240,28 +1242,6 @@ function runStop(hopperDir, taskId) {
   console.log(`Killed:  ${killNote}`);
 }
 
-function pathFromFrontmatter(handoffDir, value, fallbackName) {
-  if (!value) return join(handoffDir, fallbackName);
-  if (value.startsWith('./')) return join(handoffDir, value.slice(2));
-  if (value.includes('/') || value.includes('\\')) return resolve(handoffDir, value);
-  return join(handoffDir, value);
-}
-
-function formatMs(ms) {
-  if (!Number.isFinite(ms)) return 'n/a';
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s (${ms}ms)`;
-}
-
-function progressEventMeta(event) {
-  const meta = [];
-  if (event.status) meta.push(`status=${event.status}`);
-  if (event.adapter_status) meta.push(`adapter_status=${event.adapter_status}`);
-  if (event.exit_code !== undefined) meta.push(`exit_code=${event.exit_code}`);
-  if (event.duration_ms !== undefined) meta.push(`duration_ms=${event.duration_ms}`);
-  return meta.length > 0 ? ` [${meta.join(' ')}]` : '';
-}
-
 function runProgress(hopperDir, taskId) {
   try { validateTaskId(taskId); }
   catch (err) { console.error(`Error: ${err.message}`); process.exit(2); }
@@ -1283,6 +1263,7 @@ function renderPublicAttestation(record, { title }) {
   console.log(`Vendor:             ${record.adapter}`);
   console.log(`Status:             ${record.displayStatus}`);
   console.log(`Phase:              ${record.phase}`);
+  console.log(`Adapter diagnostic: ${record.adapterDiagnosticCode}`);
   console.log(`Requested selector: ${record.selector.requested ?? 'n/a'}`);
   console.log(`Effective selector: ${record.selector.effective ?? 'n/a'}`);
   console.log(`Source:             ${record.selector.source ?? 'user-argv'}`);
@@ -1330,18 +1311,19 @@ function listOutputMarkdownFiles(handoffDir) {
     .map((name) => join(handoffDir, name));
 }
 
-function terminalPayload(handoffDir, outputMdPath, fm) {
+function terminalPayload(hopperDir, outputMdPath, fm) {
   const taskId = taskIdFromOutputPath(outputMdPath, fm);
+  const canonical = readCanonicalAttestation({ hopperDir, taskId, outputMdPath });
+  const record = canonical.public;
   return {
     type: 'hopper.task.terminal',
-    task_id: taskId,
-    status: fm.status,
-    phase: fm.phase || fm.status,
-    vendor: fm.adapter || 'unknown',
+    task_id: record.taskId,
+    status: record.displayStatus,
+    phase: record.phase,
+    vendor: record.adapter,
     seq: Number.isInteger(fm.progress_seq) ? fm.progress_seq : null,
-    output_md: outputMdPath,
-    progress_log: pathFromFrontmatter(handoffDir, fm.progress_log, `${taskId}-progress.log`),
-    raw_log: pathFromFrontmatter(handoffDir, fm.raw_log || fm.log, `${taskId}-output.log`),
+    at: new Date().toISOString(),
+    adapter_diagnostic_code: record.adapterDiagnosticCode,
   };
 }
 
@@ -1392,7 +1374,7 @@ export function runWatchEvents(
     // Baseline-prime: record the seq so a future change is detected as new, but do NOT emit/notify
     // for a task that was ALREADY terminal when the watcher started (prevents backlog replay).
     if (silent) return;
-    const payload = terminalPayload(handoffDir, outputMdPath, fm);
+    const payload = terminalPayload(hopperDir, outputMdPath, fm);
     writeLine(JSON.stringify(payload));
     notifyFn({
       title: `hopper: ${taskId}`,
@@ -1576,83 +1558,40 @@ async function runWatch(hopperDir, taskId) {
   }
   const outputMdPath = join(hopperDir, 'handoffs', `${taskId}-output.md`);
   if (!existsSync(outputMdPath)) {
-    console.error(`Error: no output file at ${outputMdPath}. Has this task been dispatched?`);
+    console.error(`Error: no output file for task '${taskId}'. Has this task been dispatched?`);
     process.exit(1);
+  }
+
+  function renderClosedState(fm) {
+    const canonical = readCanonicalAttestation({ hopperDir, taskId, outputMdPath });
+    renderPublicAttestation(canonical.public, { title: `${taskId} - WATCH` });
+    return { canonical, terminal: isWatchTerminalFrontmatter(fm) };
   }
 
   let initialFm;
   try {
     initialFm = readFrontmatter(outputMdPath);
   } catch (err) {
-    console.error(`Error reading frontmatter: ${err.message}`);
+    console.error(`Error reading task state for '${taskId}'.`);
     process.exit(1);
   }
 
-  console.error(`Watching ${taskId} (status: ${initialFm.status}, pid: ${initialFm.pid || 'n/a'})`);
-  console.error(`Log: ${initialFm.log || 'n/a'}`);
-  console.error('');
+  const initial = renderClosedState(initialFm);
+  if (initial.terminal) process.exit(initial.canonical.displayStatus === 'done' ? 0 : 1);
 
-  // Per codex Phase 5 audit F6: if the task is ALREADY terminal at the time
-  // --watch is invoked, surface result + exit immediately. Previously
-  // `lastStatus = initialFm.status` made the watch loop think nothing
-  // changed, so the file got tailed once and then we waited forever.
-  if (isWatchTerminalFrontmatter(initialFm)) {
-    const logPath = outputMdPath.replace(/\.md$/, '.log');
-    if (existsSync(logPath)) {
-      try {
-        const stat = statSync(logPath);
-        if (stat.size > 0) process.stdout.write(readFileSync(logPath, 'utf-8'));
-      } catch (_) {}
-    }
-    console.error('');
-    console.error(`=== TASK ${initialFm.status.toUpperCase()} ===`);
-    console.error(`exit_code: ${initialFm.exit_code} | duration: ${initialFm.duration_ms}ms${initialFm.signal ? ' | signal: ' + initialFm.signal : ''}${initialFm.timed_out ? ' | TIMED OUT' : ''}`);
-    process.exit(initialFm.status === 'done' ? 0 : 1);
-  }
+  let lastFingerprint = `${initialFm.status}:${initialFm.progress_seq ?? ''}`;
 
-  const logPath = outputMdPath.replace(/\.md$/, '.log');
-  let lastSize = 0;
-  let lastStatus = initialFm.status;
-
-  // Emit any existing log content first
-  if (existsSync(logPath)) {
-    try {
-      const stat = statSync(logPath);
-      if (stat.size > 0) {
-        process.stdout.write(readFileSync(logPath, 'utf-8'));
-        lastSize = stat.size;
-      }
-    } catch (_) {}
-  }
-
-  // Watch loop
   const handler = (curr, prev) => {
     if (curr.mtimeMs === prev.mtimeMs && curr.size === prev.size) return;
-    // Read new log content
-    if (existsSync(logPath)) {
-      try {
-        const stat = statSync(logPath);
-        if (stat.size > lastSize) {
-          const fd = openSync(logPath, 'r');
-          const buf = Buffer.alloc(stat.size - lastSize);
-          readSync(fd, buf, 0, buf.length, lastSize);
-          closeSync(fd);
-          process.stdout.write(buf);
-          lastSize = stat.size;
-        }
-      } catch (_) {}
-    }
-    // Check status
     try {
       const fm = readFrontmatter(outputMdPath);
-      if (fm.status !== lastStatus || isWatchTerminalFrontmatter(fm)) {
-        lastStatus = fm.status;
-        if (isWatchTerminalFrontmatter(fm)) {
+      const fingerprint = `${fm.status}:${fm.progress_seq ?? ''}`;
+      if (fingerprint !== lastFingerprint || isWatchTerminalFrontmatter(fm)) {
+        lastFingerprint = fingerprint;
+        const current = renderClosedState(fm);
+        if (current.terminal) {
           unwatchFile(outputMdPath, handler);
-          console.error('');
-          console.error(`=== TASK ${fm.status.toUpperCase()} ===`);
-          console.error(`exit_code: ${fm.exit_code} | duration: ${fm.duration_ms}ms${fm.signal ? ' | signal: ' + fm.signal : ''}${fm.timed_out ? ' | TIMED OUT' : ''}`);
-          process.exit(fm.status === 'done' ? 0 : 1);
+          process.exit(current.canonical.displayStatus === 'done' ? 0 : 1);
         }
       }
     } catch (_) {}

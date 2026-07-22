@@ -152,6 +152,47 @@ test('same parsed result produces byte-equivalent terminal attestation fields fo
   }
 });
 
+test('terminal adapter diagnostics stay closed from failed local fixtures through public rendering', () => {
+  const fixtures = [
+    ['kimi', 'adapter-auth-failed', 'KIMI_RAW_SENTINEL_should_never_escape'],
+    ['opencode', 'adapter-protocol-invalid', 'OPENCODE_RAW_SENTINEL_should_never_escape'],
+    ['claude', 'adapter-permission-failed', 'CLAUDE_RAW_SENTINEL_should_never_escape'],
+  ];
+  for (const [vendor, adapterDiagnosticCode, hostileRaw] of fixtures) {
+    const state = setup(`T-${vendor}-closed-diagnostic`);
+    try {
+      writeFrontmatter(state.outputMdPath, {
+        task_id: state.taskId, adapter: vendor, status: 'in-progress', mode: 'background',
+        terminal_event_emitted: false, _body: '# body\n',
+      });
+      finalizeTerminalAttestation({
+        hopperDir: state.hopperDir,
+        taskId: state.taskId,
+        outputMdPath: state.outputMdPath,
+        parsed: { status: 'unknown-fail', error: hostileRaw, diagnosticCode: adapterDiagnosticCode },
+        completion: {
+          vendor, status: 'failed', phase: 'failed', message: 'Task failed.', source: 'runner',
+          durationMs: 42, exitCode: 1, adapterStatus: 'unknown-fail', adapterDiagnosticCode,
+        },
+        now: NOW,
+      });
+
+      const fm = readFrontmatter(state.outputMdPath);
+      const terminal = readProgressEvents({ hopperDir: state.hopperDir, taskId: state.taskId })
+        .find((event) => event.terminal === true);
+      const canonical = readCanonicalAttestation({ hopperDir: state.hopperDir, taskId: state.taskId, outputMdPath: state.outputMdPath });
+
+      assert.equal(fm.adapter_diagnostic_code, adapterDiagnosticCode, vendor);
+      assert.equal(terminal.adapter_diagnostic_code, adapterDiagnosticCode, vendor);
+      assert.equal(canonical.public.adapterDiagnosticCode, adapterDiagnosticCode, vendor);
+      assert.doesNotMatch(readFileSync(state.outputMdPath, 'utf8'), new RegExp(hostileRaw), vendor);
+      assert.doesNotMatch(JSON.stringify(terminal), new RegExp(hostileRaw), vendor);
+    } finally {
+      rmSync(state.tmp, { recursive: true, force: true });
+    }
+  }
+});
+
 test('finalizer consumes only parsed modelAttestation and never synthesizes observed models from request or catalog', () => {
   const state = setup('T-no-synthesis');
   const snapshot = buildAttestationStartupSnapshot({
@@ -225,17 +266,16 @@ test('existing terminal event refuses reentry and terminal writers never persist
   }
 });
 
-test('observed model JSON scalar round-trips YAML-sensitive text and normalizes hostile shapes', () => {
+test('observed model JSON scalar retains only shared-safe public identifiers', () => {
   const models = [
-    'brackets [alpha]', 'colon: # hash', "single ' quote", 'double " quote',
-    'slash\\path', 'line\nbreak', '雪', '--- document marker', '... end marker',
-    'brackets [alpha]', '', 42,
+    'fable', 'tokenbox/deepseek-v4-pro', 'sk_live_0123456789abcdefghijklmnop',
+    'C:\\private\\model', 'https://private.example/model', 'line\nbreak',
+    'fable', '', 42,
   ];
   const encoded = encodeObservedModelsJsonScalar(models);
   assert.match(encoded, /^"/);
   assert.deepEqual(parseObservedModelsJson(JSON.parse(encoded)), [
-    'brackets [alpha]', 'colon: # hash', "single ' quote", 'double " quote',
-    'slash\\path', 'line\nbreak', '雪', '--- document marker', '... end marker',
+    'fable', 'tokenbox/deepseek-v4-pro',
   ]);
   for (const hostile of [null, {}, 'not-json', 'null', '{}', '42', '["ok", null, 7, "ok", "next", ""]']) {
     assert.deepEqual(parseObservedModelsJson(hostile), [], String(hostile));
@@ -318,6 +358,27 @@ test('canonical reader treats frontmatter-only completion as complete and invali
     const invalid = readCanonicalAttestation(state);
     assert.equal(invalid.displayStatus, 'unknown');
     assert.equal(invalid.resolution.status, 'unverified');
+  } finally {
+    rmSync(state.tmp, { recursive: true, force: true });
+  }
+});
+
+test('canonical reader projects legacy selector and observed model metadata through the shared safe identifier boundary', () => {
+  const state = setup('T-legacy-public-identifiers');
+  try {
+    writeFrontmatter(state.outputMdPath, {
+      task_id: state.taskId, adapter: 'claude', status: 'done', phase: 'done', terminal_event_emitted: true,
+      requested_selector: 'sk_live_0123456789abcdefghijklmnop',
+      effective_selector: 'https://private.example/model',
+      observed_models_json: JSON.stringify([
+        'ghp_0123456789abcdefghijklmnop', 'fable', 'C:\\private\\model', 'fable',
+      ]),
+      _body: '# body\n',
+    });
+    const record = readCanonicalAttestation(state);
+    assert.deepEqual(record.selector, { requested: null, effective: null, kind: 'unknown' });
+    assert.deepEqual(record.public.observedModels, ['fable']);
+    assert.doesNotMatch(JSON.stringify(record.public), /sk_live|ghp_|private\\model|https:/);
   } finally {
     rmSync(state.tmp, { recursive: true, force: true });
   }
