@@ -1,0 +1,57 @@
+.claude-plugin/marketplace.json
+  0000019f89ea39f0 1-86
+.claude-plugin/plugin.json
+  0000019f89ea39f0 1-12
+.codex-plugin/plugin.json
+  0000019f89ea39f0 1-49
+CHANGELOG.md
+  0000019f89ea39f0 1-146
+cli/bin/hopper-dispatch
+  0000019f89ea39f0 1-2110
+cli/src/dispatch.js
+  0000019f89ea39f0 1-553
+cli/src/rules.js
+  0000019f89ea39f0 1-173
+commands/dispatch.md
+  0000019f89ea39f0 1-153
+commands/smoke.md
+  0000019f89ea39f0 1-21
+commands/vendors.md
+  0000019f89ea39f0 1-18
+package.json
+  0000019f89ea39f0 1-66
+plugins/hopper/.codex-plugin/plugin.json
+  0000019f89ea39f0 1-49
+plugins/hopper/cli/bin/hopper-dispatch
+  0000019f89ea39f0 1-2110
+plugins/hopper/cli/src/dispatch.js
+  0000019f89ea39f0 1-553
+plugins/hopper/cli/src/rules.js
+  0000019f89ea39f0 1-173
+plugins/hopper/skills/hopper-dispatch/SKILL.md
+  0000019f89ea39f0 1-26
+skills/hopper-dispatch/SKILL.md
+  0000019f89ea39f0 1-26
+tests/unit/dispatch-flags.test.js
+  0000019f89ea39f0 1-576
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "febf2a2b521010fe4c1d59bb6459fe18d69e6587",
+  "prompts": {
+    "0000019f89ea39f0": {
+      "agent_id": {
+        "id": "ai-thread-codex-gpt-5.6-sol-1784725256688",
+        "model": "gpt-5.6-sol",
+        "tool": "codex"
+      },
+      "human_author": "litianyi",
+      "messages": [],
+      "total_additions": 6900,
+      "total_deletions": 0,
+      "accepted_lines": 6900,
+      "overriden_lines": 0
+    }
+  }
+}
