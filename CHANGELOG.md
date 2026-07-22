@@ -19,6 +19,34 @@ convention: any user-observable behavior change (new capability, fixed defect,
 changed default) bumps minor; patch is reserved for the rare non-functional
 tweak.
 
+## [0.34.0] - 2026-07-22
+
+### Fixed
+
+- **Read-only Kimi requests now stop before any vendor process starts when its
+  command mode cannot enforce the requested sandbox.** This prevents a task
+  from being described as read-only while it can still modify files.
+- **Long-running background work now reports that the process is alive without
+  exposing prompt text, vendor output, paths, account data, or model details.**
+  Terminal updates clear that liveness signal, so completed work does not keep
+  appearing active.
+- **Public command, watch, and dashboard views now consistently hide raw
+  adapter, model, cache, and process diagnostics.** Users receive a stable
+  actionable status instead of sensitive implementation details.
+- **Windows cleanup, workspace validation, and cache handling now fail safely
+  and remain stable across interrupted or concurrent runs.**
+
+### Changed
+
+- **OpenCode and Fable-backed flows now preserve their explicit runtime
+  behavior while refusing unsupported or unsafe execution paths.**
+
+### Tests
+
+- Added regression coverage for read-only refusal, content-free liveness,
+  closed public diagnostics, cache/workspace recovery, one-spawn execution,
+  and root-to-vendored plugin synchronization.
+
 ## [0.33.0] - 2026-07-22
 
 ### Fixed
