@@ -1,0 +1,41 @@
+dashboard/client/src/components/ProgressTimeline.tsx
+  0000019f8823dad5 1-86
+dashboard/client/src/components/TaskDrawer.tsx
+  0000019f8823dad5 1-119
+dashboard/client/src/lib/types.ts
+  0000019f8823dad5 1-179
+dashboard/server/events/sse.js
+  0000019f8823dad5 1-78
+dashboard/server/events/watcher.js
+  0000019f8823dad5 1-106
+dashboard/server/index.js
+  0000019f8823dad5 1-139
+dashboard/server/routes/task.js
+  0000019f8823dad5 1-133
+tests/unit/dashboard-log.test.js
+  0000019f8823dad5 1-127
+tests/unit/dashboard-sse.test.js
+  0000019f8823dad5 1-226
+tests/unit/dashboard-task.test.js
+  0000019f8823dad5 1-398
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "65136580992c681c4611473fcbfebe8cdb7a3cb1",
+  "prompts": {
+    "0000019f8823dad5": {
+      "agent_id": {
+        "tool": "codex",
+        "model": "gpt-5.6-sol",
+        "id": "ai-thread-codex-gpt-5.6-sol-1784695478997"
+      },
+      "human_author": "litianyi",
+      "messages": [],
+      "total_additions": 1591,
+      "total_deletions": 0,
+      "accepted_lines": 1591,
+      "overriden_lines": 0
+    }
+  }
+}
