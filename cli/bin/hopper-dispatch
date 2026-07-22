@@ -149,13 +149,18 @@ function printSmoke() {
   process.exit(0);
 }
 
+function isHopperWorkspace(candidate) {
+  return existsSync(candidate) && statSync(candidate).isDirectory()
+    && existsSync(join(candidate, 'handoffs')) && statSync(join(candidate, 'handoffs')).isDirectory();
+}
+
 function findHopperDir() {
   if (process.env.HOPPER_DIR) {
     const p = resolve(process.env.HOPPER_DIR);
     // An explicit HOPPER_DIR is authoritative: if it does not exist, report
     // "not found" rather than silently falling back to an ancestor walk
     // (which could bind to an unrelated `.hopper` such as a global cache dir).
-    if (existsSync(p)) return p;
+    if (isHopperWorkspace(p)) return p;
     return null;
   }
   // Walk up from cwd looking for .hopper/. A bare `.hopper` is not enough:
@@ -165,7 +170,7 @@ function findHopperDir() {
   let cur = process.cwd();
   for (let i = 0; i < 5; i++) {
     const candidate = join(cur, '.hopper');
-    if (existsSync(candidate) && existsSync(join(candidate, 'handoffs'))) return candidate;
+    if (isHopperWorkspace(candidate)) return candidate;
     const parent = resolve(cur, '..');
     if (parent === cur) break;
     cur = parent;

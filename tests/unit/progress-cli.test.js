@@ -24,10 +24,11 @@ function setup() {
   return { tmp, hopperDir };
 }
 
-function runProgress(hopperDir, taskId) {
+function runProgress(hopperDir, taskId, { cwd } = {}) {
   return spawnSync(process.execPath, [DISPATCH, '--progress', taskId], {
     env: { ...process.env, HOPPER_DIR: hopperDir },
     encoding: 'utf-8',
+    cwd,
   });
 }
 
@@ -161,6 +162,29 @@ test('--progress exits 2 for invalid task id', () => {
     const result = runProgress(hopperDir, '../bad');
     assert.equal(result.status, 2);
     assert.match(result.stderr, /invalid|unsafe|path traversal|task.id/i);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('--progress rejects structurally invalid HOPPER_DIR overrides without ancestor fallback', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-progress-workspace-'));
+  const workspace = join(tmp, 'workspace');
+  const cwd = join(workspace, 'nested');
+  const fileOverride = join(tmp, 'not-a-directory');
+  const missingHandoffs = join(tmp, 'missing-handoffs');
+  const cacheLike = join(tmp, '.hopper');
+  mkdirSync(join(workspace, '.hopper', 'handoffs'), { recursive: true });
+  mkdirSync(cwd, { recursive: true });
+  writeFileSync(fileOverride, 'not a workspace', 'utf-8');
+  mkdirSync(missingHandoffs);
+  mkdirSync(cacheLike);
+  try {
+    for (const override of [fileOverride, missingHandoffs, cacheLike]) {
+      const result = runProgress(override, 'T-NO-SUCH', { cwd });
+      assert.equal(result.status, 1, `${override}: ${result.stderr}`);
+      assert.match(result.stderr, /no \.hopper\/ directory found/i, `${override}: must fail closed`);
+    }
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

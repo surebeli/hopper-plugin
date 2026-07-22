@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { createApp, parseServerArgs, startServer } from '../../dashboard/server/index.js';
+import { findHopperDir } from '../../dashboard/server/lib/hopper-dir.js';
 
 function closeServer(server) {
   return new Promise((resolve) => server.close(resolve));
@@ -39,4 +40,29 @@ test('dashboard prod mode requires built client dist', async () => {
     () => startServer({ distDir, port: 7777, requireDist: true }),
     /npm run dashboard:build/,
   );
+});
+
+test('dashboard workspace discovery rejects structurally invalid explicit HOPPER_DIR without fallback', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-dashboard-workspace-'));
+  const workspace = join(tmp, 'workspace');
+  const cwd = join(workspace, 'nested');
+  const fileOverride = join(tmp, 'not-a-directory');
+  const missingHandoffs = join(tmp, 'missing-handoffs');
+  const cacheLike = join(tmp, '.hopper');
+  const previous = process.env.HOPPER_DIR;
+  mkdirSync(join(workspace, '.hopper', 'handoffs'), { recursive: true });
+  mkdirSync(cwd, { recursive: true });
+  writeFileSync(fileOverride, 'not a workspace', 'utf-8');
+  mkdirSync(missingHandoffs);
+  mkdirSync(cacheLike);
+  try {
+    for (const override of [fileOverride, missingHandoffs, cacheLike]) {
+      process.env.HOPPER_DIR = override;
+      assert.equal(findHopperDir(cwd), null, `${override}: must not ancestor-fallback`);
+    }
+  } finally {
+    if (previous === undefined) delete process.env.HOPPER_DIR;
+    else process.env.HOPPER_DIR = previous;
+    rmSync(resolve(tmp), { recursive: true, force: true });
+  }
 });

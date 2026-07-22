@@ -29,6 +29,7 @@ import {
   spawnDetached, readFrontmatter, writeFrontmatter, isAlive,
 } from '../../cli/src/background.js';
 import { killProcessTree } from '../../cli/src/subprocess.js';
+import { removeWithRetries, waitForPidExit } from '../helpers/wait-for-pid-exit.js';
 import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
@@ -54,21 +55,11 @@ function makeFakeRunner(tmp, sleepMs = 50) {
 
 // spawnDetached anchors the detached runner's CWD to `tmp` (the repo root that
 // owns .hopper/). On Windows a live process's CWD cannot be rmdir'd (EBUSY), so
-// a synchronous rmSync(tmp) right after spawn races the still-alive runner.
-// Wait for the runner to exit before cleanup.
-async function waitForPidExit(pid, capMs = 6000) {
-  const deadline = Date.now() + capMs;
-  while (pid && isAlive(pid) && Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 100));
-  }
-}
-
-// Reliable teardown: tree-kill any still-alive runner (backstop for the rare
-// case it outlives the wait — e.g. a real vendor that actually runs), then rm
-// with retries to ride out the brief window before the OS releases the dir.
-function cleanup(tmp, pid) {
+// every real child must be reaped before a bounded retry removes the temp repo.
+async function cleanup(tmp, pid) {
   if (pid) { try { killProcessTree(pid, process.platform === 'win32'); } catch (_) {} }
-  try { rmSync(tmp, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); } catch (_) {}
+  await waitForPidExit(pid, { isAlive });
+  await removeWithRetries(tmp);
 }
 
 test('spawnDetached refuses when output.md status=in-progress + alive PID (concurrent protection)', () => {
@@ -102,6 +93,7 @@ test('spawnDetached refuses when output.md status=in-progress + alive PID (concu
 
 test('spawnDetached writes initial in-progress frontmatter + PID + start_time', async () => {
   const { tmp, hopperDir } = setup();
+  let result;
   try {
     // Use a fake runner so this infrastructure test never starts a real vendor
     // CLI or holds a global vendor lock that can interfere with parallel tests.
@@ -109,7 +101,6 @@ test('spawnDetached writes initial in-progress frontmatter + PID + start_time', 
 
     // Catch: spawnDetached may throw if it can't write frontmatter (it should
     // not throw on the spawn itself unless the runner script is missing).
-    let result;
     try {
       result = spawnDetached({
         hopperDir,
@@ -157,14 +148,15 @@ test('spawnDetached writes initial in-progress frontmatter + PID + start_time', 
       assert.ok(fm.pid > 0, 'in-progress state must have a PID');
     }
 
-    await new Promise(r => setTimeout(r, 100));
+    await waitForPidExit(result.pid, { isAlive });
   } finally {
-    rmSync(tmp, { recursive: true, force: true });
+    await cleanup(tmp, result?.pid);
   }
 });
 
 test('spawnDetached: re-running after the first completes is allowed (no false-positive lock)', async () => {
   const { tmp, hopperDir } = setup();
+  let result;
   try {
     const outputMdPath = join(hopperDir, 'handoffs', 'T-rerun-output.md');
 
@@ -183,7 +175,6 @@ test('spawnDetached: re-running after the first completes is allowed (no false-p
     });
 
     // Now dispatch again — preflight should ALLOW (status != in-progress)
-    let result;
     try {
       result = spawnDetached({
         hopperDir,
@@ -204,9 +195,9 @@ test('spawnDetached: re-running after the first completes is allowed (no false-p
       'start_time must be refreshed for the new dispatch');
 
     // Wait for fake runner exit so we don't leave a child process behind
-    await new Promise(r => setTimeout(r, 100));
+    await waitForPidExit(result.pid, { isAlive });
   } finally {
-    rmSync(tmp, { recursive: true, force: true });
+    await cleanup(tmp, result?.pid);
   }
 });
 
@@ -304,16 +295,17 @@ test('F3 atomic lock: stale lockfile (>60s) is reclaimed', async () => {
     }
     assert.ok(result.pid > 0);
     // Let the detached runner exit so it releases tmp as its CWD before cleanup.
-    await waitForPidExit(result.pid);
+    await waitForPidExit(result.pid, { isAlive });
   } finally {
-    cleanup(tmp, result?.pid);
+    await cleanup(tmp, result?.pid);
   }
 });
 
 test('F2 + F3: spawnDetached releases lock after PID seeded', async () => {
   const { tmp, hopperDir } = setup();
+  let result;
   try {
-    const result = spawnDetached({
+    result = spawnDetached({
       hopperDir,
       taskId: 'T-lock-release',
       adapterName: 'codex',
@@ -327,9 +319,6 @@ test('F2 + F3: spawnDetached releases lock after PID seeded', async () => {
     // 'done' or 'failed' before our final check. Either way, lock
     // must not exist.)
     const lockPath = join(hopperDir, 'handoffs', 'T-lock-release.dispatching');
-    // Give a tiny moment for any cleanup if needed (still synchronous in
-    // spawnDetached's return path — race tolerance only).
-    await new Promise(r => setTimeout(r, 50));
     assert.equal(existsSync(lockPath), false,
       'lockfile must be deleted after PID is seeded into frontmatter');
 
@@ -339,9 +328,8 @@ test('F2 + F3: spawnDetached releases lock after PID seeded', async () => {
     assert.ok(fm.pid === result.pid || fm.pid === null || fm.status !== 'in-progress',
       `PID expected ${result.pid}; got ${fm.pid} with status ${fm.status}`);
 
-    // Give fake runner time to exit cleanly
-    await new Promise(r => setTimeout(r, 100));
+    await waitForPidExit(result.pid, { isAlive });
   } finally {
-    rmSync(tmp, { recursive: true, force: true });
+    await cleanup(tmp, result?.pid);
   }
 });

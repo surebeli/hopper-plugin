@@ -8,9 +8,10 @@ import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
-import { stopBackgroundJob, readFrontmatter, writeFrontmatter } from '../../cli/src/background.js';
+import { stopBackgroundJob, readFrontmatter, writeFrontmatter, isAlive } from '../../cli/src/background.js';
 import { verifyPidImage } from '../../cli/src/subprocess.js';
 import { readProgressEvents } from '../../cli/src/progress.js';
+import { removeWithRetries, waitForPidExit } from '../helpers/wait-for-pid-exit.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..', '..');
@@ -116,10 +117,11 @@ test('HOPPER-6: stopBackgroundJob records a completed tree cleanup for an owned 
     assert.equal(terminal.process_cleanup_attempted, true);
     assert.ok(terminal.process_cleanup_method);
 
-    await new Promise((resolve) => child.once('close', resolve));
+    await waitForPidExit(child.pid, { isAlive });
   } finally {
     try { child.kill('SIGKILL'); } catch (_) {}
-    rmSync(tmp, { recursive: true, force: true });
+    await waitForPidExit(child.pid, { isAlive });
+    await removeWithRetries(tmp);
   }
 });
 
