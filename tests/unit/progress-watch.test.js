@@ -434,3 +434,19 @@ test('--watch-events implementation uses fs.watchFile over output.md only', () =
   assert.doesNotMatch(source, /chokidar/i);
   assert.doesNotMatch(source, /watchFile\([^)]*progress/i);
 });
+
+test('both watcher modes require a terminal status and terminal_event_emitted', async () => {
+  const { isTerminalTaskFrontmatter } = await import(pathToFileURL(DISPATCH).href);
+  for (const status of ['done', 'failed', 'timeout', 'cancelled', 'orphaned']) {
+    assert.equal(isTerminalTaskFrontmatter({ status, terminal_event_emitted: true }), true, `${status} with terminal event`);
+    assert.equal(isTerminalTaskFrontmatter({ status, terminal_event_emitted: false }), false, `${status} before terminal event`);
+  }
+  for (const status of ['in-progress', 'unknown', '']) {
+    assert.equal(isTerminalTaskFrontmatter({ status, terminal_event_emitted: true }), false, `${status} is not terminal`);
+  }
+
+  const source = readFileSync(DISPATCH, 'utf-8');
+  assert.match(source, /if \(isTerminalTaskFrontmatter\(initialFm\)\)/, '--watch initial state must use the shared predicate');
+  assert.match(source, /if \(isTerminalTaskFrontmatter\(fm\)\)/, '--watch updates must use the shared predicate');
+  assert.match(source, /if \(!isTerminalTaskFrontmatter\(fm\)\) return;/, '--watch-events must use the shared predicate');
+});

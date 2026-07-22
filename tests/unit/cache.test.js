@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { projectInventoryEntry } from '../../cli/src/inventory-contract.js';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DISPATCH_CLI = join(REPO_ROOT, 'cli', 'bin', 'hopper-dispatch');
@@ -98,6 +99,56 @@ test('ordinary cache write fails closed before payload when owner-only hardening
     );
     assert.equal(readFileSync(path, 'utf-8'), active);
     assert.deepEqual(readdirSync(tmp).filter((name) => name.includes('.tmp.')), []);
+  });
+});
+
+test('cache parent hardening happens before lock, temp, or payload and fails closed', () => {
+  withTmpCache((tmp) => {
+    const parent = join(tmp, 'nested-cache-parent');
+    const prior = process.env.HOPPER_CACHE_DIR;
+    process.env.HOPPER_CACHE_DIR = parent;
+    try {
+      const result = setVendorCache('claude', { models: ['fable'] }, {
+        security: {
+          prepareParentOwnerOnly(path) {
+            assert.equal(path, parent);
+            assert.deepEqual(readdirSync(path), [], 'parent must be empty before any lock, temp, or payload');
+            throw new Error('simulated parent ACL failure');
+          },
+        },
+      });
+      assert.deepEqual(result, {
+        written: false,
+        outcome: 'missing',
+        diagnostic_code: 'inventory-cache-parent-owner-only-failed',
+      });
+      assert.deepEqual(readdirSync(parent), [], 'failed parent hardening must not write lock, temp, or payload');
+    } finally {
+      process.env.HOPPER_CACHE_DIR = prior;
+    }
+  });
+});
+
+test('cache parent hardening failure preserves active bytes and is public-safe', () => {
+  withTmpCache((tmp) => {
+    const path = cachePath();
+    const active = '{"version":1,"host":"old","probed_at_global":"","vendors":{},"active":"must remain byte-identical"}';
+    writeFileSync(path, active, 'utf-8');
+    const result = setVendorCache('claude', { models: ['fable'] }, {
+      security: { prepareParentOwnerOnly: () => { throw new Error('simulated parent ACL failure'); } },
+    });
+    assert.deepEqual(result, {
+      written: false,
+      outcome: 'ok-v1',
+      diagnostic_code: 'inventory-cache-parent-owner-only-failed',
+    });
+    assert.equal(readFileSync(path, 'utf-8'), active);
+    assert.deepEqual(readdirSync(tmp).filter((name) => name.endsWith('.lock') || name.includes('.tmp.')), []);
+    assert.equal(projectInventoryEntry('claude', {
+      diagnostic_code: result.diagnostic_code,
+      provenance: { source_kind: 'future-private-source', binary_availability: 'present', binary_basename: 'claude' },
+      future_root_escape: 'must-not-project',
+    }).diagnosticCode, 'inventory-cache-parent-owner-only-failed');
   });
 });
 

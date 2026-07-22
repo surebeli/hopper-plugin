@@ -112,9 +112,9 @@ export function readCacheWithDiagnostics() {
  */
 export function writeCache(data, { fsOps = DEFAULT_FS_OPS, security = {} } = {}) {
   const path = cachePath();
-  if (!fsOps.existsSync(dirname(path))) fsOps.mkdirSync(dirname(path), { recursive: true });
-  const tmp = `${path}.tmp.${process.pid}.${Date.now()}`;
   const mergedSecurity = { ...DEFAULT_SECURITY, ...security };
+  if (!prepareCacheParent(path, fsOps, mergedSecurity)) throw new Error('inventory-cache-parent-owner-only-failed');
+  const tmp = `${path}.tmp.${process.pid}.${Date.now()}`;
   const temp = createOwnerOnlyExclusive(tmp, fsOps, mergedSecurity);
   if (!temp.created) throw new Error('inventory-cache-write-owner-only-failed');
   try {
@@ -181,31 +181,37 @@ function releaseLock(lockPath) {
  */
 export function setVendorCache(name, entry, { fsOps = DEFAULT_FS_OPS, security = {} } = {}) {
   const path = cachePath();
-  if (!fsOps.existsSync(dirname(path))) fsOps.mkdirSync(dirname(path), { recursive: true });
+  const prior = readCacheWithOutcome();
+  const mergedSecurity = { ...DEFAULT_SECURITY, ...security };
+  if (!prepareCacheParent(path, fsOps, mergedSecurity)) {
+    return { written: false, outcome: prior.outcome, diagnostic_code: 'inventory-cache-parent-owner-only-failed' };
+  }
   const lockPath = `${path}.lock`;
   acquireLock(lockPath, LOCK_ACQUIRE_TIMEOUT_MS);
   try {
     // Re-read INSIDE the critical section so we merge against current state,
     // not a stale pre-lock snapshot. A malformed/future cache is not empty:
     // ordinary probes must not overwrite a byte of it.
-    const prior = readCacheWithOutcome();
-    if (prior.outcome === 'malformed' || prior.outcome === 'version-mismatch') {
-      return { written: false, outcome: prior.outcome, diagnostic_code: prior.diagnostic_code };
+    const current = readCacheWithOutcome();
+    if (current.outcome === 'malformed' || current.outcome === 'version-mismatch') {
+      return { written: false, outcome: current.outcome, diagnostic_code: current.diagnostic_code };
     }
-    const c = prior.outcome === 'missing' ? freshCache() : prior.cache;
+    const c = current.outcome === 'missing' ? freshCache() : current.cache;
     c.vendors = sanitizeVendorRegistry(c.vendors);
     const oldEntry = c.vendors[name] && typeof c.vendors[name] === 'object' ? c.vendors[name] : {};
     c.vendors[name] = sanitizeVendorEntry(mergeVendorEntry(oldEntry, entry));
     c.probed_at_global = new Date().toISOString();
     try {
-      writeCache(c, { fsOps, security });
+      writeCache(c, { fsOps, security: mergedSecurity });
     } catch (err) {
-      const diagnostic_code = err && err.message === 'inventory-cache-write-owner-only-failed'
-        ? 'inventory-cache-write-owner-only-failed'
+      const diagnostic_code = err && err.message === 'inventory-cache-parent-owner-only-failed'
+        ? 'inventory-cache-parent-owner-only-failed'
+        : err && err.message === 'inventory-cache-write-owner-only-failed'
+          ? 'inventory-cache-write-owner-only-failed'
         : 'inventory-cache-write-failed';
-      return { written: false, outcome: prior.outcome, diagnostic_code };
+      return { written: false, outcome: current.outcome, diagnostic_code };
     }
-    return { written: true, outcome: prior.outcome, diagnostic_code: 'none' };
+    return { written: true, outcome: current.outcome, diagnostic_code: 'none' };
   } finally {
     releaseLock(lockPath);
   }
@@ -328,6 +334,14 @@ function assertWindowsOwnerOnly(path) {
 }
 
 const DEFAULT_SECURITY = {
+  prepareParentOwnerOnly(path, { fsOps }) {
+    fsOps.chmodSync(path, 0o700);
+    if (process.platform === 'win32') hardenWindowsDirectoryAcl(path);
+  },
+  assertParentOwnerOnly(path, { fsOps }) {
+    if (process.platform === 'win32') return assertWindowsParentOwnerOnly(path);
+    return (fsOps.statSync(path).mode & 0o777) === 0o700;
+  },
   prepareOwnerOnly(path, { fsOps }) {
     fsOps.chmodSync(path, 0o600);
     if (process.platform === 'win32') hardenWindowsAcl(path);
@@ -337,6 +351,40 @@ const DEFAULT_SECURITY = {
     return (fsOps.statSync(path).mode & 0o777) === 0o600;
   },
 };
+
+function prepareCacheParent(path, fsOps, security) {
+  const directory = dirname(path);
+  try {
+    if (!fsOps.existsSync(directory)) fsOps.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    security.prepareParentOwnerOnly(directory, { fsOps });
+    return security.assertParentOwnerOnly(directory, { fsOps }) === true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function assertWindowsParentOwnerOnly(path) {
+  const identity = windowsIdentity();
+  if (!identity) return false;
+  const result = spawnSync('icacls', [path], { encoding: 'utf-8', windowsHide: true });
+  if (result.status !== 0) return false;
+  const aclLines = String(result.stdout || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => /:\([A-Z]/i.test(line));
+  return aclLines.length === 1
+    && aclLines[0].toLowerCase().endsWith(`${identity.toLowerCase()}:(oi)(ci)(f)`);
+}
+
+function hardenWindowsDirectoryAcl(path) {
+  const identity = windowsIdentity();
+  if (!identity) throw new Error('current Windows identity is unavailable');
+  const result = spawnSync('icacls', [path, '/inheritance:r', '/grant:r', `${identity}:(OI)(CI)(F)`], {
+    encoding: 'utf-8',
+    windowsHide: true,
+  });
+  if (result.status !== 0) throw new Error('icacls parent hardening failed');
+}
 
 function bestEffortUnlink(path, fsOps) {
   try { fsOps.unlinkSync(path); } catch (_) { /* cleanup is best-effort */ }
@@ -406,15 +454,16 @@ function syncDurability(path, fsOps) {
 export function recoverCache({ vendor = null, entry = null, now = () => new Date(), randomHex = () => randomBytes(4).toString('hex'), fsOps = DEFAULT_FS_OPS, security = {} } = {}) {
   const path = cachePath();
   const mergedSecurity = { ...DEFAULT_SECURITY, ...security };
-  const directory = dirname(path);
   let active = null;
   let activeExists = false;
   let tempPath = null;
   let currentBackupPath = null;
   try {
+    if (!prepareCacheParent(path, fsOps, mergedSecurity)) {
+      return { committed: false, diagnostic_code: 'inventory-cache-parent-owner-only-failed' };
+    }
     activeExists = fsOps.existsSync(path);
     if (activeExists) active = fsOps.readFileSync(path);
-    if (!fsOps.existsSync(directory)) fsOps.mkdirSync(directory, { recursive: true });
 
     tempPath = `${path}.tmp.${process.pid}.${Date.now()}.${randomHex()}`;
     const temp = createOwnerOnlyExclusive(tempPath, fsOps, mergedSecurity);

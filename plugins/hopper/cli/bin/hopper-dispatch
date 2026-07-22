@@ -149,13 +149,18 @@ function printSmoke() {
   process.exit(0);
 }
 
+function isHopperWorkspace(candidate) {
+  return existsSync(candidate) && statSync(candidate).isDirectory()
+    && existsSync(join(candidate, 'handoffs')) && statSync(join(candidate, 'handoffs')).isDirectory();
+}
+
 function findHopperDir() {
   if (process.env.HOPPER_DIR) {
     const p = resolve(process.env.HOPPER_DIR);
     // An explicit HOPPER_DIR is authoritative: if it does not exist, report
     // "not found" rather than silently falling back to an ancestor walk
     // (which could bind to an unrelated `.hopper` such as a global cache dir).
-    if (existsSync(p)) return p;
+    if (isHopperWorkspace(p)) return p;
     return null;
   }
   // Walk up from cwd looking for .hopper/. A bare `.hopper` is not enough:
@@ -165,7 +170,7 @@ function findHopperDir() {
   let cur = process.cwd();
   for (let i = 0; i < 5; i++) {
     const candidate = join(cur, '.hopper');
-    if (existsSync(candidate) && existsSync(join(candidate, 'handoffs'))) return candidate;
+    if (isHopperWorkspace(candidate)) return candidate;
     const parent = resolve(cur, '..');
     if (parent === cur) break;
     cur = parent;
@@ -1298,8 +1303,8 @@ function taskIdFromOutputPath(outputMdPath, fm) {
   return fm.task_id || basename(outputMdPath).replace(/-output\.md$/, '');
 }
 
-function isTerminalFrontmatter(fm) {
-  return fm.terminal_event_emitted === true && TERMINAL_TASK_STATUSES.has(fm.status);
+export function isTerminalTaskFrontmatter(fm) {
+  return fm?.terminal_event_emitted === true && TERMINAL_TASK_STATUSES.has(fm.status);
 }
 
 function listOutputMarkdownFiles(handoffDir) {
@@ -1361,7 +1366,7 @@ export function runWatchEvents(
       console.error(`watch-events: could not read ${outputMdPath}: ${err.message}`);
       return;
     }
-    if (!isTerminalFrontmatter(fm)) return;
+    if (!isTerminalTaskFrontmatter(fm)) return;
 
     const taskId = taskIdFromOutputPath(outputMdPath, fm);
     const seq = Number.isInteger(fm.progress_seq) ? fm.progress_seq : 0;
@@ -1576,7 +1581,7 @@ async function runWatch(hopperDir, taskId) {
   // --watch is invoked, surface result + exit immediately. Previously
   // `lastStatus = initialFm.status` made the watch loop think nothing
   // changed, so the file got tailed once and then we waited forever.
-  if (initialFm.status === 'done' || initialFm.status === 'failed' || initialFm.status === 'orphaned') {
+  if (isTerminalTaskFrontmatter(initialFm)) {
     const logPath = outputMdPath.replace(/\.md$/, '.log');
     if (existsSync(logPath)) {
       try {
@@ -1625,9 +1630,9 @@ async function runWatch(hopperDir, taskId) {
     // Check status
     try {
       const fm = readFrontmatter(outputMdPath);
-      if (fm.status !== lastStatus) {
+      if (fm.status !== lastStatus || isTerminalTaskFrontmatter(fm)) {
         lastStatus = fm.status;
-        if (fm.status === 'done' || fm.status === 'failed' || fm.status === 'orphaned') {
+        if (isTerminalTaskFrontmatter(fm)) {
           unwatchFile(outputMdPath, handler);
           console.error('');
           console.error(`=== TASK ${fm.status.toUpperCase()} ===`);

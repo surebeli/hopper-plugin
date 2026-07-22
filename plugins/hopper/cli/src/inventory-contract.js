@@ -27,6 +27,7 @@ const DIAGNOSTIC_CODES = new Set([
   'runtime-model-metadata-absent',
   'inventory-cache-version-unsupported',
   'inventory-cache-malformed',
+  'inventory-cache-parent-owner-only-failed',
   'inventory-cache-recovery-backup-create-failed',
   'inventory-cache-recovery-replace-failed',
   'inventory-cache-recovery-durability-unknown',
