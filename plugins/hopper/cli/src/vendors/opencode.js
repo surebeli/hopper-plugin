@@ -43,9 +43,9 @@ export const opencodeAdapter = {
       sourceNote: 'opencode --model <provider/model>. Provider prefix required. Available models depend on YOUR opencode auth configuration + active subscriptions, NOT on this adapter. Run `opencode models` on your machine for live list. See .hopper/handoffs/T-DOGFOOD-PHASE6A-VENDORS.md for a sample snapshot from one dev machine (illustrative, not canonical).',
     },
     reasoningArg: {
-      accepted: 'ignored',
+      accepted: 'enumerated',
       knownGood: [],
-      sourceNote: 'CORRECTION (ISSUE-codex-vendor-model-effort, 2026-06): `opencode run --variant <name>` DOES exist (the earlier "no CLI flag" note was stale). But variant values are provider/model-specific and validated by the provider API, and opencode runs arbitrary models, so the adapter does NOT forward the canonical xhigh default automatically (would break non-reasoning models). Default path: ignored. Opt-in: set HOPPER_OPENCODE_VARIANT=<variant> to pass --variant.',
+      sourceNote: 'CORRECTION (ISSUE-codex-vendor-model-effort, 2026-06): `opencode run --variant <name>` sets a provider/model-specific variant. Hopper forwards its canonical --reasoning value as --variant ONLY when the caller explicitly supplied --reasoning; a synthesized AGENTS/default xhigh is omitted so arbitrary/custom providers are not broken. HOPPER_OPENCODE_VARIANT=<variant> has higher precedence and passes through verbatim. OpenCode/provider validates the variant; this adapter claims no universal provider/model variant enum.',
     },
     features: {
       sessionResume: { supported: true, mechanism: '`opencode run --session <id>` / `--continue` / `--fork`. Session IDs per-machine (sst/opencode#10349 — not portable Win<->macOS).' },
@@ -71,12 +71,15 @@ export const opencodeAdapter = {
       ...(opts.model ? ['--model', opts.model] : []),
       // `opencode run --variant <provider-specific>` sets reasoning effort, but the
       // valid set is PER-MODEL (validated by the provider API) and opencode runs
-      // arbitrary provider models — so unlike mimo (a fork with a known variant set)
-      // we do NOT forward the xhigh default automatically (it would break non-
-      // reasoning models). Opt-in: HOPPER_OPENCODE_VARIANT (ISSUE-codex-vendor-model-effort).
+      // arbitrary provider models. Preserve the safe no-variant behavior for a
+      // synthesized AGENTS/global default; only an explicitly requested Hopper
+      // --reasoning is forwarded. HOPPER_OPENCODE_VARIANT remains the raw, highest-
+      // precedence opt-in escape hatch for provider-specific variants.
       ...(process.env.HOPPER_OPENCODE_VARIANT
         ? ['--variant', process.env.HOPPER_OPENCODE_VARIANT]
-        : []),
+        : (opts.reasoningSource === 'user-argv' && opts.reasoning
+          ? ['--variant', opts.reasoning]
+          : [])),
       ...(opts.conversationId ? ['-s', opts.conversationId] : []),
       '--print-logs',
       '--format', 'json',

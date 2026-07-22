@@ -32,6 +32,14 @@ hopper-dispatch T-PROG-REVIEW --background --reasoning xhigh
 hopper-dispatch --progress T-PROG-REVIEW
 ```
 
+Dispatch with an explicitly selected OpenCode variant when the selected
+provider/model documents that variant:
+
+```bash
+hopper-dispatch T-PROG-REVIEW --background --vendor opencode --reasoning high
+# Hopper emits: opencode run ... --variant high
+```
+
 Dispatch with a model override for vendors that honor `--model`:
 
 ```bash
@@ -43,7 +51,7 @@ Expected output includes a runner PID and `.hopper/handoffs/<task-id>-output.md`
 
 ### Notes
 
-Vendor selection comes from `.hopper/AGENTS.md`, not from `--model`. `--reasoning` is honored by codex and mimo; Kimi reasoning is config/provider driven in `kimi -p`; `--model` is honored by kimi, opencode, copilot, grok, and mimo. Unsupported flags are ignored by the adapter rather than remapping to another vendor.
+Vendor selection comes from `.hopper/AGENTS.md`, not from `--model`. `--reasoning` is honored by codex, mimo, grok, and copilot; OpenCode maps an **explicitly supplied** value to its provider-specific `--variant`, but omits AGENTS/global defaults to protect arbitrary providers. `HOPPER_OPENCODE_VARIANT` has higher precedence and passes through verbatim. Kimi reasoning is config/provider driven in `kimi -p`; `--model` is honored by kimi, opencode, copilot, grok, and mimo. OpenCode/provider validates variants, so tokenbox/DeepSeek support is unverified unless its provider documents it.
 
 ## Recipe 2 - Background dispatch and active progress checks
 

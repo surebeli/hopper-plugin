@@ -7,6 +7,10 @@
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { delimiter, join } from 'node:path';
+import { platform, tmpdir } from 'node:os';
 import {
   runSubprocessOnce,
   resolveDispatchTimeouts,
@@ -31,6 +35,19 @@ function withEnv(key, value, fn) {
   try { return fn(); } finally {
     if (prev === undefined) delete process.env[key];
     else process.env[key] = prev;
+  }
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (_) {
+    return false;
   }
 }
 
@@ -74,6 +91,55 @@ test('runSubprocessOnce: idle fires after silence (reason=idle), well under ceil
   assert.equal(r.timedOut, true);
   assert.equal(r.timeoutReason, 'idle');
   assert.ok(r.durationMs < 4000, `idle should kill fast; got ${r.durationMs}ms`);
+});
+
+test('runSubprocessOnce: Windows cleanup fallback settles and reaps an owned child when taskkill reports false success', {
+  skip: platform() !== 'win32' ? 'Windows-only taskkill lifecycle' : false,
+  timeout: 8_000,
+}, async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-timeout-fallback-'));
+  const pidPath = join(tmp, 'taskkill-pid.txt');
+  const previousPath = process.env.PATH;
+  let resultPromise = null;
+  try {
+    writeFileSync(join(tmp, 'taskkill.cmd'), [
+      '@echo off',
+      `>${JSON.stringify(pidPath)} echo %2`,
+      'exit /b 0',
+      '',
+    ].join('\r\n'));
+    process.env.PATH = `${tmp}${delimiter}${previousPath || ''}`;
+
+    resultPromise = runSubprocessOnce({
+      command: process.execPath,
+      args: ['-e', 'setInterval(() => {}, 60_000)'],
+      stdinInput: null,
+      idleMs: 50,
+      timeoutMs: 8_000,
+    });
+    const result = await Promise.race([
+      resultPromise,
+      delay(2_000).then(() => { throw new Error('Windows cleanup fallback did not settle'); }),
+    ]);
+
+    assert.equal(result.timedOut, true);
+    assert.equal(result.timeoutReason, 'idle');
+    assert.ok(existsSync(pidPath), 'the taskkill shim observed the owned child PID');
+    const pid = Number.parseInt(readFileSync(pidPath, 'utf-8'), 10);
+    assert.ok(Number.isInteger(pid) && pid > 0);
+    assert.equal(isAlive(pid), false, 'the fallback must not leave the owned child alive');
+  } finally {
+    if (existsSync(pidPath)) {
+      const pid = Number.parseInt(readFileSync(pidPath, 'utf-8'), 10);
+      if (Number.isInteger(pid) && pid > 0 && isAlive(pid)) {
+        try { execFileSync(join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'taskkill.exe'), ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' }); } catch (_) {}
+      }
+    }
+    if (resultPromise) await Promise.race([resultPromise.catch(() => {}), delay(2_000)]);
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('runSubprocessOnce: streaming output keeps resetting idle (no kill)', async () => {

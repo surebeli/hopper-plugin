@@ -14,6 +14,8 @@ export function createActionsRouter({
   probeCleanupTimeoutMs = PROBE_CLEANUP_TIMEOUT_MS,
   killProcessTreeImpl = killProcessTree,
   isWindows = platform() === 'win32',
+  setTimeoutImpl = setTimeout,
+  clearTimeoutImpl = clearTimeout,
 } = {}) {
   const router = Router();
   const active = new Set();
@@ -37,6 +39,8 @@ export function createActionsRouter({
         killProcessTreeImpl,
         probeCleanupTimeoutMs,
         probeTimeoutMs,
+        setTimeoutImpl,
+        clearTimeoutImpl,
       });
       res.status(result.httpStatus).json(result.payload);
     } catch (err) {
@@ -64,6 +68,8 @@ function runProbe(vendor, spawnProbeImpl, {
   killProcessTreeImpl,
   probeCleanupTimeoutMs,
   probeTimeoutMs,
+  setTimeoutImpl,
+  clearTimeoutImpl,
 }) {
   return new Promise((resolveRun, rejectRun) => {
     let child;
@@ -83,8 +89,8 @@ function runProbe(vendor, spawnProbeImpl, {
     const finish = (httpStatus, outcome) => {
       if (settled) return;
       settled = true;
-      if (timeout) clearTimeout(timeout);
-      if (cleanupTimeout) clearTimeout(cleanupTimeout);
+      if (timeout) clearTimeoutImpl(timeout);
+      if (cleanupTimeout) clearTimeoutImpl(cleanupTimeout);
       child.off('error', onError);
       child.off('exit', onExit);
       child.off('close', onClose);
@@ -117,15 +123,15 @@ function runProbe(vendor, spawnProbeImpl, {
     child.once('error', onError);
     child.once('exit', onExit);
     child.once('close', onClose);
-    timeout = setTimeout(() => {
+    timeout = setTimeoutImpl(() => {
       if (settled) return;
       timedOut = true;
-      clearTimeout(timeout);
+      clearTimeoutImpl(timeout);
       timeout = null;
       const cleanupWait = Number.isFinite(probeCleanupTimeoutMs) && probeCleanupTimeoutMs >= 0
         ? probeCleanupTimeoutMs
         : PROBE_CLEANUP_TIMEOUT_MS;
-      cleanupTimeout = setTimeout(() => finish(504, 'failed'), cleanupWait);
+      cleanupTimeout = setTimeoutImpl(() => finish(504, 'failed'), cleanupWait);
       try {
         killProcessTreeImpl(child.pid, isWindows);
       } catch (_) {

@@ -64,7 +64,7 @@ Not every CLI exposes both knobs. What each vendor honors:
 | grok | `-m` | ✓ | enum low/med/high; `xhigh` clamps to `high`. |
 | mimo | `--model` | ✓ | `xhigh` → `--variant max`. |
 | copilot | `--model` | ✓ | enum low/med/high; `xhigh` clamps to `high`. Raw override: `HOPPER_COPILOT_EFFORT`. |
-| opencode | `--model <provider/model>` | opt-in | effort via `--variant`; enable with `HOPPER_OPENCODE_VARIANT=<v>` (per-model, off by default). |
+| opencode | `--model <provider/model>` | explicit only | a caller-supplied `--reasoning high` becomes `--variant high`; Hopper omits policy/default `xhigh` for provider compatibility. `HOPPER_OPENCODE_VARIANT=<v>` overrides it verbatim. |
 | kimi | `-m` | — | `kimi -p` has no per-call effort flag. |
 | claude | `--model` | — | `claude -p` has no effort flag. |
 | agy | — | — | ⚠️ **DISABLED by default** — see below. |
@@ -93,8 +93,19 @@ Tuning via environment variables:
 |---|---|
 | `HOPPER_DEFAULT_REASONING` | global effort default (else `xhigh`). |
 | `HOPPER_COPILOT_EFFORT` | raw copilot `--effort` value (e.g. `max`); `""` omits it. |
-| `HOPPER_OPENCODE_VARIANT` | enable + set opencode `--variant`. |
+| `HOPPER_OPENCODE_VARIANT` | highest-precedence raw OpenCode `--variant` override; provider/model validates the value. |
 | `HOPPER_GROK_EFFORT` | raw grok `--effort` value; `""` omits it. |
+
+For OpenCode, specify a variant only when the selected provider/model documents it:
+
+```bash
+# OpenCode receives: opencode run ... --variant high
+hopper-dispatch T-PROG-AUDIT --background --vendor opencode --reasoning high
+```
+
+When `--reasoning` is omitted, Hopper retains its general effective default for
+other adapters but intentionally sends **no** OpenCode `--variant`; custom
+providers such as tokenbox/DeepSeek have no Hopper-verified variant contract.
 
 Dispatch permissions default to `danger-full-access` so implementation tasks can edit
 files. If a task brief/spec says `read-only` / `只读`, hopper auto-downgrades the vendor

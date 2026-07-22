@@ -34,6 +34,29 @@ function createProbeChild(pid) {
   return child;
 }
 
+function createManualTimers() {
+  const pending = [];
+  return {
+    clearTimeout(timer) {
+      timer.cancelled = true;
+    },
+    setTimeout(callback, delayMs) {
+      const timer = { callback, cancelled: false, delayMs };
+      pending.push(timer);
+      return timer;
+    },
+    fire(delayMs) {
+      const timer = pending.find((candidate) => candidate.delayMs === delayMs && !candidate.cancelled);
+      assert.ok(timer, `expected a pending ${delayMs}ms timer`);
+      timer.cancelled = true;
+      timer.callback();
+    },
+    has(delayMs) {
+      return pending.some((timer) => timer.delayMs === delayMs && !timer.cancelled);
+    },
+  };
+}
+
 const CLOSED_PROBE_KEYS = ['diagnosticCode', 'diagnosticState', 'status', 'vendor'].sort();
 const RAW_PROBE_SENTINELS = [
   'RAW_STDOUT_PRIVATE',
@@ -477,6 +500,7 @@ test('probe timeout cleans the process tree and holds the vendor lock until chil
 
 test('probe timeout cleanup fallback is bounded and keeps the vendor busy until fallback', async () => {
   const timedOutChild = createProbeChild(4343);
+  const timers = createManualTimers();
   let cleanupCalls = 0;
   let spawnCount = 0;
   const app = express();
@@ -484,6 +508,8 @@ test('probe timeout cleanup fallback is bounded and keeps the vendor busy until 
   app.use('/api/action', createActionsRouter({
     probeTimeoutMs: 5,
     probeCleanupTimeoutMs: 40,
+    setTimeoutImpl: timers.setTimeout,
+    clearTimeoutImpl: timers.clearTimeout,
     killProcessTreeImpl: () => {
       cleanupCalls += 1;
       return { status: 'succeeded', method: 'fake-tree-cleanup' };
@@ -511,7 +537,9 @@ test('probe timeout cleanup fallback is bounded and keeps the vendor busy until 
       headers: { 'Content-Type': 'application/json' },
       method: 'POST',
     });
-    await waitFor(() => cleanupCalls === 1);
+    await waitFor(() => timers.has(5));
+    timers.fire(5);
+    await waitFor(() => cleanupCalls === 1 && timers.has(40));
     assert.equal(cleanupCalls, 1);
     const duplicate = await fetch(`http://127.0.0.1:${port}/api/action/probe`, {
       body: JSON.stringify({ vendor: 'codex' }),
@@ -520,6 +548,7 @@ test('probe timeout cleanup fallback is bounded and keeps the vendor busy until 
     });
     assert.equal(duplicate.status, 409);
 
+    timers.fire(40);
     const response = await first;
     assert.equal(response.status, 504);
     assertClosedProbePayload(await response.json(), {

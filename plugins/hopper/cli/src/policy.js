@@ -130,9 +130,9 @@ export function resolveVerifiedLatest(knownGood) {
  * private clamp functions already do (xhigh->high, minimal->low) WITHOUT
  * needing a vendor-specific function — any vendor whose knownGood is a
  * (possibly sparse) subset of the canonical 5-level scale gets a sensible
- * clamp for free. Vendors with an EMPTY knownGood (kimi/opencode/agy/claude —
- * they ignore --reasoning entirely) are correctly treated as "not applicable"
- * (returns null), not "everything is out of range".
+ * clamp for free. Vendors with an EMPTY knownGood (Kimi/Claude/Agy, plus
+ * OpenCode because its variants are provider/model-specific) are correctly
+ * treated as "not applicable" (returns null), not "everything is out of range".
  * @param {string} requested
  * @param {string[]} vendorKnownGood
  * @returns {string|null} the clamped level, or null if not applicable/no clamp needed
@@ -157,7 +157,8 @@ export function genericClampEffort(requested, vendorKnownGood) {
  * Compute a human-readable clamp notice (req #2: "clamp visibility" — no more
  * silent vendor-side remapping). Returns `{ inRange, clamped, notice }`;
  * `notice` is null when no clamp happened (in-range, or vendor doesn't clamp
- * at all — e.g. kimi/opencode/agy/claude, whose reasoningArg.knownGood is empty).
+ * at all — e.g. Kimi/Claude/Agy, plus OpenCode whose variants have no universal
+ * adapter enum).
  * @param {string} vendor
  * @param {string} requested          the resolved effort BEFORE vendor clamping
  * @param {string[]} vendorKnownGood  vendor's capabilities.reasoningArg.knownGood
@@ -166,7 +167,7 @@ export function genericClampEffort(requested, vendorKnownGood) {
 export function computeEffortClamp(vendor, requested, vendorKnownGood = []) {
   if (!requested) return { inRange: true, clamped: null, notice: null };
   if (!Array.isArray(vendorKnownGood) || vendorKnownGood.length === 0) {
-    return { inRange: true, clamped: null, notice: null }; // vendor doesn't consume reasoning at all
+    return { inRange: true, clamped: null, notice: null }; // no universal adapter enum to clamp against
   }
   if (vendorKnownGood.includes(requested)) return { inRange: true, clamped: null, notice: null };
   const clamped = genericClampEffort(requested, vendorKnownGood);

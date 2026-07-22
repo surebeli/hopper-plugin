@@ -343,7 +343,7 @@ For quick reference (re-verify quarterly per each adapter's `staleAfter` date):
 |---|---|---|---|---|---|
 | **codex** | IGNORED | `minimal \| low \| medium \| high \| xhigh` | ✓ | ✓ (`--output-last-message`, unused by adapter) | ✓ |
 | **kimi** | freeform (e.g. `default`) | IGNORED | ✓ (`--session <id>` / `--continue`) | ✗ | ✓ |
-| **opencode** | freeform (`<provider>/<model>`) | IGNORED | ✓ (per-machine session IDs; NOT cross-OS) | ✗ | ✓ |
+| **opencode** | freeform (`<provider>/<model>`) | explicit-only: Hopper `--reasoning` → `--variant`; defaults omitted | ✓ (per-machine session IDs; NOT cross-OS) | ✗ | ✓ |
 | **copilot** | freeform | IGNORED | partial (`--resume` picker; UNCONFIRMED ID arg) | ✗ | ✓ |
 | **agy** | IGNORED | IGNORED | UNCONFIRMED | ✗ (`--log-file` is diagnostic, not answer) | ✓ |
 | **grok** | freeform (`-m`; default `grok-4.5`) | IGNORED (no CLI flag) | ✓ (`-s` / `-r` / `-c`) | ✗ (stdout only) | ✓ (`--output-format streaming-json`) |
@@ -351,7 +351,7 @@ For quick reference (re-verify quarterly per each adapter's `staleAfter` date):
 
 **Honest gotchas surfaced by the capability data**:
 
-- Only **codex** and **mimo** honor `--reasoning`. Passing `--reasoning xhigh` to kimi/opencode/copilot/agy/grok is silently ignored by their adapters.
+- **OpenCode** forwards only an explicitly supplied Hopper `--reasoning` as `opencode run --variant`; AGENTS/global defaults are omitted for arbitrary-provider safety. `HOPPER_OPENCODE_VARIANT` is a higher-precedence raw override. The provider/model validates the value.
 - Only **kimi / opencode / copilot / grok / mimo** accept `--model`. Passing `--model X` to codex or agy is silently ignored.
 - **grok** has a binary-name collision: xAI's official "Grok Build" CLI and the third-party `superagent-ai/grok-cli` both install a binary named `grok`. The adapter targets the official one (`XAI_API_KEY`, `~/.grok/`); it never reads `GROK_API_KEY` (the third-party var). Authored from docs research, not yet live-dogfooded.
 - **mimo** accepts both `--model` and `--reasoning` (`--reasoning xhigh` maps to MiMo `--variant max`).

@@ -42,7 +42,8 @@
  * Adapter invocation options.
  * @typedef {object} AdapterOpts
  * @property {'read-only'|'workspace-write'|'danger-full-access'} [sandbox]  Vendor permission mode. Dispatcher defaults to danger-full-access unless task text explicitly says read-only.
- * @property {string} [reasoning]     Reasoning effort hint (codex honors the enum directly; mimo maps it to --variant; kimi/opencode/grok currently ignore or use config/vendor-specific knobs instead of argv)
+ * @property {string} [reasoning]     Reasoning effort hint (codex honors the enum directly; mimo maps it to --variant; OpenCode forwards only an explicit caller value as a provider-specific --variant; other adapters may ignore or use config/vendor-specific knobs)
+ * @property {'user-argv'|'policy'|'default'} [reasoningSource] Provenance of the effective reasoning value. Set by resolveAdapterOptsForTask so adapters can distinguish an explicit CLI selection from AGENTS/default fallback.
  * @property {string} [model]         Optional model override
  * @property {string|null} [requestedSelector] Original user `--model` value for audit only; set by the dispatcher and never used for runtime comparison
  * @property {string|null} [effectiveSelector] Policy-resolved selector actually passed to the adapter; null means vendor default

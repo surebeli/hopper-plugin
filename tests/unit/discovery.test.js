@@ -268,13 +268,16 @@ test('capabilities: kimi/opencode/copilot/mimo accept --model freeform', () => {
   }
 });
 
-test('capabilities: opencode/agy/kimi ignore --reasoning by default (kimi 0.x dropped --thinking argv)', () => {
+test('capabilities: OpenCode accepts explicitly selected variants; agy/kimi ignore --reasoning', () => {
   // T-KIMI-MIGRATE: Kimi Code 0.x removed the --thinking/--no-thinking argv toggle;
   // reasoning is now config/provider-driven rather than a prompt-mode argv flag, so the
   // adapter no longer forwards opts.reasoning → reasoningArg.accepted is 'ignored'.
-  // opencode's --variant exists but is opt-in (HOPPER_OPENCODE_VARIANT); default path ignores.
+  // OpenCode forwards only an explicit caller-selected --reasoning as --variant; its
+  // synthesized default remains omitted because providers define variants themselves.
   // (copilot moved to 'enumerated' — see the --effort test below.)
-  for (const name of ['opencode', 'agy', 'kimi']) {
+  assert.equal(capabilitiesForAdapter('opencode').reasoningArg.accepted, 'enumerated',
+    'OpenCode has first-class explicit --reasoning -> --variant support');
+  for (const name of ['agy', 'kimi']) {
     const caps = capabilitiesForAdapter(name);
     assert.equal(caps.reasoningArg.accepted, 'ignored',
       `${name} adapter does not forward opts.reasoning as an argv flag by default`);

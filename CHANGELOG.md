@@ -19,6 +19,18 @@ convention: any user-observable behavior change (new capability, fixed defect,
 changed default) bumps minor; patch is reserved for the rare non-functional
 tweak.
 
+## [0.34.2] - 2026-07-22
+
+### Added
+
+- **OpenCode explicit reasoning forwarding.** An explicitly supplied Hopper
+  `--reasoning <level>` now becomes `opencode run --variant <level>`. A
+  provider-specific `HOPPER_OPENCODE_VARIANT` still has higher precedence and
+  is passed through unchanged. Hopper deliberately omits `--variant` when its
+  reasoning value was inherited from AGENTS policy or the global default, so
+  arbitrary/custom OpenCode providers are not assumed to support a universal
+  variant set.
+
 ## [0.34.1] - 2026-07-22
 
 ### Fixed

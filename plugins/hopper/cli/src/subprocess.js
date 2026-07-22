@@ -62,6 +62,7 @@ export { REVIEW_TASK_TYPES, REVIEW_TASK_FLOOR_MS };
 // Both env-overridable; an explicit per-task --timeout sets the ceiling.
 const DEFAULT_IDLE_TIMEOUT_MS = 180_000;   // 3 min of silence ⇒ treat as stuck
 const CEILING_FLOOR_MS = 1_800_000;        // ≥30 min absolute ceiling (safety net)
+const WINDOWS_TIMEOUT_CLOSE_GRACE_MS = 250;
 
 function envPositiveInt(name) {
   const v = Number.parseInt(process.env[name] ?? '', 10);
@@ -91,7 +92,7 @@ export function resolveDispatchTimeouts(adapterBaselineMs, opts = {}) {
   return { idleMs: Math.min(idleMs, ceilingMs), ceilingMs };
 }
 
-export { DEFAULT_IDLE_TIMEOUT_MS, CEILING_FLOOR_MS };
+export { DEFAULT_IDLE_TIMEOUT_MS, CEILING_FLOOR_MS, WINDOWS_TIMEOUT_CLOSE_GRACE_MS };
 
 /**
  * Idle-detection helper for vendors that emit a periodic heartbeat to their log even when
@@ -226,12 +227,42 @@ export async function runSubprocessOnce({
     let processCleanup = { status: 'not-needed', method: null };
     let killTimer = null;
     let idleTimer = null;
+    let windowsCleanupTimer = null;
+    let settleExit = null;
+    let exitSettled = false;
 
     const clearTimeoutTimers = () => {
       if (killTimer) clearTimeout(killTimer);
       if (idleTimer) clearTimeout(idleTimer);
+      if (windowsCleanupTimer) clearTimeout(windowsCleanupTimer);
       killTimer = null;
       idleTimer = null;
+      windowsCleanupTimer = null;
+    };
+
+    const settleWindowsCleanupFallback = () => {
+      if (!isWindows || !timedOut || exitSettled) return;
+      // `taskkill /T /F` is synchronous, but a Windows ChildProcess can still
+      // omit its `close` event after that tree has been reaped. Ask the owned
+      // direct child to terminate too, then settle from the bounded cleanup
+      // path if its streams never close. This is cleanup only, never a second
+      // vendor invocation or dispatch retry.
+      if (child.exitCode === null && child.signalCode === null) {
+        try { child.kill('SIGKILL'); } catch (_) {}
+      }
+      windowsCleanupTimer = setTimeout(() => {
+        if (!exitSettled) {
+          try { child.stdin?.destroy(); } catch (_) {}
+          try { child.stdout?.destroy(); } catch (_) {}
+          try { child.stderr?.destroy(); } catch (_) {}
+          settleExit?.(child.exitCode, child.signalCode || 'SIGKILL');
+        }
+      }, WINDOWS_TIMEOUT_CLOSE_GRACE_MS);
+    };
+
+    const armWindowsCleanupFallback = () => {
+      if (!isWindows || windowsCleanupTimer || exitSettled) return;
+      windowsCleanupTimer = setTimeout(settleWindowsCleanupFallback, WINDOWS_TIMEOUT_CLOSE_GRACE_MS);
     };
 
     const claimTimeout = (reason) => {
@@ -242,6 +273,7 @@ export async function runSubprocessOnce({
       // arriving after a best-effort cleanup must not re-arm idle either.
       clearTimeoutTimers();
       processCleanup = killProcessTree(child.pid, isWindows);
+      armWindowsCleanupFallback();
       return true;
     };
 
@@ -275,15 +307,15 @@ export async function runSubprocessOnce({
     armIdle();  // start the idle clock at spawn (silence before first byte counts)
 
     const exitCode = await new Promise((resolve) => {
-      child.on('close', (code, signal) => {
+      settleExit = (code, signal) => {
+        if (exitSettled) return;
+        exitSettled = true;
         clearTimeoutTimers();
         // Map signal to exit-code-equivalent (POSIX convention: 128 + signal)
         resolve(code != null ? code : 128 + (signal === 'SIGKILL' ? 9 : signal === 'SIGTERM' ? 15 : 0));
-      });
-      child.on('error', (_err) => {
-        clearTimeoutTimers();
-        resolve(127); // command-not-found convention
-      });
+      };
+      child.on('close', settleExit);
+      child.on('error', (_err) => settleExit(127, null)); // command-not-found convention
     });
 
     const durationMs = Date.now() - startedAt;

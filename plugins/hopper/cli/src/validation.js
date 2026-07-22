@@ -58,9 +58,10 @@ export function validateVendor(name) {
 export const MODEL_PATTERN = /^[A-Za-z][A-Za-z0-9._/:()[\] -]{0,99}$/;
 
 /**
- * Reasoning effort whitelist. Matches codex CLI's vocabulary; kimi/opencode/
- * copilot adapters may or may not honor this opt — they ignore unrecognized
- * opts harmlessly. agy currently ignores it.
+ * Reasoning effort whitelist. Matches codex CLI's vocabulary; OpenCode forwards
+ * an explicitly requested value as its provider-specific --variant, while Kimi
+ * and Claude have no prompt-mode effort argv. Other adapters may clamp or ignore
+ * the canonical values according to their own contracts.
  *
  * Per Phase 6b vendor-introspection research 2026-05-21: codex actually
  * supports 5 levels (`minimal | low | medium | high | xhigh`), not 4.
@@ -71,9 +72,10 @@ export const ALLOWED_REASONING = Object.freeze(['minimal', 'low', 'medium', 'hig
 /**
  * Default reasoning/effort when a dispatch does not pass --reasoning. Product
  * decision (owner 2026-06-16): max out by default; explicit --reasoning or
- * HOPPER_DEFAULT_REASONING overrides. Only codex/grok/mimo consume it. Safe
- * together with the idle-timeout primitive (a slow max-effort run is killed only
- * for going SILENT, not for being slow).
+ * HOPPER_DEFAULT_REASONING overrides. OpenCode deliberately does NOT forward this
+ * synthesized default: only a caller's explicit --reasoning becomes OpenCode's
+ * provider-specific --variant. Safe together with the idle-timeout primitive (a
+ * slow max-effort run is killed only for going SILENT, not for being slow).
  */
 export const DEFAULT_DISPATCH_REASONING = 'xhigh';
 

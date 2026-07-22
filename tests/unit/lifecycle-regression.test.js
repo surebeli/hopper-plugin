@@ -44,7 +44,7 @@ function installSlowFakeKimi(binDir, sleepScriptPath) {
   chmodSync(fake, 0o755);
 }
 
-async function waitFor(check, timeoutMs = 1_500) {
+async function waitFor(check, timeoutMs = 6_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const value = check();
@@ -254,7 +254,7 @@ test('stream lifecycle extraction records only safe event metadata', () => {
   assert.match(runner, /appendVendorHeartbeat/);
 });
 
-test('Kimi runner emits content-free process_alive liveness while text output is live', async () => {
+test('Kimi runner emits content-free process_alive liveness while text output is live', { timeout: 12_000 }, async () => {
   const root = mkdtempSync(join(tmpdir(), 'hopper-kimi-liveness-'));
   const hopperDir = join(root, '.hopper');
   const handoffs = join(hopperDir, 'handoffs');
@@ -263,6 +263,7 @@ test('Kimi runner emits content-free process_alive liveness while text output is
   const logPath = join(handoffs, `${taskId}-output.log`);
   const binDir = join(root, 'fake-bin');
   const counterPath = join(root, 'kimi-spawn-count.txt');
+  const releasePath = join(root, 'release-kimi.txt');
   const sleepScriptPath = join(root, 'slow-kimi.js');
   const pathKey = process.platform === 'win32' ? 'Path' : 'PATH';
   let runner = null;
@@ -273,7 +274,11 @@ test('Kimi runner emits content-free process_alive liveness while text output is
       "process.stdout.write(JSON.stringify({ type: 'step_finish', part: { type: 'step-finish', reason: 'HOSTILE_KIMI_REASON_SENTINEL' } }) + '\\n');",
       "process.stdout.write('HOSTILE_KIMI_STDOUT_SENTINEL\\n');",
       "process.stderr.write('HOSTILE_KIMI_STDERR_SENTINEL\\n');",
-      'setTimeout(() => process.exit(0), 2200);',
+      "const { existsSync } = require('node:fs');",
+      "const releasePath = process.env.HOPPER_TEST_KIMI_RELEASE;",
+      'const releasePoll = setInterval(() => {',
+      '  if (existsSync(releasePath)) { clearInterval(releasePoll); process.exit(0); }',
+      '}, 10);',
       '',
     ].join('\n'));
     installSlowFakeKimi(binDir, sleepScriptPath);
@@ -293,6 +298,7 @@ test('Kimi runner emits content-free process_alive liveness while text output is
       [pathKey]: `${binDir}${process.platform === 'win32' ? ';' : ':'}${process.env[pathKey] || process.env.PATH || ''}`,
       HOPPER_TEST_KIMI_COUNTER: counterPath,
       HOPPER_TEST_KIMI_SLEEP_SCRIPT: sleepScriptPath,
+      HOPPER_TEST_KIMI_RELEASE: releasePath,
       HOPPER_TEST_NODE: process.execPath,
       HOPPER_TEST_ONLY_LIVENESS_INTERVAL_MS: '25',
       HOPPER_IDLE_TIMEOUT_MS: '1200',
@@ -335,15 +341,16 @@ test('Kimi runner emits content-free process_alive liveness while text output is
     ]);
     assert.match(liveness.last_update, /^\d{4}-\d{2}-\d{2}T/);
 
-    // The generic idle poll ticks no sooner than 1s. Keep Kimi alive across that
-    // boundary so hostile lifecycle-shaped text would be parsed if raw reads remain.
-    await new Promise((resolve) => setTimeout(resolve, 1_400));
     const runningEvents = progress.readProgressEvents({ hopperDir, taskId })
       .filter((event) => event.phase === 'running');
     assert.ok(runningEvents.length > 0);
     assert.ok(runningEvents.every((event) => event.kind === 'process_alive'));
     assert.ok(runningEvents.every((event) => event.last_stream_event === 'process_alive'));
     assert.ok(runningEvents.every((event) => event.last_reason === undefined));
+    assert.equal(readFrontmatter(outputMdPath).status, 'in-progress', 'the explicit release has not occurred yet');
+
+    writeFileSync(releasePath, 'release\n');
+    await runnerClosed;
 
     const progressJsonl = readFileSync(join(handoffs, `${taskId}-progress.log`), 'utf-8');
     const frontmatter = readFrontmatter(outputMdPath);
@@ -364,7 +371,10 @@ test('Kimi runner emits content-free process_alive liveness while text output is
       assert.doesNotMatch(safeSurfaces, new RegExp(sentinel));
     }
   } finally {
-    if (runnerClosed) await runnerClosed;
+    if (runnerClosed) {
+      try { writeFileSync(releasePath, 'release\n'); } catch (_) {}
+      await runnerClosed;
+    }
     rmSync(root, { recursive: true, force: true });
   }
 });

@@ -328,12 +328,20 @@ export function resolveAdapterOptsForTask(resolved, adapterOpts = {}) {
     out.webSearch = true;
   }
   // ── --reasoning fallback chain (batch 2): flag > AGENTS.md Effort policy cell >
-  // HOPPER_DEFAULT_REASONING > xhigh. Only codex/grok/mimo/copilot consume it
-  // (kimi/opencode/agy/claude ignore it harmlessly — see their empty
-  // reasoningArg.knownGood). This is safe BY DESIGN together with the idle-timeout
+  // HOPPER_DEFAULT_REASONING > xhigh. Record the source as part of the effective
+  // adapter contract: OpenCode can forward an operator's explicit CLI choice as
+  // its provider-specific --variant, while safely omitting a synthesized global
+  // default for arbitrary/custom providers. The source survives a second resolver
+  // pass in executeWithAdapter() and the background runner's JSON handoff.
+  // This is safe BY DESIGN together with the idle-timeout
   // primitive: a slower max-effort run is not killed for being slow, only for going
   // silent. Injected at the DISPATCH layer (not in each adapter), so adapters' own
   // opt-in defaults — and their unit tests — are unaffected.
+  const inheritedReasoningSource = ['user-argv', 'policy', 'default'].includes(adapterOpts.reasoningSource)
+    ? adapterOpts.reasoningSource
+    : null;
+  let reasoningSource = inheritedReasoningSource
+    || (out.reasoning != null ? 'user-argv' : null);
   if (out.reasoning == null) {
     let fromPolicy = null;
     if (resolved?.policy?.effortPolicy) {
@@ -348,13 +356,15 @@ export function resolveAdapterOptsForTask(resolved, adapterOpts = {}) {
       // through to the next level, same convention as an unbound Default-vendor cell.
     }
     out.reasoning = fromPolicy || resolveDefaultReasoning();
+    reasoningSource = fromPolicy ? 'policy' : 'default';
   }
+  out.reasoningSource = reasoningSource;
   // Clamp visibility (req #2): a vendor that cannot accept the resolved level
   // (whichever chain step it came from — flag, policy, or default) used to remap it
   // SILENTLY inside the adapter (grok/copilot: xhigh->high, minimal->low). Surface
   // that as an explicit notice instead. computeEffortClamp is a no-op (null notice)
-  // for vendors that don't clamp at all (in-range, or reasoningArg.knownGood is empty
-  // — kimi/opencode/agy/claude, which ignore --reasoning entirely).
+  // for vendors that don't clamp at all (in-range, or reasoningArg.knownGood is empty —
+  // Kimi/Claude/Agy and OpenCode, which has no universal provider enum).
   if (out.reasoning && resolved?.vendor) {
     try {
       const reasoningKg = getAdapter(resolved.vendor)?.capabilities?.reasoningArg?.knownGood || [];
