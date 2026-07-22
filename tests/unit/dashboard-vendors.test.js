@@ -14,6 +14,26 @@ function closeServer(server) {
   return new Promise((resolveClose) => server.close(resolveClose));
 }
 
+function delay(ms) {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
+}
+
+async function waitFor(predicate, timeoutMs = 1_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error('timed out waiting for test condition');
+    await delay(1);
+  }
+}
+
+function createProbeChild(pid) {
+  const child = new EventEmitter();
+  child.pid = pid;
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  return child;
+}
+
 const CLOSED_PROBE_KEYS = ['diagnosticCode', 'diagnosticState', 'status', 'vendor'].sort();
 const RAW_PROBE_SENTINELS = [
   'RAW_STDOUT_PRIVATE',
@@ -252,6 +272,7 @@ test('spawnProbe allowlists vendors and spawns only hopper-dispatch --probe', ()
   assert.equal(captured.args.includes('--background'), false);
   assert.equal(captured.args.includes('--dispatch'), false);
   assert.equal(captured.opts.stdio[0], 'ignore');
+  assert.equal(captured.opts.detached, process.platform !== 'win32');
   assert.throws(() => spawnProbe('codex; rm -rf /', { spawn: () => child }), /vendor not allowed/);
 });
 
@@ -301,20 +322,32 @@ test('probe action returns 409 while same vendor is already running', async () =
   }
 });
 
-test('probe action times out and kills hung child', async () => {
-  let killed = false;
+test('probe timeout cleans the process tree and holds the vendor lock until child close', async () => {
+  const timedOutChild = createProbeChild(4242);
+  const cleanupCalls = [];
+  let directKills = 0;
+  let spawnCount = 0;
+  let firstResolved = false;
+  timedOutChild.kill = () => { directKills += 1; };
   const app = express();
   app.use(express.json());
   app.use('/api/action', createActionsRouter({
     probeTimeoutMs: 5,
+    probeCleanupTimeoutMs: 100,
+    killProcessTreeImpl: (pid, isWindows) => {
+      cleanupCalls.push([pid, isWindows]);
+      return { status: 'succeeded', method: 'fake-tree-cleanup' };
+    },
     spawnProbeImpl: () => {
-      const child = new EventEmitter();
-      child.stdout = new PassThrough();
-      child.stderr = new PassThrough();
-      child.kill = () => {
-        killed = true;
-        child.emit('exit', null, 'SIGTERM');
-      };
+      spawnCount += 1;
+      if (spawnCount === 1) return timedOutChild;
+      const child = createProbeChild(5000 + spawnCount);
+      queueMicrotask(() => {
+        child.stdout.end();
+        child.stderr.end();
+        child.emit('exit', 0, null);
+        child.emit('close', 0, null);
+      });
       return child;
     },
   }));
@@ -323,19 +356,124 @@ test('probe action times out and kills hung child', async () => {
   const { port } = server.address();
 
   try {
-    const response = await fetch(`http://127.0.0.1:${port}/api/action/probe`, {
+    const first = fetch(`http://127.0.0.1:${port}/api/action/probe`, {
+      body: JSON.stringify({ vendor: 'codex' }),
+      headers: { 'Content-Type': 'application/json' },
+      method: 'POST',
+    }).then((response) => {
+      firstResolved = true;
+      return response;
+    });
+    await waitFor(() => cleanupCalls.length === 1);
+
+    assert.deepEqual(cleanupCalls, [[4242, process.platform === 'win32']]);
+    assert.equal(firstResolved, false, 'timeout response must wait for child close');
+    assert.equal(directKills, 0, 'tree cleanup replaces parent-only child.kill');
+
+    timedOutChild.emit('exit', null, 'SIGKILL');
+    await new Promise((resolveTick) => setImmediate(resolveTick));
+    assert.equal(firstResolved, false, 'exit alone must not release the active vendor lock');
+    const duplicate = await fetch(`http://127.0.0.1:${port}/api/action/probe`, {
       body: JSON.stringify({ vendor: 'codex' }),
       headers: { 'Content-Type': 'application/json' },
       method: 'POST',
     });
+    assert.equal(duplicate.status, 409);
+
+    timedOutChild.stdout.end();
+    timedOutChild.stderr.end();
+    timedOutChild.emit('close', null, 'SIGKILL');
+    const response = await first;
     const body = await response.json();
 
     assert.equal(response.status, 504);
     assertClosedProbePayload(body, {
       vendor: 'codex', status: 'failed', diagnosticCode: 'probe-failed', diagnosticState: 'unavailable',
     });
-    assert.equal(killed, true);
+    assert.equal(timedOutChild.listenerCount('error'), 0);
+    assert.equal(timedOutChild.listenerCount('exit'), 0);
+    assert.equal(timedOutChild.listenerCount('close'), 0);
+    assert.equal(timedOutChild.stdout.listenerCount('data'), 0);
+    assert.equal(timedOutChild.stderr.listenerCount('data'), 0);
+
+    const retry = await fetch(`http://127.0.0.1:${port}/api/action/probe`, {
+      body: JSON.stringify({ vendor: 'codex' }),
+      headers: { 'Content-Type': 'application/json' },
+      method: 'POST',
+    });
+    assert.equal(retry.status, 200);
+    assert.equal(spawnCount, 2);
+    timedOutChild.emit('close', null, 'SIGKILL');
+    assert.equal(cleanupCalls.length, 1, 'late close must not trigger duplicate cleanup or resolution');
   } finally {
+    if (!firstResolved) timedOutChild.emit('close', null, 'SIGKILL');
+    await closeServer(server);
+  }
+});
+
+test('probe timeout cleanup fallback is bounded and keeps the vendor busy until fallback', async () => {
+  const timedOutChild = createProbeChild(4343);
+  let cleanupCalls = 0;
+  let spawnCount = 0;
+  const app = express();
+  app.use(express.json());
+  app.use('/api/action', createActionsRouter({
+    probeTimeoutMs: 5,
+    probeCleanupTimeoutMs: 40,
+    killProcessTreeImpl: () => {
+      cleanupCalls += 1;
+      return { status: 'succeeded', method: 'fake-tree-cleanup' };
+    },
+    spawnProbeImpl: () => {
+      spawnCount += 1;
+      if (spawnCount === 1) return timedOutChild;
+      const child = createProbeChild(6000 + spawnCount);
+      queueMicrotask(() => {
+        child.stdout.end();
+        child.stderr.end();
+        child.emit('exit', 0, null);
+        child.emit('close', 0, null);
+      });
+      return child;
+    },
+  }));
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolveListen) => server.once('listening', resolveListen));
+  const { port } = server.address();
+
+  try {
+    const first = fetch(`http://127.0.0.1:${port}/api/action/probe`, {
+      body: JSON.stringify({ vendor: 'codex' }),
+      headers: { 'Content-Type': 'application/json' },
+      method: 'POST',
+    });
+    await waitFor(() => cleanupCalls === 1);
+    assert.equal(cleanupCalls, 1);
+    const duplicate = await fetch(`http://127.0.0.1:${port}/api/action/probe`, {
+      body: JSON.stringify({ vendor: 'codex' }),
+      headers: { 'Content-Type': 'application/json' },
+      method: 'POST',
+    });
+    assert.equal(duplicate.status, 409);
+
+    const response = await first;
+    assert.equal(response.status, 504);
+    assertClosedProbePayload(await response.json(), {
+      vendor: 'codex', status: 'failed', diagnosticCode: 'probe-failed', diagnosticState: 'unavailable',
+    });
+    assert.equal(timedOutChild.listenerCount('close'), 0);
+    assert.equal(timedOutChild.listenerCount('exit'), 0);
+    assert.equal(timedOutChild.listenerCount('error'), 0);
+
+    const retry = await fetch(`http://127.0.0.1:${port}/api/action/probe`, {
+      body: JSON.stringify({ vendor: 'codex' }),
+      headers: { 'Content-Type': 'application/json' },
+      method: 'POST',
+    });
+    assert.equal(retry.status, 200);
+    assert.equal(spawnCount, 2);
+  } finally {
+    timedOutChild.emit('close', null, 'SIGKILL');
     await closeServer(server);
   }
 });

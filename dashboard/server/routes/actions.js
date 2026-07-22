@@ -1,11 +1,20 @@
 import { Router } from 'express';
+import { platform } from 'node:os';
 import { spawnProbe } from '../lib/spawn-cli.js';
 import { ALLOWED_VENDORS } from '../lib/spawn-cli.js';
 import { projectProbeDiagnostic } from '../../../cli/src/inventory-contract.js';
+import { killProcessTree } from '../../../cli/src/subprocess.js';
 
 export const PROBE_TIMEOUT_MS = 60_000;
+export const PROBE_CLEANUP_TIMEOUT_MS = 5_000;
 
-export function createActionsRouter({ spawnProbeImpl = spawnProbe, probeTimeoutMs = PROBE_TIMEOUT_MS } = {}) {
+export function createActionsRouter({
+  spawnProbeImpl = spawnProbe,
+  probeTimeoutMs = PROBE_TIMEOUT_MS,
+  probeCleanupTimeoutMs = PROBE_CLEANUP_TIMEOUT_MS,
+  killProcessTreeImpl = killProcessTree,
+  isWindows = platform() === 'win32',
+} = {}) {
   const router = Router();
   const active = new Set();
 
@@ -23,7 +32,12 @@ export function createActionsRouter({ spawnProbeImpl = spawnProbe, probeTimeoutM
       }
       active.add(vendor);
       started = true;
-      const result = await runProbe(vendor, spawnProbeImpl, probeTimeoutMs);
+      const result = await runProbe(vendor, spawnProbeImpl, {
+        isWindows,
+        killProcessTreeImpl,
+        probeCleanupTimeoutMs,
+        probeTimeoutMs,
+      });
       res.status(result.httpStatus).json(result.payload);
     } catch (err) {
       const malformed = err?.code === 'EINVAL';
@@ -45,7 +59,12 @@ function probeResponse(vendor, outcome) {
   };
 }
 
-function runProbe(vendor, spawnProbeImpl, probeTimeoutMs) {
+function runProbe(vendor, spawnProbeImpl, {
+  isWindows,
+  killProcessTreeImpl,
+  probeCleanupTimeoutMs,
+  probeTimeoutMs,
+}) {
   return new Promise((resolveRun, rejectRun) => {
     let child;
     try {
@@ -55,32 +74,58 @@ function runProbe(vendor, spawnProbeImpl, probeTimeoutMs) {
       return;
     }
     let settled = false;
-    const timeout = setTimeout(() => {
-      settled = true;
-      child.kill?.();
-      resolveRun({ httpStatus: 504, payload: probeResponse(vendor, 'failed') });
-    }, probeTimeoutMs);
-    const rejectOnce = () => {
+    let timedOut = false;
+    let cleanupTimeout = null;
+    let timeout = null;
+    const drain = () => {};
+    const finish = (httpStatus, outcome) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timeout);
-      resolveRun({ httpStatus: 500, payload: probeResponse(vendor, 'failed') });
+      if (timeout) clearTimeout(timeout);
+      if (cleanupTimeout) clearTimeout(cleanupTimeout);
+      child.off('error', onError);
+      child.off('exit', onExit);
+      child.off('close', onClose);
+      child.stdout?.off('data', drain);
+      child.stderr?.off('data', drain);
+      resolveRun({ httpStatus, payload: probeResponse(vendor, outcome) });
+    };
+    const onError = () => {
+      if (!timedOut) finish(500, 'failed');
+    };
+    const onExit = (exitCode) => {
+      if (timedOut) return;
+      finish(exitCode === 0 ? 200 : 500, exitCode === 0 ? 'success' : 'failed');
+    };
+    const onClose = (exitCode) => {
+      if (timedOut) {
+        finish(504, 'failed');
+        return;
+      }
+      if (!settled) finish(exitCode === 0 ? 200 : 500, exitCode === 0 ? 'success' : 'failed');
     };
     // Drain both streams to prevent child-process backpressure. Their raw bytes
     // are deliberately not retained or returned by this public API.
-    child.stdout?.on('data', () => {});
-    child.stderr?.on('data', () => {});
-    child.once('error', rejectOnce);
-    child.once('exit', (exitCode, signal) => {
+    child.stdout?.on('data', drain);
+    child.stderr?.on('data', drain);
+    child.once('error', onError);
+    child.once('exit', onExit);
+    child.once('close', onClose);
+    timeout = setTimeout(() => {
       if (settled) return;
-      settled = true;
+      timedOut = true;
       clearTimeout(timeout);
-      if (exitCode === 0) {
-        resolveRun({ httpStatus: 200, payload: probeResponse(vendor, 'success') });
-        return;
+      timeout = null;
+      const cleanupWait = Number.isFinite(probeCleanupTimeoutMs) && probeCleanupTimeoutMs >= 0
+        ? probeCleanupTimeoutMs
+        : PROBE_CLEANUP_TIMEOUT_MS;
+      cleanupTimeout = setTimeout(() => finish(504, 'failed'), cleanupWait);
+      try {
+        killProcessTreeImpl(child.pid, isWindows);
+      } catch (_) {
+        // The bounded close wait below still preserves the fixed public diagnostic.
       }
-      resolveRun({ httpStatus: 500, payload: probeResponse(vendor, 'failed') });
-    });
+    }, probeTimeoutMs);
   });
 }
 

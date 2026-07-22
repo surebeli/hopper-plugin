@@ -18,6 +18,7 @@ export function spawnProbe(vendor, { spawn = nodeSpawn } = {}) {
     throw err;
   }
   return spawn(process.execPath, [DISPATCH_PATH, ...buildProbeArgs(vendor)], {
+    detached: process.platform !== 'win32',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 }

@@ -143,8 +143,8 @@ function isSafePublicText(value) {
 
 export function projectPublicProgressEvents(value) {
   if (!Array.isArray(value)) return [];
-  return value.map((event) => ({
-    seq: Number.isInteger(event?.seq) ? event.seq : null,
+  return value.filter((event) => Number.isSafeInteger(event?.seq) && event.seq >= 0).map((event) => ({
+    seq: event.seq,
     phase: PUBLIC_PHASES.has(event?.phase) ? event.phase : 'unknown',
     kind: PUBLIC_EVENT_KINDS.has(event?.kind) ? event.kind : 'unknown',
     terminal: event?.terminal === true,

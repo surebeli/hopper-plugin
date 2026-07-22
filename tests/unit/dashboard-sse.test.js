@@ -57,6 +57,30 @@ test('SSE hub supports retry, multi-client publish, and close', () => {
   assert.equal(second.ended, true);
 });
 
+test('SSE hub removes and ends a client on its first backpressured write', async () => {
+  const hub = createSseHub({ heartbeatMs: 5 });
+  const slow = fakeRes();
+  const writes = [];
+  slow.write = (chunk) => {
+    writes.push(chunk);
+    return false;
+  };
+
+  hub.add('queue', slow);
+  assert.equal(writes.length, 1);
+  assert.equal(hub.size('queue'), 0);
+  assert.equal(slow.ended, true);
+  assert.equal(slow.listenerCount('close'), 0);
+  assert.equal(slow.listenerCount('error'), 0);
+
+  hub.publish('queue', 'queue', { changed: true });
+  assert.equal(writes.length, 1, 'removed client must not receive later events');
+  await new Promise((resolveWait) => setTimeout(resolveWait, 15));
+  assert.equal(writes.length, 1, 'removed client must not receive later heartbeats');
+  hub.close();
+  assert.equal(writes.length, 1, 'removed client must not receive close-time writes');
+});
+
 test('dashboard exposes only six closed SSE subscription routes', async () => {
   const app = createApp({ dev: true, sseHub: createSseHub({ heartbeatMs: 0 }) });
   const server = app.listen(0, '127.0.0.1');
@@ -179,6 +203,11 @@ test('watcher publishes only closed progress event fields from a dedicated taile
         nextOffset: 96,
         chunk: [
           '{"seq":1,"task_id":"T-PROG","vendor":"codex","phase":"running","kind":"progress","terminal":false,"status":"in-progress","message":"RAW_PROGRESS_PRIVATE C:\\\\PRIVATE\\\\progress.log sk-private-token","source":"runner","exit_code":99,"duration_ms":42}',
+          '{"seq":null,"phase":"running","kind":"progress","terminal":false,"status":"in-progress"}',
+          '{"phase":"running","kind":"progress","terminal":false,"status":"in-progress"}',
+          '{"seq":1.5,"phase":"running","kind":"progress","terminal":false,"status":"in-progress"}',
+          '{"seq":-1,"phase":"running","kind":"progress","terminal":false,"status":"in-progress"}',
+          '{"seq":9007199254740992,"phase":"running","kind":"progress","terminal":false,"status":"in-progress"}',
           'not json',
           '{"seq":2,"task_id":"T-PROG","vendor":"codex","phase":"done","kind":"terminal","terminal":true,"status":"done","message":"RAW_TERMINAL_PRIVATE","source":"runner","signal":"SIGPRIVATE"}',
           '',
