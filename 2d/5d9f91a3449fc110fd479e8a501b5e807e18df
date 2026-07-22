@@ -1,0 +1,27 @@
+cli/bin/hopper-runner
+  0000019f893897df 1-652
+plugins/hopper/cli/bin/hopper-runner
+  0000019f893897df 1-652
+tests/integration/runner-single-spawn.test.js
+  0000019f893897df 1-1096
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "2d5d9f91a3449fc110fd479e8a501b5e807e18df",
+  "prompts": {
+    "0000019f893897df": {
+      "agent_id": {
+        "id": "ai-thread-codex-gpt-5.6-sol-1784713615327",
+        "tool": "codex",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "litianyi",
+      "messages": [],
+      "total_additions": 2400,
+      "total_deletions": 0,
+      "accepted_lines": 2400,
+      "overriden_lines": 0
+    }
+  }
+}
