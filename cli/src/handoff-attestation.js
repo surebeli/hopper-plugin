@@ -451,7 +451,7 @@ function completionValue(completion, camel, snake, fallback = undefined) {
 }
 
 // Kept internal so all writers construct byte/field-equivalent terminal records.
-function buildCanonicalTerminalRecord({ fm, startupSnapshot, parsed, completion }) {
+function buildCanonicalTerminalRecord({ fm, startupSnapshot, parsed, completion, now }) {
   const snapshot = startupSnapshot ?? startupSnapshotFromFrontmatter(fm);
   const evidence = parsedModelAttestation(parsed);
   const resolved = resolveAttestation({
@@ -462,6 +462,7 @@ function buildCanonicalTerminalRecord({ fm, startupSnapshot, parsed, completion 
     observedModels: evidence.observedModels,
     catalogSourceKind: snapshot.catalog.sourceKind,
     runtimeDiagnosticCode: completion.runtimeDiagnosticCode ?? completion.runtime_diagnostic_code ?? 'none',
+    now,
   });
   const status = terminalStatus(completion.status);
   const phase = scalar(completion.phase, status);
@@ -516,6 +517,7 @@ export function finalizeTerminalAttestation({
   startupSnapshot = null,
   parsed = {},
   completion = {},
+  now = new Date(),
   io = {},
 }) {
   const readEvents = io.readProgressEvents ?? readProgressEvents;
@@ -532,7 +534,7 @@ export function finalizeTerminalAttestation({
     return { refused: true, reason: 'terminal-frontmatter-exists', terminalCount: 0 };
   }
 
-  const record = buildCanonicalTerminalRecord({ fm, startupSnapshot, parsed, completion });
+  const record = buildCanonicalTerminalRecord({ fm, startupSnapshot, parsed, completion, now });
   // Event first: an append error must leave frontmatter visibly in-progress.
   const event = appendEvent({ hopperDir, taskId, event: record.event });
   // The only writer state transition after successful append. `finalizing` and

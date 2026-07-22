@@ -28,6 +28,10 @@ const EXPECTED_CODEX_SKILLS = [
   'hopper-vendors',
 ];
 
+function normalizedNewlines(text) {
+  return String(text).replace(/\r\n/g, '\n');
+}
+
 function readJson(path) {
   return JSON.parse(readFileSync(path, 'utf-8'));
 }
@@ -92,7 +96,7 @@ test('Codex plugin bundles one callable skill per Hopper command surface', () =>
     for (const skillName of EXPECTED_CODEX_SKILLS) {
       const skillPath = join(skillRoot, skillName, 'SKILL.md');
       assert.ok(existsSync(skillPath), `Hopper skill missing at ${skillPath}`);
-      const body = readFileSync(skillPath, 'utf-8');
+      const body = normalizedNewlines(readFileSync(skillPath, 'utf-8'));
       assert.ok(body.startsWith('---\n'), `${skillName} must start with YAML frontmatter`);
       assert.match(body, new RegExp(`\\nname:\\s*${skillName}\\n`), `${skillName} frontmatter name must match folder`);
       assert.match(body, /\ndescription:\s*.+Hopper.+/, `${skillName} description must mention Hopper`);

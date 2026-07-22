@@ -19,6 +19,10 @@ const MANIFEST = join(REPO_ROOT, '.claude-plugin', 'plugin.json');
 const COMMANDS_DIR = join(REPO_ROOT, 'commands');
 const MONITORS_CONFIG = join(REPO_ROOT, 'monitors', 'monitors.json');
 
+function normalizedNewlines(text) {
+  return String(text).replace(/\r\n/g, '\n');
+}
+
 test('plugin manifest exists at repo-root /.claude-plugin/ (codex P0 F1)', () => {
   assert.ok(existsSync(MANIFEST), `plugin.json missing at ${MANIFEST}`);
   const raw = readFileSync(MANIFEST, 'utf-8');
@@ -60,7 +64,7 @@ test('commands/ directory contains expected slash command markdown files', () =>
 test('every slash command file starts with YAML frontmatter and has description', () => {
   for (const cmd of ['dispatch.md', 'status.md', 'smoke.md', 'vendors.md']) {
     const path = join(COMMANDS_DIR, cmd);
-    const content = readFileSync(path, 'utf-8');
+    const content = normalizedNewlines(readFileSync(path, 'utf-8'));
     assert.match(content, /^---\n/, `${cmd}: must start with --- frontmatter`);
     assert.match(content, /^description:/m, `${cmd}: must declare description in frontmatter`);
     const fmEnd = content.indexOf('\n---\n', 4);
@@ -71,7 +75,7 @@ test('every slash command file starts with YAML frontmatter and has description'
 test('every slash command file declares allowed-tools (includes Bash)', () => {
   for (const cmd of ['dispatch.md', 'status.md', 'smoke.md', 'vendors.md']) {
     const path = join(COMMANDS_DIR, cmd);
-    const content = readFileSync(path, 'utf-8');
+    const content = normalizedNewlines(readFileSync(path, 'utf-8'));
     const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n/);
     assert.ok(fmMatch, `${cmd}: frontmatter must be parseable`);
     assert.match(fmMatch[1], /allowed-tools:.*Bash/i,

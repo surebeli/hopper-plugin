@@ -123,8 +123,8 @@ test('same parsed result produces byte-equivalent terminal attestation fields fo
     catalog: catalog(), selectorMetadata: selectorMetadata(),
   });
   try {
-    finalizeTerminalAttestation({ hopperDir: left.hopperDir, taskId: left.taskId, outputMdPath: left.outputMdPath, startupSnapshot: snapshot, parsed: parsed(), completion: completion() });
-    finalizeTerminalAttestation({ hopperDir: right.hopperDir, taskId: right.taskId, outputMdPath: right.outputMdPath, startupSnapshot: snapshot, parsed: parsed(), completion: completion() });
+    finalizeTerminalAttestation({ hopperDir: left.hopperDir, taskId: left.taskId, outputMdPath: left.outputMdPath, startupSnapshot: snapshot, parsed: parsed(), completion: completion(), now: NOW });
+    finalizeTerminalAttestation({ hopperDir: right.hopperDir, taskId: right.taskId, outputMdPath: right.outputMdPath, startupSnapshot: snapshot, parsed: parsed(), completion: completion(), now: NOW });
 
     const fields = [
       'requested_selector', 'effective_selector', 'effective_selector_source', 'selector_kind',
@@ -159,7 +159,7 @@ test('finalizer consumes only parsed modelAttestation and never synthesizes obse
     catalog: { ...catalog(), models: ['claude-catalog-only'] }, selectorMetadata: selectorMetadata(),
   });
   try {
-    finalizeTerminalAttestation({ hopperDir: state.hopperDir, taskId: state.taskId, outputMdPath: state.outputMdPath, startupSnapshot: snapshot, parsed: {}, completion: completion() });
+    finalizeTerminalAttestation({ hopperDir: state.hopperDir, taskId: state.taskId, outputMdPath: state.outputMdPath, startupSnapshot: snapshot, parsed: {}, completion: completion(), now: NOW });
     const fm = readFrontmatter(state.outputMdPath);
     assert.equal(fm.observed_models_json, '[]');
     assert.equal(fm.resolution_status, 'unverified');
