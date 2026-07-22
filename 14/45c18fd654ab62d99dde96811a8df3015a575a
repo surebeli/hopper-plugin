@@ -1,0 +1,25 @@
+dashboard/server/routes/task.js
+  0000019f88377ddc 1-161
+tests/unit/dashboard-task.test.js
+  0000019f88377ddc 1-518
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "1445c18fd654ab62d99dde96811a8df3015a575a",
+  "prompts": {
+    "0000019f88377ddc": {
+      "agent_id": {
+        "tool": "codex",
+        "model": "gpt-5.6-sol",
+        "id": "ai-thread-codex-gpt-5.6-sol-1784696765916"
+      },
+      "human_author": "litianyi",
+      "messages": [],
+      "total_additions": 679,
+      "total_deletions": 0,
+      "accepted_lines": 679,
+      "overriden_lines": 0
+    }
+  }
+}
