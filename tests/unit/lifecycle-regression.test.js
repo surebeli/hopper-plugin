@@ -3,13 +3,56 @@
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { readFileSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { readFileSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, chmodSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import * as progress from '../../cli/src/progress.js';
 import * as subprocess from '../../cli/src/subprocess.js';
+import { readFrontmatter } from '../../cli/src/background.js';
 
 import { getAdapter } from '../../cli/src/vendors/index.js';
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const RUNNER = join(REPO_ROOT, 'cli', 'bin', 'hopper-runner');
+const DISPATCH = join(REPO_ROOT, 'cli', 'bin', 'hopper-dispatch');
+
+function installSlowFakeKimi(binDir, sleepScriptPath) {
+  mkdirSync(binDir, { recursive: true });
+  if (process.platform === 'win32') {
+    writeFileSync(join(binDir, 'kimi.cmd'), [
+      '@echo off',
+      '>>"%HOPPER_TEST_KIMI_COUNTER%" echo spawned',
+      'echo HOSTILE_KIMI_STDOUT_SENTINEL',
+      'echo HOSTILE_KIMI_STDERR_SENTINEL 1>&2',
+      '"%HOPPER_TEST_NODE%" "%HOPPER_TEST_KIMI_SLEEP_SCRIPT%"',
+      'exit /b %ERRORLEVEL%',
+      '',
+    ].join('\r\n'));
+    return;
+  }
+  const fake = join(binDir, 'kimi');
+  writeFileSync(fake, [
+    '#!/bin/sh',
+    'printf "spawned\\n" >> "$HOPPER_TEST_KIMI_COUNTER"',
+    'printf "HOSTILE_KIMI_STDOUT_SENTINEL\\n"',
+    'printf "HOSTILE_KIMI_STDERR_SENTINEL\\n" >&2',
+    '"$HOPPER_TEST_NODE" "$HOPPER_TEST_KIMI_SLEEP_SCRIPT"',
+    '',
+  ].join('\n'));
+  chmodSync(fake, 0o755);
+}
+
+async function waitFor(check, timeoutMs = 1_500) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const value = check();
+    if (value) return value;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`timed out after ${timeoutMs}ms`);
+}
 
 const OPENCODE_STOP_STREAM = [
   JSON.stringify({ type: 'step_start', part: { type: 'step-start' } }),
@@ -201,6 +244,102 @@ test('stream lifecycle extraction records only safe event metadata', () => {
   const runner = readFileSync(resolve(testDir, '..', '..', 'cli', 'bin', 'hopper-runner'), 'utf-8');
   assert.match(runner, /findLatestVendorProgressEvent/);
   assert.match(runner, /appendVendorHeartbeat/);
+});
+
+test('Kimi runner emits content-free process_alive liveness while text output is live', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'hopper-kimi-liveness-'));
+  const hopperDir = join(root, '.hopper');
+  const handoffs = join(hopperDir, 'handoffs');
+  const taskId = 'T-kimi-live';
+  const outputMdPath = join(handoffs, `${taskId}-output.md`);
+  const logPath = join(handoffs, `${taskId}-output.log`);
+  const binDir = join(root, 'fake-bin');
+  const counterPath = join(root, 'kimi-spawn-count.txt');
+  const sleepScriptPath = join(root, 'slow-kimi.js');
+  const pathKey = process.platform === 'win32' ? 'Path' : 'PATH';
+  let runner = null;
+  let runnerClosed = null;
+  try {
+    mkdirSync(handoffs, { recursive: true });
+    writeFileSync(sleepScriptPath, 'setTimeout(() => process.exit(0), 400);\n');
+    installSlowFakeKimi(binDir, sleepScriptPath);
+    writeFileSync(outputMdPath, [
+      '---',
+      `task_id: ${taskId}`,
+      'adapter: kimi',
+      'status: in-progress',
+      'terminal_event_emitted: false',
+      `start_time: ${new Date().toISOString()}`,
+      '---',
+      `# ${taskId} — kimi (background, in-progress)`,
+      '',
+    ].join('\n'));
+    const env = {
+      ...process.env,
+      [pathKey]: `${binDir}${process.platform === 'win32' ? ';' : ':'}${process.env[pathKey] || process.env.PATH || ''}`,
+      HOPPER_TEST_KIMI_COUNTER: counterPath,
+      HOPPER_TEST_KIMI_SLEEP_SCRIPT: sleepScriptPath,
+      HOPPER_TEST_NODE: process.execPath,
+      HOPPER_TEST_ONLY_LIVENESS_INTERVAL_MS: '25',
+    };
+    runner = spawn(process.execPath, [
+      RUNNER,
+      '--task-id', taskId,
+      '--hopper-dir', hopperDir,
+      '--adapter', 'kimi',
+      '--output-md', outputMdPath,
+      '--log', logPath,
+      '--cwd', root,
+      '--', '-p', 'HOSTILE_KIMI_PROMPT_SENTINEL',
+    ], { cwd: root, env, stdio: 'ignore' });
+    runnerClosed = new Promise((resolve) => runner.once('close', resolve));
+
+    await waitFor(() => existsSync(counterPath));
+    const rawLog = await waitFor(() => existsSync(logPath) && readFileSync(logPath, 'utf-8'));
+    assert.match(rawLog, /HOSTILE_KIMI_STDOUT_SENTINEL/);
+    assert.match(rawLog, /HOSTILE_KIMI_STDERR_SENTINEL/);
+    const liveness = await waitFor(() => progress.readProgressEvents({ hopperDir, taskId })
+      .find((event) => event.kind === 'process_alive'));
+    assert.deepEqual({
+      phase: liveness.phase,
+      kind: liveness.kind,
+      message: liveness.message,
+      source: liveness.source,
+      terminal: liveness.terminal,
+      last_stream_event: liveness.last_stream_event,
+    }, {
+      phase: 'running',
+      kind: 'process_alive',
+      message: 'Vendor process is still running.',
+      source: 'runner',
+      terminal: false,
+      last_stream_event: 'process_alive',
+    });
+    assert.deepEqual(Object.keys(liveness).sort(), [
+      'kind', 'last_stream_event', 'last_update', 'message', 'phase', 'seq', 'source', 'task_id', 'terminal', 'ts', 'vendor',
+    ]);
+    assert.match(liveness.last_update, /^\d{4}-\d{2}-\d{2}T/);
+
+    const progressJsonl = readFileSync(join(handoffs, `${taskId}-progress.log`), 'utf-8');
+    const frontmatter = readFrontmatter(outputMdPath);
+    const { _body, ...frontmatterSurface } = frontmatter;
+    const defaultSurface = execFileSync(process.execPath, [DISPATCH, '--progress', taskId], {
+      cwd: root,
+      env: { ...env, HOPPER_DIR: hopperDir },
+      encoding: 'utf-8',
+    });
+    const safeSurfaces = `${progressJsonl}\n${JSON.stringify(frontmatterSurface)}\n${defaultSurface}`;
+    for (const sentinel of [
+      'HOSTILE_KIMI_STDOUT_SENTINEL',
+      'HOSTILE_KIMI_STDERR_SENTINEL',
+      'HOSTILE_KIMI_PROMPT_SENTINEL',
+    ]) {
+      assert.doesNotMatch(safeSurfaces, new RegExp(sentinel));
+    }
+  } finally {
+    if (runnerClosed) await runnerClosed;
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('progress events preserve lifecycle metadata', async () => {

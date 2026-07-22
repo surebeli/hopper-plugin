@@ -60,6 +60,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const RUNNER_PATH = join(__dirname, 'hopper-runner');
 
+function assertReadOnlySandboxEnforceable(adapter, effectiveAdapterOpts) {
+  const readOnlySandbox = adapter?.capabilities?.features?.permissions?.readOnlySandbox;
+  if (adapter?.name !== 'kimi' || effectiveAdapterOpts?.sandbox !== 'read-only' || readOnlySandbox?.enforceable !== false) return;
+  const error = new Error(`${readOnlySandbox.failureCode}: Kimi prompt mode cannot enforce a read-only sandbox.`);
+  error.exitCode = 2;
+  throw error;
+}
+
 /** Parse the explicit recovery form without making recovery implicit. */
 export function parseProbeCacheRecoveryArgs(argv, vendors) {
   const recoverCount = argv.filter((arg) => arg === '--recover-cache').length;
@@ -865,6 +873,7 @@ async function runDispatch(hopperDir, taskId, { write = false, force = false, ad
     if (!adapter) {
       throw new Error(`unknown vendor '${resolved.vendor}'`);
     }
+    assertReadOnlySandboxEnforceable(adapter, effectiveAdapterOpts);
     const startupSnapshot = attestationStartupSnapshot(effectiveAdapterOpts, resolved.vendor, adapter);
     const result = await executeWithAdapter({ resolved, adapter, adapterOpts: effectiveAdapterOpts, hopperDir, cwd: resolveVendorCwd(hopperDir) });
     const elapsedMs = Date.now() - startedAt;
@@ -970,7 +979,7 @@ async function runDispatch(hopperDir, taskId, { write = false, force = false, ad
     if (result.output.status !== 'success') process.exit(1);
   } catch (err) {
     console.error(`Error: ${err.message}`);
-    process.exit(1);
+    process.exit(err.exitCode || 1);
   }
 }
 
@@ -1010,6 +1019,11 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {}, vend
   const adapter = getAdapter(resolved.vendor);
   if (!adapter) {
     bail(`Error: unknown vendor '${resolved.vendor}'`, 1);
+  }
+  try {
+    assertReadOnlySandboxEnforceable(adapter, effectiveAdapterOpts);
+  } catch (err) {
+    bail(`Error: ${err.message}`, err.exitCode || 2);
   }
 
   // Enforce host != vendor across all host adapters.

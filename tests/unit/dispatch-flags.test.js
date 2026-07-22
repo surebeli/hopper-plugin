@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, chmodSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -50,7 +50,7 @@ function runCli(args, opts = {}) {
   }
 }
 
-function makeMinimalHopper(vendor = 'codex-builder', { brief = 'test', taskSpec = '' } = {}) {
+function makeMinimalHopper(vendor = 'codex-builder', { brief = 'test', taskSpec = '', taskType = 'code-impl' } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'hopper-host-vendor-'));
   const hopperDir = join(root, '.hopper');
   mkdirSync(join(hopperDir, 'tasks'), { recursive: true });
@@ -58,10 +58,10 @@ function makeMinimalHopper(vendor = 'codex-builder', { brief = 'test', taskSpec 
   writeFileSync(join(hopperDir, 'queue.md'), [
     '| ID | Task-type | Status | Depends | Brief |',
     '|----|-----------|--------|---------|-------|',
-    `| T-SAME | code-impl | pending | | ${brief} |`,
+    `| T-SAME | ${taskType} | pending | | ${brief} |`,
     '',
   ].join('\n'));
-  writeFileSync(join(hopperDir, 'tasks', 'code-impl.md'), '# code-impl\n');
+  writeFileSync(join(hopperDir, 'tasks', `${taskType}.md`), `# ${taskType}\n`);
   if (taskSpec) {
     writeFileSync(join(hopperDir, 'handoffs', 'leader-tasklist.md'), taskSpec);
   }
@@ -76,10 +76,36 @@ function makeMinimalHopper(vendor = 'codex-builder', { brief = 'test', taskSpec 
     '',
     '| Task-type | Default vendor |',
     '|---|---|',
-    '| `code-impl` | builder |',
+    `| \`${taskType}\` | builder |`,
     '',
   ].join('\n'));
   return { root, hopperDir };
+}
+
+function installFakeKimi(binDir, counterPath) {
+  mkdirSync(binDir, { recursive: true });
+  if (process.platform === 'win32') {
+    writeFileSync(join(binDir, 'kimi.cmd'), [
+      '@echo off',
+      '>>"%HOPPER_TEST_KIMI_COUNTER%" echo spawned',
+      'exit /b 0',
+      '',
+    ].join('\r\n'));
+    return;
+  }
+  const fake = join(binDir, 'kimi');
+  writeFileSync(fake, `#!/bin/sh\nprintf 'spawned\\n' >> \"${counterPath}\"\nexit 0\n`);
+  chmodSync(fake, 0o755);
+}
+
+function fakeKimiEnv(binDir, counterPath) {
+  const pathKey = process.platform === 'win32' ? 'Path' : 'PATH';
+  const inheritedPath = process.env[pathKey] || process.env.PATH || '';
+  return {
+    HOPPER_HOST_VENDOR: 'codex',
+    HOPPER_TEST_KIMI_COUNTER: counterPath,
+    [pathKey]: `${binDir}${process.platform === 'win32' ? ';' : ':'}${inheritedPath}`,
+  };
 }
 
 // ─── Static validation tests ──────────────────────────────────────────
@@ -382,6 +408,57 @@ test('CLI codex ignores even an explicit --sandbox read-only (always full-access
     assert.doesNotMatch(r.stderr, /permission: sandbox=read-only/);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Kimi fails closed before any sync or background spawn when read-only is effective', async () => {
+  const cases = [
+    {
+      name: 'explicit --sandbox read-only in sync mode',
+      args: ['T-SAME', '--sandbox', 'read-only'],
+      brief: 'inspect routing',
+      taskType: 'code-impl',
+    },
+    {
+      name: 'read-only brief policy in background mode',
+      args: ['T-SAME', '--background'],
+      brief: 'read-only task: inspect routing',
+      taskType: 'code-impl',
+    },
+    {
+      name: 'research task-type policy in background mode',
+      args: ['T-SAME', '--background'],
+      brief: 'research the current routing',
+      taskType: 'prd-research',
+    },
+    {
+      name: 'review task-type policy in sync mode',
+      args: ['T-SAME'],
+      brief: 'review the current routing',
+      taskType: 'code-review-acceptance',
+    },
+  ];
+
+  for (const scenario of cases) {
+    const { root, hopperDir } = makeMinimalHopper('kimi', scenario);
+    const binDir = join(root, 'fake-bin');
+    const counterPath = join(root, 'kimi-spawn-count.txt');
+    installFakeKimi(binDir, counterPath);
+    try {
+      const r = runCli(scenario.args, { hopperDir, env: fakeKimiEnv(binDir, counterPath) });
+
+      assert.equal(r.exitCode, 2, scenario.name);
+      assert.match(r.stderr, /E_KIMI_READ_ONLY_UNENFORCEABLE/, scenario.name);
+      // Give a mistakenly launched detached runner enough time to execute the fake
+      // binary, then prove this gate preceded both spawn routes and all artifacts.
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      assert.equal(existsSync(counterPath), false, `${scenario.name}: fake kimi must not spawn`);
+      assert.equal(existsSync(join(hopperDir, 'handoffs', 'T-SAME-output.md')), false, `${scenario.name}: no output artifact`);
+      assert.equal(existsSync(join(hopperDir, 'handoffs', 'T-SAME-output.log')), false, `${scenario.name}: no raw log artifact`);
+      assert.equal(existsSync(join(hopperDir, 'handoffs', 'T-SAME-progress.log')), false, `${scenario.name}: no progress artifact`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   }
 });
 

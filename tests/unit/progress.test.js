@@ -173,6 +173,39 @@ test('appendProgressEvent rejects unsafe task ids before writing', () => {
   }
 });
 
+test('process_alive liveness keeps the progress schema content-free', () => {
+  const { tmp, hopperDir } = setup();
+  try {
+    const event = appendProgressEvent({
+      hopperDir,
+      taskId: 'T-process-alive',
+      event: {
+        vendor: 'kimi',
+        phase: 'running',
+        kind: 'process_alive',
+        message: 'Vendor process is still running.',
+        source: 'runner',
+        terminal: false,
+        last_stream_event: 'process_alive',
+        raw_chunk: 'HOSTILE_RAW_CHUNK_SENTINEL',
+        stdout: 'HOSTILE_STDOUT_SENTINEL',
+        stderr: 'HOSTILE_STDERR_SENTINEL',
+        prompt: 'HOSTILE_PROMPT_SENTINEL',
+        log_path: 'HOSTILE_LOG_PATH_SENTINEL',
+        byte_count: 1234,
+        model: 'HOSTILE_MODEL_SENTINEL',
+      },
+    });
+
+    assert.deepEqual(Object.keys(event).sort(), [
+      'kind', 'last_stream_event', 'message', 'phase', 'seq', 'source', 'task_id', 'terminal', 'ts', 'vendor',
+    ]);
+    assert.doesNotMatch(JSON.stringify(event), /HOSTILE_/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('terminal events retain the attestation optional-field allowlist exactly', () => {
   const { tmp, hopperDir } = setup();
   try {

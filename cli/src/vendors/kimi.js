@@ -45,7 +45,15 @@ export const kimiAdapter = {
       sessionResume: { supported: true, mechanism: '`kimi --session <id>` / `-S <id>` (documented short flag in 0.x; was `-r` in legacy) / `-C` (continue most recent in cwd). `-r` retained as a hidden alias of --session. Prompt mode rejects --session without an id, so adapter forwards it only when opts.conversationId is set.' },
       fileOutput: { supported: false, mechanism: 'stdout only; no --output-file flag. Use --output-format stream-json + shell redirect if needed.' },
       streaming: { supported: true, mechanism: '`-p` streams assistant text to stdout; thinking, tool progress, and resume notices go to stderr. `--output-format stream-json` emits one JSON object per stdout line (thinking excluded); default `text`.' },
-      permissions: { supported: true, mechanism: '`kimi -p` uses Kimi prompt-mode auto permission policy by default. Kimi 0.14 rejects `--prompt` combined with `--yolo`, `--auto`, or `--plan`; adapter therefore does not forward hopper sandbox flags. Static deny rules in Kimi config still apply.' },
+      permissions: {
+        supported: true,
+        mechanism: '`kimi -p` uses Kimi prompt-mode auto permission policy by default. Kimi 0.14 rejects `--prompt` combined with `--yolo`, `--auto`, or `--plan`; adapter therefore does not forward hopper sandbox flags. Static deny rules in Kimi config still apply.',
+        readOnlySandbox: {
+          enforceable: false,
+          failureCode: 'E_KIMI_READ_ONLY_UNENFORCEABLE',
+          mechanism: 'Kimi prompt mode has no argv or sandbox primitive that can enforce hopper read-only intent.',
+        },
+      },
     },
     webSearch: { headless: true, hopperEnabled: true, how: 'automatic — built-in SearchWeb tool (auto-wired on Kimi Code login)' },
     staleAfter: '2026-09-11',
@@ -56,6 +64,10 @@ export const kimiAdapter = {
   // The 0.x rewrite removed --print/--afk/--final-message-only, so a stale preset
   // emitting them would ERROR (Commander allowUnknownOption(false)).
   compatFlags: ['--prompt', '--output-format', '--model'],
+
+  // Text prompt mode has no safe lifecycle envelope to mirror. The runner emits
+  // only its fixed process-alive marker; it never derives liveness from Kimi text.
+  liveness: { processAlive: true },
 
   args(input, opts) {
     // Kimi Code 0.x headless form (CONFIRMED): kimi -p "<prompt>" [-m <alias>] [--session <id>]

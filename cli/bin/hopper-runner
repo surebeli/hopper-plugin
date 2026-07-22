@@ -377,11 +377,12 @@ async function main() {
   if (bufferedOutput) {
     process.stderr.write(`hopper-runner: idle watchdog disabled (bufferedOutput vendor) — ceiling-only timeout applies (${ceilingMs}ms)\n`);
   }
-  // End-buffered vendors cannot expose stream progress before completion. Emit
-  // a fixed, non-sensitive process-alive marker instead: no log reads, prompt,
-  // output, or idle activity clocks are involved, and the absolute ceiling is
-  // intentionally untouched. The test-only override keeps integration tests
-  // fast without changing the production cadence.
+  // End-buffered and text-only adapters without a safe lifecycle envelope cannot
+  // expose stream progress. Emit a fixed, non-sensitive process-alive marker
+  // instead: no log reads, prompt, output, or idle activity clocks are involved,
+  // and the absolute/idle timeout semantics are intentionally untouched. The
+  // test-only override keeps integration tests fast without changing production
+  // cadence.
   const DEFAULT_BUFFERED_LIVENESS_INTERVAL_MS = 30_000;
   const testLivenessMs = Number.parseInt(process.env.HOPPER_TEST_ONLY_LIVENESS_INTERVAL_MS || '', 10);
   const bufferedLivenessIntervalMs = Number.isFinite(testLivenessMs) && testLivenessMs > 0
@@ -399,7 +400,7 @@ async function main() {
         event: {
           vendor: fm.adapter || adapterName,
           phase: 'running',
-          kind: 'liveness',
+          kind: 'process_alive',
           message: 'Vendor process is still running.',
           source: 'runner',
           terminal: false,
@@ -420,7 +421,8 @@ async function main() {
       // Liveness is advisory; terminal frontmatter remains authoritative.
     }
   };
-  bufferedLivenessTimer = bufferedOutput ? setInterval(
+  const emitsProcessAliveLiveness = bufferedOutput || adapter?.liveness?.processAlive === true;
+  bufferedLivenessTimer = emitsProcessAliveLiveness ? setInterval(
     appendBufferedLiveness,
     bufferedLivenessIntervalMs,
   ) : null;
