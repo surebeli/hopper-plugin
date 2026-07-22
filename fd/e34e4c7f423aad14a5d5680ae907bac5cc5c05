@@ -1,0 +1,93 @@
+.claude-plugin/marketplace.json
+  0000019f8ac66c87 1-86
+.claude-plugin/plugin.json
+  0000019f8ac66c87 1-12
+.codex-plugin/plugin.json
+  0000019f8ac66c87 1-49
+CHANGELOG.md
+  0000019f8ac66c87 1-158
+README.md
+  0000019f8ac66c87 1-235
+cli/bin/hopper-dispatch
+  0000019f8ac66c87 1-2110
+cli/src/dispatch.js
+  0000019f8ac66c87 1-563
+cli/src/policy.js
+  0000019f8ac66c87 1-183
+cli/src/rules.js
+  0000019f8ac66c87 1-173
+cli/src/subprocess.js
+  0000019f8ac66c87 1-440
+cli/src/types.js
+  0000019f8ac66c87 1-128
+cli/src/validation.js
+  0000019f8ac66c87 1-302
+cli/src/vendors/opencode.js
+  0000019f8ac66c87 1-338
+commands/dispatch.md
+  0000019f8ac66c87 1-153
+commands/smoke.md
+  0000019f8ac66c87 1-21
+commands/vendors.md
+  0000019f8ac66c87 1-18
+dashboard/server/routes/actions.js
+  0000019f8ac66c87 1-144
+docs/cookbook.md
+  0000019f8ac66c87 1-331
+docs/release/INSTALL-MATRIX.md
+  0000019f8ac66c87 1-504
+package.json
+  0000019f8ac66c87 1-66
+plugins/hopper/.codex-plugin/plugin.json
+  0000019f8ac66c87 1-49
+plugins/hopper/cli/bin/hopper-dispatch
+  0000019f8ac66c87 1-2110
+plugins/hopper/cli/src/dispatch.js
+  0000019f8ac66c87 1-563
+plugins/hopper/cli/src/policy.js
+  0000019f8ac66c87 1-183
+plugins/hopper/cli/src/rules.js
+  0000019f8ac66c87 1-173
+plugins/hopper/cli/src/subprocess.js
+  0000019f8ac66c87 1-440
+plugins/hopper/cli/src/types.js
+  0000019f8ac66c87 1-128
+plugins/hopper/cli/src/validation.js
+  0000019f8ac66c87 1-302
+plugins/hopper/cli/src/vendors/opencode.js
+  0000019f8ac66c87 1-338
+plugins/hopper/skills/hopper-dispatch/SKILL.md
+  0000019f8ac66c87 1-27
+skills/hopper-dispatch/SKILL.md
+  0000019f8ac66c87 1-27
+tests/unit/dashboard-vendors.test.js
+  0000019f8ac66c87 1-620
+tests/unit/discovery.test.js
+  0000019f8ac66c87 1-322
+tests/unit/lifecycle-regression.test.js
+  0000019f8ac66c87 1-442
+tests/unit/opencode-reasoning-variant.test.js
+  0000019f8ac66c87 1-69
+tests/unit/timeout-reasoning.test.js
+  0000019f8ac66c87 1-267
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "fde34e4c7f423aad14a5d5680ae907bac5cc5c05",
+  "prompts": {
+    "0000019f8ac66c87": {
+      "agent_id": {
+        "model": "gpt-5.6-sol",
+        "tool": "codex",
+        "id": "ai-thread-codex-gpt-5.6-sol-1784739687559"
+      },
+      "human_author": "litianyi",
+      "messages": [],
+      "total_additions": 12074,
+      "total_deletions": 0,
+      "accepted_lines": 12074,
+      "overriden_lines": 0
+    }
+  }
+}
