@@ -1,0 +1,23 @@
+tests/integration/runner-single-spawn.test.js
+  0000019f880ef69b 1-851
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "86009fe17c7a4bb93c5c606f9b09f6e26b340098",
+  "prompts": {
+    "0000019f880ef69b": {
+      "agent_id": {
+        "tool": "codex",
+        "model": "gpt-5.6-sol",
+        "id": "ai-thread-codex-gpt-5.6-sol-1784694109851"
+      },
+      "human_author": "litianyi",
+      "messages": [],
+      "total_additions": 851,
+      "total_deletions": 0,
+      "accepted_lines": 851,
+      "overriden_lines": 0
+    }
+  }
+}
