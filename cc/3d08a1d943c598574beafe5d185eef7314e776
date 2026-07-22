@@ -1,27 +1,24 @@
-cli/bin/hopper-runner
-  0000019f88b2f427 1-633
-plugins/hopper/cli/bin/hopper-runner
-  0000019f88b2f427 1-633
 tests/integration/runner-single-spawn.test.js
-  0000019f88b2f427 1-961
+  s_9b9532ed48c3cb::t_118c9bf63c8a4e 35
+  s_9b9532ed48c3cb::t_a4e0853b2bb029 795-834
+cli/bin/hopper-runner
+  s_9b9532ed48c3cb::t_2f4de1c8ad81b1 104
+plugins/hopper/cli/bin/hopper-runner
+  s_9b9532ed48c3cb::t_2decb92aeb02b5 104
 ---
 {
   "schema_version": "authorship/3.0.0",
   "git_ai_version": "1.6.15",
   "base_commit_sha": "cc3d08a1d943c598574beafe5d185eef7314e776",
-  "prompts": {
-    "0000019f88b2f427": {
+  "prompts": {},
+  "sessions": {
+    "s_9b9532ed48c3cb": {
       "agent_id": {
         "tool": "codex",
-        "model": "gpt-5.6-sol",
-        "id": "ai-thread-codex-gpt-5.6-sol-1784704857127"
+        "id": "019f829e-39fc-7e93-a464-c73aba41ebea",
+        "model": "gpt-5.6-terra"
       },
-      "human_author": "litianyi",
-      "messages": [],
-      "total_additions": 2227,
-      "total_deletions": 0,
-      "accepted_lines": 2227,
-      "overriden_lines": 0
+      "human_author": "litianyi <litianyi@corp.netease.com>"
     }
   }
 }
