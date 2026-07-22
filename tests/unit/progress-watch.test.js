@@ -435,18 +435,62 @@ test('--watch-events implementation uses fs.watchFile over output.md only', () =
   assert.doesNotMatch(source, /watchFile\([^)]*progress/i);
 });
 
-test('both watcher modes require a terminal status and terminal_event_emitted', async () => {
-  const { isTerminalTaskFrontmatter } = await import(pathToFileURL(DISPATCH).href);
+test('watch and watch-events use their distinct terminal predicates', async () => {
+  const { isWatchTerminalFrontmatter, isWatchEventsTerminalFrontmatter } = await import(pathToFileURL(DISPATCH).href);
   for (const status of ['done', 'failed', 'timeout', 'cancelled', 'orphaned']) {
-    assert.equal(isTerminalTaskFrontmatter({ status, terminal_event_emitted: true }), true, `${status} with terminal event`);
-    assert.equal(isTerminalTaskFrontmatter({ status, terminal_event_emitted: false }), false, `${status} before terminal event`);
+    assert.equal(isWatchTerminalFrontmatter({ status, terminal_event_emitted: true }), true, `${status} is terminal for --watch`);
+    assert.equal(isWatchTerminalFrontmatter({ status, terminal_event_emitted: false }), true, `${status} legacy fallback exits --watch`);
+    assert.equal(isWatchEventsTerminalFrontmatter({ status, terminal_event_emitted: true }), true, `${status} emits a watch event`);
+    assert.equal(isWatchEventsTerminalFrontmatter({ status, terminal_event_emitted: false }), false, `${status} without event marker stays silent`);
   }
   for (const status of ['in-progress', 'unknown', '']) {
-    assert.equal(isTerminalTaskFrontmatter({ status, terminal_event_emitted: true }), false, `${status} is not terminal`);
+    assert.equal(isWatchTerminalFrontmatter({ status, terminal_event_emitted: true }), false, `${status} is not terminal for --watch`);
+    assert.equal(isWatchEventsTerminalFrontmatter({ status, terminal_event_emitted: true }), false, `${status} is not terminal for --watch-events`);
   }
 
   const source = readFileSync(DISPATCH, 'utf-8');
-  assert.match(source, /if \(isTerminalTaskFrontmatter\(initialFm\)\)/, '--watch initial state must use the shared predicate');
-  assert.match(source, /if \(isTerminalTaskFrontmatter\(fm\)\)/, '--watch updates must use the shared predicate');
-  assert.match(source, /if \(!isTerminalTaskFrontmatter\(fm\)\) return;/, '--watch-events must use the shared predicate');
+  assert.match(source, /if \(isWatchTerminalFrontmatter\(initialFm\)\)/, '--watch initial state must use its fallback predicate');
+  assert.match(source, /if \(isWatchTerminalFrontmatter\(fm\)\)/, '--watch updates must use its fallback predicate');
+  assert.match(source, /if \(!isWatchEventsTerminalFrontmatter\(fm\)\) return;/, '--watch-events must require an emitted terminal event');
+});
+
+test('--watch exits for legacy terminal frontmatter without terminal_event_emitted', () => {
+  const { tmp, hopperDir } = setup();
+  const taskId = 'T-WATCH-LEGACY-TERMINAL';
+  try {
+    writeTask(hopperDir, taskId, {
+      status: 'cancelled', phase: 'cancelled', terminal_event_emitted: false,
+      duration_ms: 12, exit_code: null,
+    });
+    const result = spawnSync(process.execPath, [DISPATCH, '--watch', taskId], {
+      env: { ...process.env, HOPPER_NOTIFY: '0', HOPPER_DIR: hopperDir },
+      encoding: 'utf-8',
+      timeout: 2000,
+    });
+    assert.equal(result.status, 1, result.error?.message || result.stderr);
+    assert.match(result.stderr, /TASK CANCELLED/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('--watch-events does not emit legacy terminal frontmatter without terminal_event_emitted', async () => {
+  const { tmp, hopperDir } = setup();
+  const taskId = 'T-WATCH-EVENTS-LEGACY';
+  const { runWatchEvents } = await import(pathToFileURL(DISPATCH).href);
+  const lines = [];
+  let cleanup;
+  try {
+    writeTask(hopperDir, taskId, { status: 'failed', phase: 'failed', terminal_event_emitted: false });
+    cleanup = runWatchEvents(hopperDir, {
+      replay: true,
+      notifyFn: async () => { throw new Error('legacy frontmatter must not notify'); },
+      writeLine: (line) => lines.push(line),
+      exitFn: () => {},
+    });
+    assert.deepEqual(lines, []);
+  } finally {
+    if (cleanup) cleanup();
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });

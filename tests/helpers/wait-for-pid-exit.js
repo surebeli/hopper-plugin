@@ -26,3 +26,16 @@ export async function removeWithRetries(path, { attempts = 20, retryDelayMs = 25
   }
   throw lastError;
 }
+
+export async function cleanupAfterPidExit(path, pid, {
+  pidExitObserved = false,
+  isAlive,
+  kill,
+  remove = removeWithRetries,
+} = {}) {
+  if (!pidExitObserved && pid && isAlive(pid)) {
+    kill(pid, process.platform === 'win32');
+    await waitForPidExit(pid, { isAlive });
+  }
+  await remove(path);
+}

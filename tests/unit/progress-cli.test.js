@@ -6,7 +6,7 @@ import { strict as assert } from 'node:assert';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 import { writeFrontmatter } from '../../cli/src/background.js';
@@ -188,6 +188,21 @@ test('--progress rejects structurally invalid HOPPER_DIR overrides without ances
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test('CLI workspace validation fails closed when stat races or is denied', async () => {
+  const { isHopperWorkspace } = await import(pathToFileURL(DISPATCH).href);
+  const calls = [];
+  const fsOps = {
+    existsSync(path) { calls.push(['exists', path]); return true; },
+    statSync(path) {
+      calls.push(['stat', path]);
+      if (calls.filter(([kind]) => kind === 'stat').length === 1) return { isDirectory: () => true };
+      throw Object.assign(new Error('simulated handoffs race'), { code: 'ENOENT' });
+    },
+  };
+  assert.equal(isHopperWorkspace('volatile-workspace', fsOps), false);
+  assert.equal(calls.filter(([kind]) => kind === 'stat').length, 2, 'validation intentionally uses statSync and follows symlinks');
 });
 
 test('--progress and --result render the same event-first crash-window diagnosis', () => {

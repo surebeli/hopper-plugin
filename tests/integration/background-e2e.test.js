@@ -29,7 +29,7 @@ import {
   spawnDetached, readFrontmatter, writeFrontmatter, isAlive,
 } from '../../cli/src/background.js';
 import { killProcessTree } from '../../cli/src/subprocess.js';
-import { removeWithRetries, waitForPidExit } from '../helpers/wait-for-pid-exit.js';
+import { cleanupAfterPidExit, removeWithRetries, waitForPidExit } from '../helpers/wait-for-pid-exit.js';
 import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
@@ -56,11 +56,29 @@ function makeFakeRunner(tmp, sleepMs = 50) {
 // spawnDetached anchors the detached runner's CWD to `tmp` (the repo root that
 // owns .hopper/). On Windows a live process's CWD cannot be rmdir'd (EBUSY), so
 // every real child must be reaped before a bounded retry removes the temp repo.
-async function cleanup(tmp, pid) {
-  if (pid) { try { killProcessTree(pid, process.platform === 'win32'); } catch (_) {} }
-  await waitForPidExit(pid, { isAlive });
-  await removeWithRetries(tmp);
+async function cleanup(tmp, pid, { pidExitObserved = false } = {}) {
+  await cleanupAfterPidExit(tmp, pid, {
+    pidExitObserved,
+    isAlive,
+    kill: killProcessTree,
+    remove: removeWithRetries,
+  });
 }
+
+test('observed PID exit skips fallback kill even if the PID appears reused', async () => {
+  const { tmp } = setup();
+  let aliveChecks = 0;
+  let killCalls = 0;
+  await cleanupAfterPidExit(tmp, 4242, {
+    pidExitObserved: true,
+    isAlive: () => { aliveChecks += 1; return true; },
+    kill: () => { killCalls += 1; },
+    remove: removeWithRetries,
+  });
+  assert.equal(aliveChecks, 0, 'an observed exit must not re-check a potentially reused PID');
+  assert.equal(killCalls, 0, 'an observed exit must never taskkill a potentially reused PID');
+  assert.equal(existsSync(tmp), false);
+});
 
 test('spawnDetached refuses when output.md status=in-progress + alive PID (concurrent protection)', () => {
   const { tmp, hopperDir } = setup();
@@ -94,6 +112,7 @@ test('spawnDetached refuses when output.md status=in-progress + alive PID (concu
 test('spawnDetached writes initial in-progress frontmatter + PID + start_time', async () => {
   const { tmp, hopperDir } = setup();
   let result;
+  let pidExitObserved = false;
   try {
     // Use a fake runner so this infrastructure test never starts a real vendor
     // CLI or holds a global vendor lock that can interfere with parallel tests.
@@ -149,14 +168,16 @@ test('spawnDetached writes initial in-progress frontmatter + PID + start_time', 
     }
 
     await waitForPidExit(result.pid, { isAlive });
+    pidExitObserved = true;
   } finally {
-    await cleanup(tmp, result?.pid);
+    await cleanup(tmp, result?.pid, { pidExitObserved });
   }
 });
 
 test('spawnDetached: re-running after the first completes is allowed (no false-positive lock)', async () => {
   const { tmp, hopperDir } = setup();
   let result;
+  let pidExitObserved = false;
   try {
     const outputMdPath = join(hopperDir, 'handoffs', 'T-rerun-output.md');
 
@@ -196,8 +217,9 @@ test('spawnDetached: re-running after the first completes is allowed (no false-p
 
     // Wait for fake runner exit so we don't leave a child process behind
     await waitForPidExit(result.pid, { isAlive });
+    pidExitObserved = true;
   } finally {
-    await cleanup(tmp, result?.pid);
+    await cleanup(tmp, result?.pid, { pidExitObserved });
   }
 });
 
@@ -274,6 +296,7 @@ test('F3 atomic lock: concurrent spawnDetached on SAME task — second refuses',
 test('F3 atomic lock: stale lockfile (>60s) is reclaimed', async () => {
   const { tmp, hopperDir } = setup();
   let result;
+  let pidExitObserved = false;
   try {
     const lockPath = join(hopperDir, 'handoffs', 'T-stale-lock.dispatching');
     // Create lockfile + backdate mtime to 2 minutes ago
@@ -296,14 +319,16 @@ test('F3 atomic lock: stale lockfile (>60s) is reclaimed', async () => {
     assert.ok(result.pid > 0);
     // Let the detached runner exit so it releases tmp as its CWD before cleanup.
     await waitForPidExit(result.pid, { isAlive });
+    pidExitObserved = true;
   } finally {
-    await cleanup(tmp, result?.pid);
+    await cleanup(tmp, result?.pid, { pidExitObserved });
   }
 });
 
 test('F2 + F3: spawnDetached releases lock after PID seeded', async () => {
   const { tmp, hopperDir } = setup();
   let result;
+  let pidExitObserved = false;
   try {
     result = spawnDetached({
       hopperDir,
@@ -329,7 +354,8 @@ test('F2 + F3: spawnDetached releases lock after PID seeded', async () => {
       `PID expected ${result.pid}; got ${fm.pid} with status ${fm.status}`);
 
     await waitForPidExit(result.pid, { isAlive });
+    pidExitObserved = true;
   } finally {
-    await cleanup(tmp, result?.pid);
+    await cleanup(tmp, result?.pid, { pidExitObserved });
   }
 });

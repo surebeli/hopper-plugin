@@ -149,9 +149,15 @@ function printSmoke() {
   process.exit(0);
 }
 
-function isHopperWorkspace(candidate) {
-  return existsSync(candidate) && statSync(candidate).isDirectory()
-    && existsSync(join(candidate, 'handoffs')) && statSync(join(candidate, 'handoffs')).isDirectory();
+export function isHopperWorkspace(candidate, fsOps = { existsSync, statSync }) {
+  try {
+    // statSync intentionally follows symlinks; this only closes disappearance/
+    // permission races and does not change the existing symlink policy.
+    return fsOps.existsSync(candidate) && fsOps.statSync(candidate).isDirectory()
+      && fsOps.existsSync(join(candidate, 'handoffs')) && fsOps.statSync(join(candidate, 'handoffs')).isDirectory();
+  } catch (_) {
+    return false;
+  }
 }
 
 function findHopperDir() {
@@ -1303,8 +1309,16 @@ function taskIdFromOutputPath(outputMdPath, fm) {
   return fm.task_id || basename(outputMdPath).replace(/-output\.md$/, '');
 }
 
-export function isTerminalTaskFrontmatter(fm) {
-  return fm?.terminal_event_emitted === true && TERMINAL_TASK_STATUSES.has(fm.status);
+// `--watch` is a completion fallback: legacy/crash-window writers may persist a
+// terminal status even when their progress-event append failed.
+export function isWatchTerminalFrontmatter(fm) {
+  return TERMINAL_TASK_STATUSES.has(fm?.status);
+}
+
+// `--watch-events` is an event bridge, so it emits only after the canonical
+// terminal event marker is durable; this prevents premature/history events.
+export function isWatchEventsTerminalFrontmatter(fm) {
+  return fm?.terminal_event_emitted === true && isWatchTerminalFrontmatter(fm);
 }
 
 function listOutputMarkdownFiles(handoffDir) {
@@ -1366,7 +1380,7 @@ export function runWatchEvents(
       console.error(`watch-events: could not read ${outputMdPath}: ${err.message}`);
       return;
     }
-    if (!isTerminalTaskFrontmatter(fm)) return;
+    if (!isWatchEventsTerminalFrontmatter(fm)) return;
 
     const taskId = taskIdFromOutputPath(outputMdPath, fm);
     const seq = Number.isInteger(fm.progress_seq) ? fm.progress_seq : 0;
@@ -1581,7 +1595,7 @@ async function runWatch(hopperDir, taskId) {
   // --watch is invoked, surface result + exit immediately. Previously
   // `lastStatus = initialFm.status` made the watch loop think nothing
   // changed, so the file got tailed once and then we waited forever.
-  if (isTerminalTaskFrontmatter(initialFm)) {
+  if (isWatchTerminalFrontmatter(initialFm)) {
     const logPath = outputMdPath.replace(/\.md$/, '.log');
     if (existsSync(logPath)) {
       try {
@@ -1630,9 +1644,9 @@ async function runWatch(hopperDir, taskId) {
     // Check status
     try {
       const fm = readFrontmatter(outputMdPath);
-      if (fm.status !== lastStatus || isTerminalTaskFrontmatter(fm)) {
+      if (fm.status !== lastStatus || isWatchTerminalFrontmatter(fm)) {
         lastStatus = fm.status;
-        if (isTerminalTaskFrontmatter(fm)) {
+        if (isWatchTerminalFrontmatter(fm)) {
           unwatchFile(outputMdPath, handler);
           console.error('');
           console.error(`=== TASK ${fm.status.toUpperCase()} ===`);

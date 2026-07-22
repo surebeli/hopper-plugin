@@ -1,9 +1,15 @@
 import { existsSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-function isHopperWorkspace(candidate) {
-  return existsSync(candidate) && statSync(candidate).isDirectory()
-    && existsSync(join(candidate, 'handoffs')) && statSync(join(candidate, 'handoffs')).isDirectory();
+export function isHopperWorkspace(candidate, fsOps = { existsSync, statSync }) {
+  try {
+    // statSync intentionally follows symlinks; fail closed only for lookup races
+    // or access errors without changing the established symlink policy.
+    return fsOps.existsSync(candidate) && fsOps.statSync(candidate).isDirectory()
+      && fsOps.existsSync(join(candidate, 'handoffs')) && fsOps.statSync(join(candidate, 'handoffs')).isDirectory();
+  } catch (_) {
+    return false;
+  }
 }
 
 export function findHopperDir(startDir = process.cwd()) {

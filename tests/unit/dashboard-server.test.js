@@ -4,7 +4,9 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createApp, parseServerArgs, startServer } from '../../dashboard/server/index.js';
-import { findHopperDir } from '../../dashboard/server/lib/hopper-dir.js';
+import * as hopperDirLib from '../../dashboard/server/lib/hopper-dir.js';
+
+const { findHopperDir, isHopperWorkspace } = hopperDirLib;
 
 function closeServer(server) {
   return new Promise((resolve) => server.close(resolve));
@@ -65,4 +67,18 @@ test('dashboard workspace discovery rejects structurally invalid explicit HOPPER
     else process.env.HOPPER_DIR = previous;
     rmSync(resolve(tmp), { recursive: true, force: true });
   }
+});
+
+test('dashboard workspace validation fails closed when stat races or is denied', () => {
+  const calls = [];
+  const fsOps = {
+    existsSync(path) { calls.push(['exists', path]); return true; },
+    statSync(path) {
+      calls.push(['stat', path]);
+      if (calls.filter(([kind]) => kind === 'stat').length === 1) return { isDirectory: () => true };
+      throw Object.assign(new Error('simulated handoffs permission failure'), { code: 'EACCES' });
+    },
+  };
+  assert.equal(isHopperWorkspace('volatile-workspace', fsOps), false);
+  assert.equal(calls.filter(([kind]) => kind === 'stat').length, 2, 'validation intentionally uses statSync and follows symlinks');
 });
