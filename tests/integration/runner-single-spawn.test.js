@@ -766,7 +766,8 @@ test('spawn error emits no late process_alive after more than one liveness inter
     });
 
     assert.notEqual(result.code, 0);
-    assert.match(result.stderr, /spawn error|ENOENT|not found/i);
+    assert.equal(result.stderr.trim(), 'hopper-runner: adapter-unknown-failed',
+      'spawn failure must expose only the closed runner diagnostic');
     const atError = readProgressEvents({ hopperDir, taskId });
     assert.equal(atError.filter((event) => event.terminal).length, 1,
       'spawn error must reach one authoritative terminal event before the stability wait');
