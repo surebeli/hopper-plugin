@@ -1,0 +1,29 @@
+cli/src/handoff-attestation.js
+  0000019f87e8f655 1-563
+tests/unit/claude-code-host.test.js
+  0000019f87e8f655 1-209
+tests/unit/codex-plugin.test.js
+  0000019f87e8f655 1-156
+tests/unit/handoff-attestation.test.js
+  0000019f87e8f655 1-409
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "a37d250bb1ed143532a134910d1980b2c4b3fbed",
+  "prompts": {
+    "0000019f87e8f655": {
+      "agent_id": {
+        "tool": "codex",
+        "model": "gpt-5.6-sol",
+        "id": "ai-thread-codex-gpt-5.6-sol-1784691619413"
+      },
+      "human_author": "litianyi",
+      "messages": [],
+      "total_additions": 1337,
+      "total_deletions": 0,
+      "accepted_lines": 1337,
+      "overriden_lines": 0
+    }
+  }
+}
