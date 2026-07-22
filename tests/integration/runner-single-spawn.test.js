@@ -671,10 +671,20 @@ test('buffered vendor emits non-sensitive process-alive liveness without extendi
     assert.equal(interim.frontmatter.phase, 'running', 'liveness advances starting → running');
     assert.equal(interim.frontmatter.last_stream_event, 'process_alive');
 
-    const liveness = interim.events.filter((event) => event.kind === 'liveness');
+    const liveness = interim.events.filter((event) => event.kind === 'process_alive');
     assert.ok(liveness.length >= 1, 'silent buffered process must emit a throttled liveness event');
     assert.ok(liveness.every((event) => event.last_stream_event === 'process_alive'));
     assert.ok(liveness.every((event) => event.message === 'Vendor process is still running.'));
+    assert.ok(liveness.every((event) => event.source === 'runner' && event.terminal === false));
+    const safeLivenessKeys = [
+      'kind', 'last_stream_event', 'last_update', 'message', 'phase', 'seq', 'source', 'task_id', 'terminal', 'ts', 'vendor',
+    ];
+    assert.ok(liveness.every((event) => JSON.stringify(Object.keys(event).sort()) === JSON.stringify(safeLivenessKeys)),
+      'process_alive events must contain only canonical lifecycle/timestamp/sequence fields');
+    for (const forbidden of ['raw_chunk', 'stdout', 'stderr', 'prompt', 'byte_count', 'log_path', 'account', 'model', 'provider']) {
+      assert.ok(liveness.every((event) => !Object.prototype.hasOwnProperty.call(event, forbidden)),
+        `process_alive must not expose raw-derived field ${forbidden}`);
+    }
     const interimProtocol = JSON.stringify({ frontmatter: interim.frontmatter, events: liveness });
     assert.doesNotMatch(interimProtocol, new RegExp(promptSecret));
     assert.doesNotMatch(interimProtocol, new RegExp(outputSecret));
@@ -688,7 +698,7 @@ test('buffered vendor emits non-sensitive process-alive liveness without extendi
     const terminalEvents = finalEvents.filter((event) => event.terminal);
     assert.equal(terminalEvents.length, 1);
     const terminalSeq = terminalEvents[0].seq;
-    assert.ok(finalEvents.filter((event) => event.kind === 'liveness').every((event) => event.seq < terminalSeq),
+    assert.ok(finalEvents.filter((event) => event.kind === 'process_alive').every((event) => event.seq < terminalSeq),
       'no liveness event may trail terminalization');
 
     const eventCountAtTerminal = finalEvents.length;
@@ -700,10 +710,12 @@ test('buffered vendor emits non-sensitive process-alive liveness without extendi
   }
 });
 
-test('buffered liveness timer is conditional and cleared on close/error paths', () => {
+test('process-alive liveness timer requires buffered output or adapter capability and clears on close/error', () => {
   const runner = readFileSync(RUNNER_PATH, 'utf-8');
-  assert.match(runner, /bufferedLivenessTimer\s*=\s*bufferedOutput\s*\?\s*setInterval/,
-    'non-buffered vendors must not receive process-alive liveness events');
+  assert.match(runner, /const emitsProcessAliveLiveness\s*=\s*bufferedOutput\s*\|\|\s*adapter\?\.liveness\?\.processAlive\s*===\s*true/,
+    'non-buffered adapters must explicitly opt in to process-alive liveness');
+  assert.match(runner, /bufferedLivenessTimer\s*=\s*emitsProcessAliveLiveness\s*\?\s*setInterval/,
+    'the timer must be gated by the unified buffered-or-capability predicate');
 
   const closeStart = runner.indexOf("vendor.on('close'");
   const errorStart = runner.indexOf("vendor.on('error'", closeStart);
