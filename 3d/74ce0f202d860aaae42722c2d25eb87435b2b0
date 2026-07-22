@@ -1,0 +1,37 @@
+cli/bin/hopper-dispatch
+  0000019f88170806 1-2154
+dashboard/server/lib/hopper-dir.js
+  0000019f88170806 1-30
+plugins/hopper/cli/bin/hopper-dispatch
+  0000019f88170806 1-2154
+tests/helpers/wait-for-pid-exit.js
+  0000019f88170806 1-41
+tests/integration/background-e2e.test.js
+  0000019f88170806 1-361
+tests/unit/dashboard-server.test.js
+  0000019f88170806 1-84
+tests/unit/progress-cli.test.js
+  0000019f88170806 1-324
+tests/unit/progress-watch.test.js
+  0000019f88170806 1-496
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "3d74ce0f202d860aaae42722c2d25eb87435b2b0",
+  "prompts": {
+    "0000019f88170806": {
+      "agent_id": {
+        "tool": "codex",
+        "model": "gpt-5.6-sol",
+        "id": "ai-thread-codex-gpt-5.6-sol-1784694638598"
+      },
+      "human_author": "litianyi",
+      "messages": [],
+      "total_additions": 5644,
+      "total_deletions": 0,
+      "accepted_lines": 5644,
+      "overriden_lines": 0
+    }
+  }
+}
