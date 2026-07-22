@@ -1,29 +1,25 @@
 cli/src/handoff-attestation.js
-  0000019f87e8f655 1-563
+  s_9b9532ed48c3cb::t_a1cb1a707418a0 454,465,520,537
 tests/unit/claude-code-host.test.js
-  0000019f87e8f655 1-209
+  s_9b9532ed48c3cb::t_65f700b8217b72 22-25,67,78
 tests/unit/codex-plugin.test.js
-  0000019f87e8f655 1-156
+  s_9b9532ed48c3cb::t_e94d62b498f3e5 31-34,99
 tests/unit/handoff-attestation.test.js
-  0000019f87e8f655 1-409
+  s_9b9532ed48c3cb::t_6bcaec50e8939d 126-127,162
 ---
 {
   "schema_version": "authorship/3.0.0",
   "git_ai_version": "1.6.15",
   "base_commit_sha": "a37d250bb1ed143532a134910d1980b2c4b3fbed",
-  "prompts": {
-    "0000019f87e8f655": {
+  "prompts": {},
+  "sessions": {
+    "s_9b9532ed48c3cb": {
       "agent_id": {
         "tool": "codex",
-        "model": "gpt-5.6-sol",
-        "id": "ai-thread-codex-gpt-5.6-sol-1784691619413"
+        "id": "019f829e-39fc-7e93-a464-c73aba41ebea",
+        "model": "gpt-5.6-terra"
       },
-      "human_author": "litianyi",
-      "messages": [],
-      "total_additions": 1337,
-      "total_deletions": 0,
-      "accepted_lines": 1337,
-      "overriden_lines": 0
+      "human_author": "litianyi <litianyi@corp.netease.com>"
     }
   }
 }
