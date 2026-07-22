@@ -182,6 +182,124 @@ test('dashboard task route closes hostile selector and observed-model value doma
   }
 });
 
+test('dashboard task route denies credential-shaped prefixes without blocking short slug lookalikes', () => {
+  const root = mkdtempSync(join(tmpdir(), 'hopper-dashboard-task-credentials-'));
+  const handoffs = join(root, '.hopper', 'handoffs');
+  const tokens = [
+    `ghp_${'A'.repeat(36)}`,
+    `gho_${'B'.repeat(36)}`,
+    `ghu_${'C'.repeat(36)}`,
+    `ghs_${'D'.repeat(36)}`,
+    `ghr_${'E'.repeat(36)}`,
+    `github_pat_${'F'.repeat(32)}`,
+    `glpat-${'G'.repeat(24)}`,
+    `xapp-1-${'H'.repeat(32)}`,
+    `xoxb-${'I'.repeat(32)}`,
+    'sk-private-secret-token',
+  ];
+  const shortLookalikes = [
+    'gho_model',
+    'ghu-preview',
+    'ghs-test',
+    'ghr-dev',
+    'glpat-model',
+    'xapp-preview',
+  ];
+  mkdirSync(handoffs, { recursive: true });
+  writeFileSync(join(handoffs, 'T-CREDENTIALS-output.md'), [
+    '---',
+    'task_id: T-CREDENTIALS',
+    'adapter: claude',
+    'status: done',
+    'phase: done',
+    `requested_selector: ${tokens[1]}`,
+    `effective_selector: ${tokens[6]}`,
+    'effective_selector_source: user-argv',
+    'selector_kind: concrete',
+    `observed_models_json: ${JSON.stringify(JSON.stringify([...tokens, ...shortLookalikes, 'fable', 'tokenbox/deepseek-v4-pro']))}`,
+    '---',
+    'PRIVATE BODY',
+  ].join('\n'));
+
+  const detail = readTaskDetail(join(root, '.hopper'), 'T-CREDENTIALS');
+  assert.equal(detail.selector.requested, null);
+  assert.equal(detail.selector.effective, null);
+  assert.deepEqual(detail.observedModels, [...shortLookalikes, 'fable', 'tokenbox/deepseek-v4-pro']);
+  const serialized = JSON.stringify(detail);
+  for (const token of tokens) {
+    assert.equal(serialized.includes(token), false, `task DTO leaked credential-shaped value ${token.slice(0, 12)}`);
+  }
+});
+
+test('dashboard task route preserves exact adapter-declared non-slug knownGood models only', () => {
+  const root = mkdtempSync(join(tmpdir(), 'hopper-dashboard-task-known-good-'));
+  const hopperDir = join(root, '.hopper');
+  const handoffs = join(hopperDir, 'handoffs');
+  const claudeKnownGood = [
+    'sonnet', 'opus', 'haiku', 'fable', 'opusplan', 'best', 'default', 'sonnet[1m]', 'opus[1m]',
+  ];
+  const agyKnownGood = [
+    'Gemini 3.5 Flash (High)',
+    'Gemini 3.5 Flash (Medium)',
+    'Gemini 3.1 Pro (High)',
+    'Gemini 3.1 Pro (Low)',
+  ];
+  mkdirSync(handoffs, { recursive: true });
+  writeFileSync(join(handoffs, 'T-CLAUDE-KG-output.md'), [
+    '---',
+    'task_id: T-CLAUDE-KG',
+    'adapter: claude',
+    'status: done',
+    'phase: done',
+    'requested_selector: sonnet[1m]',
+    'effective_selector: opus[1m]',
+    'effective_selector_source: user-argv',
+    'selector_kind: alias',
+    `observed_models_json: ${JSON.stringify(JSON.stringify([
+      ...claudeKnownGood,
+      'Sonnet[1m]',
+      'Gemini 3.5 Flash (High)',
+      'Enterprise Model (Private)',
+    ]))}`,
+    '---',
+    'PRIVATE BODY',
+  ].join('\n'));
+  writeFileSync(join(handoffs, 'T-AGY-KG-output.md'), [
+    '---',
+    'task_id: T-AGY-KG',
+    'adapter: agy',
+    'status: done',
+    'phase: done',
+    'requested_selector: Gemini 3.5 Flash (High)',
+    'effective_selector: Gemini 3.5 Flash (Medium)',
+    'effective_selector_source: user-argv',
+    'selector_kind: concrete',
+    `observed_models_json: ${JSON.stringify(JSON.stringify([
+      ...agyKnownGood,
+      'gemini 3.5 flash high',
+      'sonnet[1m]',
+      'Enterprise Model (Private)',
+    ]))}`,
+    '---',
+    'PRIVATE BODY',
+  ].join('\n'));
+
+  const claude = readTaskDetail(hopperDir, 'T-CLAUDE-KG');
+  assert.deepEqual(claude.selector, {
+    requested: 'sonnet[1m]', effective: 'opus[1m]', kind: 'alias', source: 'user-argv',
+  });
+  assert.deepEqual(claude.observedModels, claudeKnownGood);
+
+  const agy = readTaskDetail(hopperDir, 'T-AGY-KG');
+  assert.deepEqual(agy.selector, {
+    requested: 'Gemini 3.5 Flash (High)',
+    effective: 'Gemini 3.5 Flash (Medium)',
+    kind: 'concrete',
+    source: 'user-argv',
+  });
+  assert.deepEqual(agy.observedModels, agyKnownGood);
+});
+
 test('dashboard task progress route returns limited progress events in append order', async () => {
   const root = mkdtempSync(join(tmpdir(), 'hopper-dashboard-task-progress-'));
   const handoffs = join(root, '.hopper', 'handoffs');
