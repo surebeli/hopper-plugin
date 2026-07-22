@@ -13,10 +13,10 @@
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { executeWithAdapter } from '../../cli/src/dispatch.js';
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { executeDispatch, executeWithAdapter } from '../../cli/src/dispatch.js';
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync, readdirSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 
 /**
  * Build a fake adapter that increments a counter file on every spawn.
@@ -50,6 +50,111 @@ function makeCounterAdapter(counterFile, options = {}) {
     },
   };
 }
+
+function makeKimiPublicFixture() {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-kimi-public-'));
+  const hopperDir = join(tmp, '.hopper');
+  const handoffsDir = join(hopperDir, 'handoffs');
+  const binDir = join(tmp, 'fake-bin');
+  const counterFile = join(tmp, 'kimi-count.txt');
+  const fakeScript = join(tmp, 'fake-kimi.js');
+  mkdirSync(join(hopperDir, 'tasks'), { recursive: true });
+  mkdirSync(handoffsDir, { recursive: true });
+  mkdirSync(binDir, { recursive: true });
+  writeFileSync(counterFile, '0');
+  writeFileSync(join(hopperDir, 'queue.md'), [
+    '| ID | Task-type | Status | Depends | Brief |',
+    '|----|-----------|--------|---------|-------|',
+    '| T-KIMI-PUBLIC | code-impl | pending | | read-only audit of routing |',
+    '',
+  ].join('\n'));
+  writeFileSync(join(hopperDir, 'tasks', 'code-impl.md'), '# code-impl\n');
+  writeFileSync(join(hopperDir, 'AGENTS.md'), [
+    '## Active Agent Instances',
+    '',
+    '| Nickname | UUID | Vendor | Default invocation |',
+    '|----------|------|--------|--------------------|',
+    '| `builder` | `1` | kimi | `kimi` |',
+    '',
+    '## Task-type → vendor default preference',
+    '',
+    '| Task-type | Default vendor |',
+    '|---|---|',
+    '| `code-impl` | builder |',
+    '',
+  ].join('\n'));
+  writeFileSync(fakeScript, [
+    "const fs = require('node:fs');",
+    'const file = process.env.HOPPER_TEST_KIMI_COUNTER;',
+    "const n = Number.parseInt(fs.readFileSync(file, 'utf-8'), 10) + 1;",
+    "fs.writeFileSync(file, String(n));",
+    "process.stdout.write('FAKE_KIMI_OK\\n');",
+    '',
+  ].join('\n'));
+  if (process.platform === 'win32') {
+    writeFileSync(join(binDir, 'kimi.cmd'), '@echo off\r\n"%HOPPER_TEST_NODE%" "%HOPPER_TEST_KIMI_SCRIPT%" %*\r\n');
+  } else {
+    const fake = join(binDir, 'kimi');
+    writeFileSync(fake, '#!/bin/sh\n"$HOPPER_TEST_NODE" "$HOPPER_TEST_KIMI_SCRIPT" "$@"\n');
+    chmodSync(fake, 0o755);
+  }
+  return { tmp, hopperDir, handoffsDir, binDir, counterFile, fakeScript };
+}
+
+async function withFakeKimiOnPath(fixture, fn) {
+  const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === 'path') || 'PATH';
+  const previous = {
+    path: process.env[pathKey],
+    counter: process.env.HOPPER_TEST_KIMI_COUNTER,
+    node: process.env.HOPPER_TEST_NODE,
+    script: process.env.HOPPER_TEST_KIMI_SCRIPT,
+  };
+  process.env[pathKey] = `${fixture.binDir}${delimiter}${previous.path || ''}`;
+  process.env.HOPPER_TEST_KIMI_COUNTER = fixture.counterFile;
+  process.env.HOPPER_TEST_NODE = process.execPath;
+  process.env.HOPPER_TEST_KIMI_SCRIPT = fixture.fakeScript;
+  try {
+    return await fn();
+  } finally {
+    if (previous.path === undefined) delete process.env[pathKey]; else process.env[pathKey] = previous.path;
+    if (previous.counter === undefined) delete process.env.HOPPER_TEST_KIMI_COUNTER; else process.env.HOPPER_TEST_KIMI_COUNTER = previous.counter;
+    if (previous.node === undefined) delete process.env.HOPPER_TEST_NODE; else process.env.HOPPER_TEST_NODE = previous.node;
+    if (previous.script === undefined) delete process.env.HOPPER_TEST_KIMI_SCRIPT; else process.env.HOPPER_TEST_KIMI_SCRIPT = previous.script;
+  }
+}
+
+test('executeDispatch public sync entry rejects effective Kimi read-only before spawn or artifact', async () => {
+  const fixture = makeKimiPublicFixture();
+  try {
+    await withFakeKimiOnPath(fixture, async () => {
+      await assert.rejects(
+        () => executeDispatch({ hopperDir: fixture.hopperDir, taskId: 'T-KIMI-PUBLIC' }),
+        (err) => err.code === 'E_KIMI_READ_ONLY_UNENFORCEABLE' && err.exitCode === 2,
+      );
+    });
+    assert.equal(readFileSync(fixture.counterFile, 'utf-8'), '0', 'fake kimi must not spawn');
+    assert.deepEqual(readdirSync(fixture.handoffsDir), [], 'public sync refusal must not create handoff artifacts');
+  } finally {
+    rmSync(fixture.tmp, { recursive: true, force: true });
+  }
+});
+
+test('executeDispatch public sync entry permits explicit danger-full-access for Kimi', async () => {
+  const fixture = makeKimiPublicFixture();
+  try {
+    const result = await withFakeKimiOnPath(fixture, () => executeDispatch({
+      hopperDir: fixture.hopperDir,
+      taskId: 'T-KIMI-PUBLIC',
+      adapterOpts: { sandbox: 'danger-full-access' },
+    }));
+    assert.equal(result.output.status, 'success');
+    assert.match(result.output.text, /FAKE_KIMI_OK/);
+    assert.equal(readFileSync(fixture.counterFile, 'utf-8'), '1', 'explicit full-access should spawn fake kimi exactly once');
+    assert.deepEqual(readdirSync(fixture.handoffsDir), [], 'successful sync call without --write creates no handoff artifact');
+  } finally {
+    rmSync(fixture.tmp, { recursive: true, force: true });
+  }
+});
 
 test('executeWithAdapter spawns subprocess EXACTLY ONCE on success path (E2E)', async () => {
   const tmp = mkdtempSync(join(tmpdir(), 'hopper-e2e-success-'));

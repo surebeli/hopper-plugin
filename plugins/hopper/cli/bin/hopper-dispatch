@@ -5,7 +5,7 @@
 // Per spec §3 #4 (no harness reaction core): ONE invocation = ONE action = ONE exit.
 // No retry, no fallback, no state across invocations.
 
-import { resolveDispatch, resolveAdhocDispatch, planSwarm, getStatus, executeWithAdapter, resolveAdapterOptsForTask, assertVendorDispatchable } from '../src/dispatch.js';
+import { resolveDispatch, resolveAdhocDispatch, planSwarm, getStatus, executeWithAdapter, resolveAdapterOptsForTask, assertVendorDispatchable, assertAdapterSandboxEnforceable } from '../src/dispatch.js';
 import { listTaskTypes } from '../src/tasks.js';
 import { listAdapters, getAdapter, installCheckForAdapter, capabilitiesForAdapter, probeVendor } from '../src/vendors/index.js';
 import { readCacheWithOutcome, getVendorCache, setVendorCache, recoverCache, isStale, staleness } from '../src/cache.js';
@@ -59,14 +59,6 @@ const VERSION = '0.32.0';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const RUNNER_PATH = join(__dirname, 'hopper-runner');
-
-function assertReadOnlySandboxEnforceable(adapter, effectiveAdapterOpts) {
-  const readOnlySandbox = adapter?.capabilities?.features?.permissions?.readOnlySandbox;
-  if (adapter?.name !== 'kimi' || effectiveAdapterOpts?.sandbox !== 'read-only' || readOnlySandbox?.enforceable !== false) return;
-  const error = new Error(`${readOnlySandbox.failureCode}: Kimi prompt mode cannot enforce a read-only sandbox.`);
-  error.exitCode = 2;
-  throw error;
-}
 
 /** Parse the explicit recovery form without making recovery implicit. */
 export function parseProbeCacheRecoveryArgs(argv, vendors) {
@@ -873,7 +865,6 @@ async function runDispatch(hopperDir, taskId, { write = false, force = false, ad
     if (!adapter) {
       throw new Error(`unknown vendor '${resolved.vendor}'`);
     }
-    assertReadOnlySandboxEnforceable(adapter, effectiveAdapterOpts);
     const startupSnapshot = attestationStartupSnapshot(effectiveAdapterOpts, resolved.vendor, adapter);
     const result = await executeWithAdapter({ resolved, adapter, adapterOpts: effectiveAdapterOpts, hopperDir, cwd: resolveVendorCwd(hopperDir) });
     const elapsedMs = Date.now() - startedAt;
@@ -1021,7 +1012,7 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {}, vend
     bail(`Error: unknown vendor '${resolved.vendor}'`, 1);
   }
   try {
-    assertReadOnlySandboxEnforceable(adapter, effectiveAdapterOpts);
+    assertAdapterSandboxEnforceable(adapter, effectiveAdapterOpts);
   } catch (err) {
     bail(`Error: ${err.message}`, err.exitCode || 2);
   }

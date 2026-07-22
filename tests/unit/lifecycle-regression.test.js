@@ -261,7 +261,13 @@ test('Kimi runner emits content-free process_alive liveness while text output is
   let runnerClosed = null;
   try {
     mkdirSync(handoffs, { recursive: true });
-    writeFileSync(sleepScriptPath, 'setTimeout(() => process.exit(0), 400);\n');
+    writeFileSync(sleepScriptPath, [
+      "process.stdout.write(JSON.stringify({ type: 'step_finish', part: { type: 'step-finish', reason: 'HOSTILE_KIMI_REASON_SENTINEL' } }) + '\\n');",
+      "process.stdout.write('HOSTILE_KIMI_STDOUT_SENTINEL\\n');",
+      "process.stderr.write('HOSTILE_KIMI_STDERR_SENTINEL\\n');",
+      'setTimeout(() => process.exit(0), 2200);',
+      '',
+    ].join('\n'));
     installSlowFakeKimi(binDir, sleepScriptPath);
     writeFileSync(outputMdPath, [
       '---',
@@ -281,6 +287,7 @@ test('Kimi runner emits content-free process_alive liveness while text output is
       HOPPER_TEST_KIMI_SLEEP_SCRIPT: sleepScriptPath,
       HOPPER_TEST_NODE: process.execPath,
       HOPPER_TEST_ONLY_LIVENESS_INTERVAL_MS: '25',
+      HOPPER_IDLE_TIMEOUT_MS: '1200',
     };
     runner = spawn(process.execPath, [
       RUNNER,
@@ -320,6 +327,16 @@ test('Kimi runner emits content-free process_alive liveness while text output is
     ]);
     assert.match(liveness.last_update, /^\d{4}-\d{2}-\d{2}T/);
 
+    // The generic idle poll ticks no sooner than 1s. Keep Kimi alive across that
+    // boundary so hostile lifecycle-shaped text would be parsed if raw reads remain.
+    await new Promise((resolve) => setTimeout(resolve, 1_400));
+    const runningEvents = progress.readProgressEvents({ hopperDir, taskId })
+      .filter((event) => event.phase === 'running');
+    assert.ok(runningEvents.length > 0);
+    assert.ok(runningEvents.every((event) => event.kind === 'process_alive'));
+    assert.ok(runningEvents.every((event) => event.last_stream_event === 'process_alive'));
+    assert.ok(runningEvents.every((event) => event.last_reason === undefined));
+
     const progressJsonl = readFileSync(join(handoffs, `${taskId}-progress.log`), 'utf-8');
     const frontmatter = readFrontmatter(outputMdPath);
     const { _body, ...frontmatterSurface } = frontmatter;
@@ -333,6 +350,8 @@ test('Kimi runner emits content-free process_alive liveness while text output is
       'HOSTILE_KIMI_STDOUT_SENTINEL',
       'HOSTILE_KIMI_STDERR_SENTINEL',
       'HOSTILE_KIMI_PROMPT_SENTINEL',
+      'HOSTILE_KIMI_REASON_SENTINEL',
+      'step_finish',
     ]) {
       assert.doesNotMatch(safeSurfaces, new RegExp(sentinel));
     }

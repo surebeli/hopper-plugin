@@ -67,7 +67,7 @@ export const kimiAdapter = {
 
   // Text prompt mode has no safe lifecycle envelope to mirror. The runner emits
   // only its fixed process-alive marker; it never derives liveness from Kimi text.
-  liveness: { processAlive: true },
+  liveness: { processAlive: true, safeStreamEvents: false },
 
   args(input, opts) {
     // Kimi Code 0.x headless form (CONFIRMED): kimi -p "<prompt>" [-m <alias>] [--session <id>]

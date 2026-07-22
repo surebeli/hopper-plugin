@@ -421,6 +421,8 @@ async function main() {
       // Liveness is advisory; terminal frontmatter remains authoritative.
     }
   };
+  const contentFreeProcessLiveness = adapter?.liveness?.processAlive === true
+    && adapter?.liveness?.safeStreamEvents === false;
   const emitsProcessAliveLiveness = bufferedOutput || adapter?.liveness?.processAlive === true;
   bufferedLivenessTimer = emitsProcessAliveLiveness ? setInterval(
     appendBufferedLiveness,
@@ -446,6 +448,13 @@ async function main() {
     try { sz = existsSync(logPath) ? statSync(logPath).size : 0; } catch (_) {}
         if (sz !== lastSize) {
           lastSize = sz;
+          if (contentFreeProcessLiveness) {
+            // This adapter has no safe lifecycle envelope. File growth still
+            // resets the idle clock, but raw bytes are never opened or parsed.
+            lastReadOffset = sz;
+            lastGrowAt = Date.now();
+            return;
+          }
           if (sz > lastReadOffset) {
             let chunk = null;
             try {

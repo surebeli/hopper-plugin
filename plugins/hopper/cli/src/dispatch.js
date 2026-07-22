@@ -388,6 +388,21 @@ export function assertVendorDispatchable(vendor, env = process.env) {
 }
 
 /**
+ * Refuse an effective read-only dispatch when the selected adapter explicitly
+ * declares that it cannot enforce that sandbox. This is the shared sync and
+ * background gate; callers must pass opts after resolveAdapterOptsForTask().
+ */
+export function assertAdapterSandboxEnforceable(adapter, effectiveAdapterOpts) {
+  const readOnlySandbox = adapter?.capabilities?.features?.permissions?.readOnlySandbox;
+  if (adapter?.name !== 'kimi' || effectiveAdapterOpts?.sandbox !== 'read-only' || readOnlySandbox?.enforceable !== false) return;
+  const failureCode = readOnlySandbox.failureCode;
+  const error = new Error(`${failureCode}: Kimi prompt mode cannot enforce a read-only sandbox.`);
+  error.code = failureCode;
+  error.exitCode = 2;
+  throw error;
+}
+
+/**
  * Execute dispatch end-to-end: resolve + adapter preflight + subprocess spawn + parse.
  *
  * Per spec §3 #4 (no harness reaction core): ONE adapter call = ONE subprocess
@@ -430,6 +445,7 @@ export async function executeWithAdapter({ resolved, adapter, adapterOpts = {}, 
   // blocked here unless explicitly opted in. Throws before any subprocess is spawned.
   assertVendorDispatchable(vendor);
   const dispatchAdapterOpts = resolveAdapterOptsForTask(resolved, adapterOpts);
+  assertAdapterSandboxEnforceable(adapter, dispatchAdapterOpts);
 
   // envPreflight — if not ok, fail FAST without spawning subprocess
   const preflight = adapter.envPreflight();
