@@ -31,6 +31,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { applyTaskTypeFloor } from '../subprocess.js';
+import { adapterFailure } from '../adapter-diagnostics.js';
 
 // Versioned adapter metadata is the closed allowlist for result fields that are
 // stable enough to attest an actual runtime model. It deliberately names paths,
@@ -180,14 +181,10 @@ export const claudeAdapter = {
 
   parseResult(raw) {
     if (raw.timedOut) {
-      return { text: raw.stdout, status: 'timeout', error: `claude -p timed out after ${raw.durationMs}ms` };
+      return adapterFailure('timeout', 'adapter-timeout');
     }
     if (raw.exitCode === 127 || /not found|command not found/i.test(raw.stderr || '')) {
-      return {
-        text: '',
-        status: 'permission-fail',
-        error: 'claude binary not found in PATH. Install: npm install -g @anthropic-ai/claude-code (see code.claude.com/docs).',
-      };
+      return adapterFailure('permission-fail', 'adapter-binary-missing');
     }
     // A completed result object is the authoritative vendor outcome. The
     // file-backed runner records startup diagnostics in the same log, so broad
@@ -201,22 +198,14 @@ export const claudeAdapter = {
     // Auth failure (the `error` categories the SDK emits include
     // authentication_failed / oauth_org_not_allowed — code.claude.com/docs/en/headless).
     if (/authentication_failed|oauth_org_not_allowed|invalid api key|invalid x-api-key|ANTHROPIC_API_KEY|not logged in|please run\b.*login|\b401\b|\b403\b/i.test(signal)) {
-      return {
-        text: '',
-        status: 'auth-fail',
-        error: 'claude is not authenticated. Set ANTHROPIC_API_KEY, run `claude` then `/login`, or `claude setup-token` (CLAUDE_CODE_OAUTH_TOKEN). With --bare only ANTHROPIC_API_KEY / apiKeyHelper auth is read.',
-      };
+      return adapterFailure('auth-fail', 'adapter-auth-failed');
     }
     // Billing / credit / usage-limit block. Kept as a distinct branch because the
     // SDK emits a `billing_error` category regardless of the current billing
     // model — the wording stays policy-neutral on purpose (the `claude -p` billing
     // regime changed repeatedly across 2026; see the BILLING NOTE at the top).
     if (/billing_error|credit balance|insufficient.*credit|agent sdk credit|quota exceeded|usage limit/i.test(signal)) {
-      return {
-        text: '',
-        status: 'auth-fail',
-        error: 'claude -p was blocked by a billing / credit / usage limit. Check the Claude account plan limits or credit balance (the `claude -p` billing model has changed across 2026 — verify current policy at anthropic.com).',
-      };
+      return adapterFailure('auth-fail', 'adapter-auth-failed');
     }
     if (raw.exitCode === 0) {
       // --output-format json yields a single trailing result object. Parse
@@ -227,20 +216,11 @@ export const claudeAdapter = {
       // turn (permission mode) or a max-turns hit can exit 0 with is_error/empty
       // result. Treat is_error OR no usable text as failure.
       if (parsed.isError || !parsed.text.trim()) {
-        return {
-          text: parsed.text,
-          status: 'unknown-fail',
-          error: `claude produced no usable result${parsed.subtype ? ` (subtype="${parsed.subtype}")` : ''}. ` +
-            'Common causes: a blocked headless turn (permission mode) or a max-turns limit. Confirm auth + permission mode and re-dispatch.',
-        };
+        return adapterFailure('unknown-fail', 'adapter-protocol-invalid');
       }
       return successfulClaudeOutput(parsed);
     }
-    return {
-      text: raw.stdout,
-      status: 'unknown-fail',
-      error: `claude exited ${raw.exitCode}: ${(raw.stderr || '').slice(0, 500)}`,
-    };
+    return adapterFailure('unknown-fail', 'adapter-unknown-failed');
   },
 };
 
@@ -285,8 +265,8 @@ function extractClaudeResult(stdout) {
 
 function successfulClaudeOutput(parsed) {
   const output = parsed.usage
-    ? { text: parsed.text, status: 'success', usage: parsed.usage }
-    : { text: parsed.text, status: 'success' };
+    ? { text: parsed.text, status: 'success', diagnosticCode: 'none', usage: parsed.usage }
+    : { text: parsed.text, status: 'success', diagnosticCode: 'none' };
   const modelAttestation = extractClaudeModelAttestation(parsed.terminalEnvelope);
   return modelAttestation ? { ...output, modelAttestation } : output;
 }

@@ -78,17 +78,16 @@ test('renderOutputMarkdown: success case includes Phase 2 schema sections in cor
   }
 });
 
-test('renderOutputMarkdown: failure case includes Vendor error context section', () => {
+test('renderOutputMarkdown: failure case includes only a closed adapter diagnostic', () => {
   const result = makeDispatchResult({
-    output: { text: '', status: 'auth-fail', error: 'kimi: HTTP 402 membership' },
-    raw: { exitCode: 0, stdout: '', stderr: 'auth error from server', timedOut: false, durationMs: 500 },
+    output: { text: 'RAW_STDOUT_PRIVATE', status: 'auth-fail', error: 'adapter-auth-failed', diagnosticCode: 'adapter-auth-failed' },
+    raw: { exitCode: 0, stdout: 'RAW_STDOUT_PRIVATE', stderr: 'RAW_STDERR_PRIVATE', timedOut: false, durationMs: 500 },
   });
   const md = renderOutputMarkdown(result);
   assert.match(md, /Vendor dispatch status: `auth-fail` \[FAIL\]/);
-  assert.match(md, /## Vendor error context/);
-  assert.match(md, /kimi: HTTP 402 membership/);
-  assert.doesNotMatch(md, /Stderr excerpt/);
-  assert.doesNotMatch(md, /auth error from server/);
+  assert.match(md, /## Adapter diagnostic/);
+  assert.match(md, /adapter-auth-failed/);
+  assert.doesNotMatch(md, /RAW_STDOUT_PRIVATE|RAW_STDERR_PRIVATE/);
 });
 
 test('renderOutputMarkdown: timed-out case is annotated', () => {
@@ -163,15 +162,14 @@ test('suggestCostEdit: produces a markdown table row', () => {
   assert.match(row, /7\.5s/);
 });
 
-test('suggestCostEdit: failure includes error excerpt', () => {
+test('suggestCostEdit: failure includes only the closed diagnostic code', () => {
   const task = { id: 'T-42', taskType: 'code-impl' };
   const row = suggestCostEdit(task, 'agy',
-    { status: 'auth-fail', error: 'agy is not OAuth-authed.\nFix it.' },
+    { status: 'auth-fail', error: 'adapter-auth-failed', diagnosticCode: 'adapter-auth-failed' },
     { durationMs: 300 });
   assert.match(row, /auth-fail/);
-  assert.match(row, /error=/);
-  // Newlines in error should be replaced with spaces
-  assert.ok(!row.includes('\n'), 'error excerpt must not introduce newlines into the row');
+  assert.match(row, /adapter-auth-failed/);
+  assert.doesNotMatch(row, /error=|RAW_|OAuth-authed/);
 });
 
 test('writeOutput: creates file at .hopper/handoffs/<task-id>-output.md', async () => {
@@ -538,14 +536,13 @@ test('renderOutputMarkdown: vendor name with control chars sanitized in H1', () 
   assert.equal(h1.split('\n').length, 1, 'H1 must be single line');
 });
 
-test('renderOutputMarkdown: error message with embedded fences does not break ', () => {
+test('renderOutputMarkdown: diagnostic rendering ignores raw error prose with embedded fences', () => {
   const result = makeDispatchResult({
-    output: { text: '', status: 'unknown-fail', error: 'failed at ```bash\nrm -rf /\n``` line 42' },
+    output: { text: 'RAW_STDOUT_PRIVATE', status: 'unknown-fail', error: 'failed at ```bash\nRAW_STDERR_PRIVATE\n``` line 42', diagnosticCode: 'adapter-unknown-failed' },
     raw: { exitCode: 1, stdout: '', stderr: '', timedOut: false, durationMs: 100 },
   });
   const md = renderOutputMarkdown(result);
-  assert.match(md, /## Vendor error context/);
-  // The error fence should be longer than 3 backticks since error contains ```
-  const errorSection = md.split('## Vendor error context')[1];
-  assert.match(errorSection, /````+/, 'error fence must be ≥4 backticks');
+  assert.match(md, /## Adapter diagnostic/);
+  assert.match(md, /adapter-unknown-failed/);
+  assert.doesNotMatch(md, /RAW_STDOUT_PRIVATE|RAW_STDERR_PRIVATE|rm -rf/);
 });

@@ -117,7 +117,7 @@ test('T7: --result renders only canonical safe attestation data unless --full is
     const forbidden = [
       'C:\\PRIVATE_LOGS\\result.log', 'C:\\PRIVATE_CONFIG\\vendor.json', 'RAW_STDERR_PRIVATE',
       'AUTH_PROSE_PRIVATE', 'PRIVATE_PROVIDER_NAME', 'https://private.example.invalid/model',
-      'sk-private-secret-token', 'SOURCE_NOTE_PRIVATE', 'CACHE_ERROR_PRIVATE',
+      'sk-private-secret-token', 'SOURCE_NOTE_PRIVATE', 'CACHE_ERROR_PRIVATE', 'RAW_DIAGNOSTIC_PRIVATE',
       'raw_log', 'sourceNote', 'cacheError', 'modelsSource', 'RAW_SIDECAR_PRIVATE',
     ];
     writeFileSync(output, [
@@ -129,7 +129,7 @@ test('T7: --result renders only canonical safe attestation data unless --full is
       'catalog_source_kind: static', 'catalog_source_label: SOURCE_NOTE_PRIVATE',
       'binary_availability: present', 'binary_basename: codex',
       'raw_log: C:\\PRIVATE_LOGS\\result.log', 'modelsSource: modelsSource',
-      'sourceNote: SOURCE_NOTE_PRIVATE', 'cacheError: CACHE_ERROR_PRIVATE',
+      'sourceNote: SOURCE_NOTE_PRIVATE', 'cacheError: CACHE_ERROR_PRIVATE', 'diagnostic_code: RAW_DIAGNOSTIC_PRIVATE',
       'notes: AUTH_PROSE_PRIVATE sk-private-secret-token', 'stderr: RAW_STDERR_PRIVATE',
       'provider: PRIVATE_PROVIDER_NAME', '---', '', 'RAW_STDERR_PRIVATE',
     ].join('\n'), 'utf-8');

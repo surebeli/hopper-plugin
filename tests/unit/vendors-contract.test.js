@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { listAdapters, getAdapter } from '../../cli/src/vendors/index.js';
 import { mimoAnswerCompleted } from '../../cli/src/vendors/mimo.js';
+import { ADAPTER_DIAGNOSTIC_CODES, adapterDiagnostic } from '../../cli/src/adapter-diagnostics.js';
 
 const VENDORS = ['codex', 'kimi', 'opencode', 'copilot', 'agy', 'grok', 'mimo', 'claude'];
 
@@ -18,6 +19,16 @@ test('registry lists exactly the 8 functional vendors', () => {
   const names = listAdapters().sort();
   assert.deepEqual(names, [...VENDORS].sort(),
     `expected ${VENDORS.join(',')}; got ${names.join(',')}`);
+});
+
+test('adapter diagnostics are a frozen closed vocabulary', () => {
+  assert.equal(Object.isFrozen(ADAPTER_DIAGNOSTIC_CODES), true);
+  assert.deepEqual([...ADAPTER_DIAGNOSTIC_CODES].sort(), [
+    'adapter-auth-failed', 'adapter-binary-missing', 'adapter-permission-failed',
+    'adapter-protocol-invalid', 'adapter-timeout', 'adapter-unknown-failed', 'none',
+  ]);
+  assert.equal(adapterDiagnostic('adapter-timeout'), 'adapter-timeout');
+  assert.equal(adapterDiagnostic('RAW_DIAGNOSTIC_PRIVATE'), 'adapter-unknown-failed');
 });
 
 for (const name of VENDORS) {
@@ -66,6 +77,10 @@ for (const name of VENDORS) {
       durationMs: 30000,
     });
     assert.equal(result.status, 'timeout', `${name}: timeout case must map to status='timeout'`);
+    if (['kimi', 'opencode', 'claude'].includes(name)) {
+      assert.equal(result.diagnosticCode, 'adapter-timeout', `${name}: timeout must carry a closed diagnostic`);
+      assert.equal(result.error, 'adapter-timeout', `${name}: timeout error is the closed diagnostic`);
+    }
   });
 
   test(`${name} adapter parseResult() handles command-not-found (exit 127)`, () => {
@@ -78,7 +93,12 @@ for (const name of VENDORS) {
       durationMs: 50,
     });
     assert.equal(result.status, 'permission-fail', `${name}: 127 must map to permission-fail`);
-    assert.ok(/not found|install/i.test(result.error || ''), `${name}: error must mention install`);
+    if (['kimi', 'opencode', 'claude'].includes(name)) {
+      assert.equal(result.diagnosticCode, 'adapter-binary-missing', `${name}: missing binary must carry a closed diagnostic`);
+      assert.equal(result.error, 'adapter-binary-missing', `${name}: binary error is the closed diagnostic`);
+    } else {
+      assert.ok(/not found|install/i.test(result.error || ''), `${name}: error must mention install`);
+    }
   });
 
   test(`${name} adapter parseResult() handles success (exit 0 + stdout)`, () => {
@@ -197,6 +217,70 @@ test('opencode adapter parseResult() reconstructs text from opencode 1.17+ {type
   assert.equal(result.status, 'success');
   assert.equal(result.text, 'OK_DONE', 'must extract clean assistant text');
   assert.ok(!result.text.includes('step_start'), 'must NOT fall back to dumping raw JSON');
+});
+
+test('Kimi, OpenCode, and Claude failure parsers return only closed diagnostics', () => {
+  const raw = {
+    stdout: 'RAW_STDOUT_PRIVATE C:\\PRIVATE\\vendor.log sk-private-vendor-token',
+    stderr: 'RAW_STDERR_PRIVATE PRIVATE_PROVIDER https://private.example.invalid',
+    timedOut: false,
+    durationMs: 42,
+  };
+  const cases = [
+    ['kimi', { ...raw, exitCode: 1 }, 'unknown-fail', 'adapter-unknown-failed'],
+    ['kimi', { ...raw, exitCode: 0, stdout: `Error code: 402 {'error': {'message': "RAW_STDOUT_PRIVATE"}}` }, 'auth-fail', 'adapter-auth-failed'],
+    ['opencode', { ...raw, exitCode: 1 }, 'unknown-fail', 'adapter-unknown-failed'],
+    ['opencode', { ...raw, exitCode: 0, stdout: JSON.stringify({ type: 'text', part: { type: 'text', text: 'RAW_STDOUT_PRIVATE' } }) }, 'unknown-fail', 'adapter-protocol-invalid'],
+    ['claude', { ...raw, exitCode: 1 }, 'unknown-fail', 'adapter-unknown-failed'],
+    ['claude', { ...raw, exitCode: 0, stdout: JSON.stringify({ type: 'result', subtype: 'error_max_turns', is_error: true, result: 'RAW_STDOUT_PRIVATE' }) }, 'unknown-fail', 'adapter-protocol-invalid'],
+  ];
+  for (const [vendor, fixture, status, diagnosticCode] of cases) {
+    const result = getAdapter(vendor).parseResult(fixture);
+    assert.equal(result.status, status, vendor);
+    assert.equal(result.diagnosticCode, diagnosticCode, vendor);
+    assert.equal(result.error, diagnosticCode, vendor);
+    assert.equal(result.text, '', `${vendor} failure must retain raw text only in its raw log/sidecar`);
+    assert.equal(JSON.stringify(result).includes('RAW_'), false, vendor);
+    assert.equal(JSON.stringify(result).includes('PRIVATE_PROVIDER'), false, vendor);
+  }
+});
+
+test('OpenCode remains fail-closed without both completion and reconstructed text', () => {
+  const a = getAdapter('opencode');
+  const noCompletion = a.parseResult({
+    exitCode: 0,
+    stdout: JSON.stringify({ type: 'text', part: { type: 'text', text: 'SAFE_TEXT' } }),
+    stderr: 'RAW_STDERR_PRIVATE', timedOut: false, durationMs: 42,
+  });
+  const noText = a.parseResult({
+    exitCode: 0,
+    stdout: JSON.stringify({ type: 'step_finish', part: { type: 'step-finish', reason: 'stop' } }),
+    stderr: 'RAW_STDERR_PRIVATE', timedOut: false, durationMs: 42,
+  });
+  for (const result of [noCompletion, noText]) {
+    assert.equal(result.status, 'unknown-fail');
+    assert.equal(result.diagnosticCode, 'adapter-protocol-invalid');
+    assert.equal(result.error, 'adapter-protocol-invalid');
+    assert.equal(result.text, '');
+  }
+});
+
+test('Claude fable stays a dynamic, non-gating alias even when runtime identity is different', () => {
+  const a = getAdapter('claude');
+  const argv = a.args('test prompt', { model: 'fable' });
+  assert.ok(argv.includes('--model'));
+  assert.equal(argv[argv.indexOf('--model') + 1], 'fable');
+  const result = a.parseResult({
+    exitCode: 0,
+    stdout: JSON.stringify({
+      type: 'result', subtype: 'success', is_error: false, result: 'SAFE_RESULT',
+      usage: { modelUsage: { 'claude-actual-backend': {} } },
+    }),
+    stderr: 'RAW_STDERR_PRIVATE', timedOut: false, durationMs: 42,
+  });
+  assert.equal(result.status, 'success');
+  assert.equal(result.text, 'SAFE_RESULT');
+  assert.notEqual(result.diagnosticCode, 'adapter-protocol-invalid');
 });
 
 test('mimo adapter args() maps sandbox and reasoning to MiMoCode run flags', () => {
@@ -552,8 +636,8 @@ test('claude adapter parseResult() fails fast on is_error / empty result (no sil
     durationMs: 100,
   });
   assert.equal(errResult.status, 'unknown-fail');
-  assert.match(errResult.error, /no usable result/i);
-  assert.match(errResult.error, /error_max_turns/);
+  assert.equal(errResult.diagnosticCode, 'adapter-protocol-invalid');
+  assert.equal(errResult.error, 'adapter-protocol-invalid');
 });
 
 test('claude adapter parseResult() detects auth-fail and billing/credit block', () => {
@@ -562,11 +646,12 @@ test('claude adapter parseResult() detects auth-fail and billing/credit block', 
     exitCode: 1, stdout: '', stderr: 'authentication_failed: please run /login', timedOut: false, durationMs: 90,
   });
   assert.equal(auth.status, 'auth-fail');
+  assert.equal(auth.error, 'adapter-auth-failed');
   const billing = a.parseResult({
     exitCode: 1, stdout: '', stderr: 'billing_error: usage limit reached', timedOut: false, durationMs: 90,
   });
   assert.equal(billing.status, 'auth-fail');
-  assert.match(billing.error, /billing \/ credit \/ usage limit/i);
+  assert.equal(billing.error, 'adapter-auth-failed');
 });
 
 test('getAdapter throws clear error for unknown vendor', () => {

@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs';
 import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
 import { applyTaskTypeFloor } from '../subprocess.js';
+import { adapterFailure } from '../adapter-diagnostics.js';
 
 // This is intentionally narrower than the completion parser: an answer can be
 // completed by several OpenCode event forms, but runtime model evidence is
@@ -121,28 +122,22 @@ export const opencodeAdapter = {
 
   parseResult(raw) {
     if (raw.timedOut) {
-      return { text: raw.stdout, status: 'timeout', error: `opencode run timed out after ${raw.durationMs}ms` };
+      return adapterFailure('timeout', 'adapter-timeout');
     }
     if (raw.exitCode === 127) {
-      return { text: '', status: 'permission-fail', error: 'opencode binary not found. Install: npm install -g opencode-ai/opencode' };
+      return adapterFailure('permission-fail', 'adapter-binary-missing');
     }
     if (raw.exitCode === 0) {
       const text = extractOpencodeText(raw.stdout);
       if (!opencodeAnswerCompleted(raw.stdout) || !text) {
-        return {
-          text,
-          status: 'unknown-fail',
-          error: 'opencode exited 0 without authoritative completion evidence and usable result text.',
-        };
+        return adapterFailure('unknown-fail', 'adapter-protocol-invalid');
       }
       const modelAttestation = extractOpencodeModelAttestation(raw.stdout);
-      return modelAttestation ? { text, status: 'success', modelAttestation } : { text, status: 'success' };
+      return modelAttestation
+        ? { text, status: 'success', diagnosticCode: 'none', modelAttestation }
+        : { text, status: 'success', diagnosticCode: 'none' };
     }
-    return {
-      text: raw.stdout,
-      status: 'unknown-fail',
-      error: `opencode exited ${raw.exitCode}: ${(raw.stderr || '').slice(0, 500)}`,
-    };
+    return adapterFailure('unknown-fail', 'adapter-unknown-failed');
   },
 };
 

@@ -781,6 +781,15 @@ test('spawn error emits no late process_alive after more than one liveness inter
   }
 });
 
+test('hopper-runner never renders parsed vendor text after a failed adapter classification', () => {
+  const runner = readFileSync(RUNNER_PATH, 'utf-8');
+  assert.match(
+    runner,
+    /adapterText\s*=\s*adapterStatus\s*===\s*'success'\s*\?\s*\(parsedResult\.text\s*\|\|\s*''\)\s*:\s*''/,
+    'non-success parser text remains only in the raw log/explicit boundary',
+  );
+});
+
 test('hopper-runner early fail appends one terminal progress event when frontmatter exists', async () => {
   const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-terminal-early-fail-'));
   try {
@@ -794,7 +803,7 @@ test('hopper-runner early fail appends one terminal progress event when frontmat
     });
 
     assert.notEqual(result.code, 0);
-    assert.match(result.stderr, /missing-vendor/);
+    assert.equal(result.stderr.trim(), 'hopper-runner: adapter-unknown-failed');
 
     const fm = readFrontmatter(outputMdPath);
     assert.equal(fm.status, 'failed');
@@ -806,7 +815,9 @@ test('hopper-runner early fail appends one terminal progress event when frontmat
     assert.equal(events.length, 1);
     assert.equal(events[0].terminal, true);
     assert.equal(events[0].status, 'failed');
-    assert.match(events[0].message, /missing-vendor/);
+    assert.equal(events[0].message, 'Task failed.');
+    assert.match(fm._body, /adapter-unknown-failed/);
+    assert.doesNotMatch(fm._body, /missing-vendor/);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

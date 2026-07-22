@@ -49,6 +49,7 @@ import { runArchive, findArchivedOutputMd } from '../src/archive.js';
 import { notify } from '../src/notify.js';
 import { resolveCommandWithKnownPaths } from '../src/path-resolve.js';
 import { resolvePromptDelivery } from '../src/prompt-delivery.js';
+import { publicAdapterDiagnostic } from '../src/adapter-diagnostics.js';
 import { watchFile, unwatchFile, readFileSync, existsSync, openSync, readSync, closeSync, statSync, readdirSync } from 'node:fs';
 import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -885,12 +886,7 @@ async function runDispatch(hopperDir, taskId, { write = false, force = false, ad
       console.log('--- END OUTPUT ---');
     } else {
       console.log(`--- ${result.output.status.toUpperCase()} ---`);
-      console.log(result.output.error || '(no error message)');
-      if (result.output.text) {
-        console.log('');
-        console.log('--- PARTIAL OUTPUT ---');
-        console.log(result.output.text);
-      }
+      console.log(publicAdapterDiagnostic(result.output));
       console.log('--- END ---');
     }
 

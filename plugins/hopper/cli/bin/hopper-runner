@@ -20,6 +20,7 @@ import { getAdapter } from '../src/vendors/index.js';
 import { acquireVendorLock, killProcessTree, resolveDispatchTimeouts, chunkHasSubstantiveLine } from '../src/subprocess.js';
 import { resolveCommandOnPath, resolveCommandWithKnownPaths } from '../src/path-resolve.js';
 import { renderVendorOutputSection, writeRunnerSidecar } from '../src/output.js';
+import { adapterDiagnostic, publicAdapterDiagnostic } from '../src/adapter-diagnostics.js';
 
 function parseRunnerArgs(argv) {
   // Format: --task-id X --hopper-dir Y --adapter Z --output-md A --log B -- <adapter argv...>
@@ -77,7 +78,8 @@ function runnerStartupSnapshot() {
   }
 }
 
-function fail(outputMdPath, message, context = {}) {
+function fail(outputMdPath, _message, context = {}) {
+  const diagnosticCode = adapterDiagnostic(context.diagnosticCode || 'adapter-unknown-failed');
   // The shared finalizer retains event-first failure semantics: append failures
   // deliberately leave frontmatter in-progress rather than inventing a terminal.
   try {
@@ -94,20 +96,20 @@ function fail(outputMdPath, message, context = {}) {
         vendor: fm.adapter || context.adapterName,
         status: 'failed',
         phase: 'failed',
-        message,
+        message: 'Task failed.',
         source: 'runner',
         durationMs: duration_ms,
         exitCode: -1,
         adapterStatus: context.adapter_status || 'unknown-fail',
         endTime,
         bodyAppend:
-          `\n## Failure (runner)\n${message}\n`,
+          `\n## Failure (runner)\n- diagnostic_code: ${diagnosticCode}\n`,
       },
     });
   } catch (_) {
     // if we can't even write frontmatter, all we can do is exit
   }
-  process.stderr.write(`hopper-runner: ${message}\n`);
+  process.stderr.write(`hopper-runner: ${diagnosticCode}\n`);
   process.exit(1);
 }
 
@@ -154,7 +156,7 @@ async function main() {
     fdOut = openSync(logPath, 'a');
     fdErr = openSync(logPath, 'a');
   } catch (err) {
-    fail(outputMdPath, `Could not open log file ${logPath}: ${err.message}`, { taskId, hopperDir, adapterName });
+    fail(outputMdPath, 'could not open log file', { taskId, hopperDir, adapterName, diagnosticCode: 'adapter-unknown-failed' });
   }
 
   // STDIN prompt delivery (win-cmd-shim): read the 0600 prompt file UP FRONT so an
@@ -173,7 +175,7 @@ async function main() {
     try {
       promptStdinBuf = readFileSync(promptStdinFile);
     } catch (err) {
-      fail(outputMdPath, `prompt stdin file unreadable (${promptStdinFile}): ${err.message}`, { taskId, hopperDir, adapterName, status: 'prompt-delivery-fail', adapter_status: 'prompt-delivery-fail' });
+      fail(outputMdPath, 'prompt stdin file unreadable', { taskId, hopperDir, adapterName, status: 'prompt-delivery-fail', adapter_status: 'prompt-delivery-fail', diagnosticCode: 'adapter-protocol-invalid' });
       return;
     }
   }
@@ -516,7 +518,7 @@ async function main() {
     }
 
     let adapterStatus;
-    let adapterError;
+    let adapterDiagnosticCode = 'adapter-unknown-failed';
     let adapterText = '';                   // HOPPER-5: the parsed vendor answer
     let parsedResult = {};
     try {
@@ -530,11 +532,12 @@ async function main() {
         logFileContent,
       });
       adapterStatus = parsedResult.status;       // success | auth-fail | timeout | permission-fail | unknown-fail
-      adapterError = parsedResult.error || null;
-      adapterText = parsedResult.text || '';     // HOPPER-5: mirror into output.md body below
+      adapterDiagnosticCode = publicAdapterDiagnostic(parsedResult);
+      adapterText = adapterStatus === 'success' ? (parsedResult.text || '') : '';
     } catch (err) {
       adapterStatus = 'unknown-fail';
-      adapterError = `parseResult threw: ${err.message}`;
+      adapterDiagnosticCode = 'adapter-protocol-invalid';
+      parsedResult = { text: '', status: adapterStatus, error: adapterDiagnosticCode, diagnosticCode: adapterDiagnosticCode };
     }
 
     // Observable stdin contract: if the prompt was not fully delivered to the vendor,
@@ -543,7 +546,8 @@ async function main() {
     // as success. (Codex review: never swallow a delivery failure.)
     if (stdinDeliveryError) {
       adapterStatus = 'prompt-delivery-fail';
-      adapterError = `prompt stdin delivery failed after ${stdinBytesWritten}B: ${stdinDeliveryError.message || stdinDeliveryError}. Vendor may have received a truncated/empty prompt.`;
+      adapterDiagnosticCode = 'adapter-protocol-invalid';
+      parsedResult = { text: '', status: adapterStatus, error: adapterDiagnosticCode, diagnosticCode: adapterDiagnosticCode };
       adapterText = '';
     }
 
@@ -588,6 +592,7 @@ async function main() {
             `\n## Status (background completion)\n` +
             `- queue_status: ${status}\n` +
             `- adapter_status: ${adapterStatus}\n` +
+            `- adapter_diagnostic_code: ${adapterDiagnosticCode}\n` +
             `- exit_code: ${code === null ? -1 : code}\n` +
             (signal ? `- signal: ${signal}\n` : '') +
             (timedOut ? `- timed_out: true\n` : '') +
@@ -596,12 +601,11 @@ async function main() {
             (processCleanup.method ? `- process_cleanup_method: ${processCleanup.method}\n` : '') +
             `- duration_ms: ${duration_ms}\n` +
             `- end_time: ${endTime}\n` +
-            (adapterError ? `\n### Adapter error\n\`\`\`\n${adapterError.slice(0, 2000)}\n\`\`\`\n` : '') +
             `- log: see \`${logPath.split(/[\\/]/).pop()}\` for raw output\n`,
         },
       });
     } catch (err) {
-      process.stderr.write(`hopper-runner: failed to write final frontmatter: ${err.message}\n`);
+      process.stderr.write('hopper-runner: adapter-protocol-invalid\n');
       process.exit(2);
     }
 
@@ -613,7 +617,7 @@ async function main() {
     clearTimeout(killTimer);
     if (idlePoll) clearInterval(idlePoll);
     if (bufferedLivenessTimer) clearInterval(bufferedLivenessTimer);
-    fail(outputMdPath, `Vendor spawn error: ${err.message} (command: ${adapter.command})`, { taskId, hopperDir, adapterName });
+    fail(outputMdPath, 'vendor spawn error', { taskId, hopperDir, adapterName, diagnosticCode: 'adapter-unknown-failed' });
   });
 
   vendor.on('error', () => {
@@ -621,7 +625,7 @@ async function main() {
   });
 }
 
-main().catch((err) => {
-  process.stderr.write(`hopper-runner fatal: ${err.message}\n`);
+main().catch(() => {
+  process.stderr.write('hopper-runner fatal: adapter-unknown-failed\n');
   process.exit(2);
 });

@@ -22,6 +22,7 @@ import { mkdir, writeFile, access, lstat, realpath } from 'node:fs/promises';
 import { existsSync, lstatSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { validateTaskId as canonicalValidateTaskId } from './validation.js';
+import { publicAdapterDiagnostic } from './adapter-diagnostics.js';
 
 const PREVIEW_CHAR_LIMIT = 4096;
 
@@ -198,8 +199,14 @@ export function renderOutputMarkdown({ task, vendor, output, raw, rawPath = null
   const safeTaskId = sanitizeInline(task.id);
   const safeTaskType = sanitizeInline(task.taskType);
   const safeBrief = task.brief ? sanitizeInline(task.brief) : '(no brief in queue.md)';
-  const previewText = truncate(output.text || '', effectivePreviewLimit(PREVIEW_CHAR_LIMIT));
-  const fullTextLen = (output.text || '').length;
+  const isSuccess = output.status === 'success';
+  const diagnosticCode = publicAdapterDiagnostic(output);
+  // Failure output can contain unparsed vendor diagnostics. The raw log/sidecar
+  // remains the explicit retrieval boundary; only successful parsed text is
+  // eligible for the normal markdown preview.
+  const publicText = isSuccess ? (output.text || '') : '';
+  const previewText = truncate(publicText, effectivePreviewLimit(PREVIEW_CHAR_LIMIT));
+  const fullTextLen = publicText.length;
   const rawSidecarName = rawPath ? expectedRawSidecarName(task.id) : null;
 
   return `# ${safeTaskId} — ${safeTaskType} Output (vendor: ${safeVendor})
@@ -277,7 +284,7 @@ _(Recipient fills in after verdict; e.g. "proceed to T-XX" or "REWORK before T-X
 
 ${fence(previewText || '(empty)')}
 ${rawSidecarName ? `\n_Full vendor output exceeds ${effectivePreviewLimit(PREVIEW_CHAR_LIMIT)}-char preview limit; retrieve the complete text only with \`hopper-dispatch --result ${safeTaskId} --full\`._\n` : ''}
-${output.error ? `## Vendor error context\n\n${fence(truncate(output.error, 2000))}\n` : ''}
+${isSuccess ? '' : `## Adapter diagnostic\n\n${fence(diagnosticCode)}\n`}
 
 ## Suggested protocol edits _(auto-generated)_
 
@@ -369,7 +376,7 @@ export function suggestCostEdit(task, vendor, output, raw) {
   const durationSec = (raw.durationMs / 1000).toFixed(1);
   const notes = output.status === 'success'
     ? `${output.status}; duration ${durationSec}s`
-    : `${output.status}; duration ${durationSec}s; error="${truncate((output.error || '').replace(/[\r\n]+/g, ' '), 80)}"`;
+    : `${output.status}; duration ${durationSec}s; diagnostic=${publicAdapterDiagnostic(output)}`;
   return `| ${date} | ${task.id} | ${task.taskType} | ${vendor} | ${tokenStr} | n/a | n/a | ${notes} |`;
 }
 

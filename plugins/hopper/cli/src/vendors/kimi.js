@@ -23,6 +23,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { applyTaskTypeFloor } from '../subprocess.js';
+import { adapterFailure } from '../adapter-diagnostics.js';
 
 /** @type {import('../types.js').VendorAdapter} */
 export const kimiAdapter = {
@@ -120,35 +121,21 @@ export const kimiAdapter = {
 
   parseResult(raw) {
     if (raw.timedOut) {
-      return { text: raw.stdout, status: 'timeout', error: `kimi -p timed out after ${raw.durationMs}ms` };
+      return adapterFailure('timeout', 'adapter-timeout');
     }
     if (raw.exitCode === 127 || /not found|command not found/i.test(raw.stderr || '')) {
-      return {
-        text: '',
-        status: 'permission-fail',
-        error: 'kimi binary not found in PATH. Install: curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash (Windows: irm https://code.kimi.com/kimi-code/install.ps1 | iex; Homebrew: brew install kimi-code).',
-      };
+      return adapterFailure('permission-fail', 'adapter-binary-missing');
     }
     // Primary auth-fail (0.x routes auth errors to stderr + sets non-zero exit;
     // 401->AuthenticationError, 403->PermissionDenied, 402 membership).
     const signal = `${raw.stdout || ''}\n${raw.stderr || ''}`;
     if (/invalid authentication|api key.*(invalid|expired)|verify your membership|usage limit|unauthoriz|not logged in|\b401\b|\b40[23]\b/i.test(signal)) {
-      const msg = signal.match(/'message':\s*"([^"]+)"/);
-      return {
-        text: '',
-        status: 'auth-fail',
-        error: msg ? `Kimi auth: ${msg[1]}` : 'Kimi auth/membership error. Run `kimi` then `/login`, or set KIMI_API_KEY.',
-      };
+      return adapterFailure('auth-fail', 'adapter-auth-failed');
     }
     // Legacy-compat fallback: the Python 1.x client printed HTTP 402 to stdout at
     // exit 0. UNCONFIRMED whether the Node 0.x tool ever does this; kept defensively.
     if (raw.stdout.includes('Error code: 4') && raw.stdout.includes("'error'")) {
-      const msg = raw.stdout.match(/'message':\s*"([^"]+)"/);
-      return {
-        text: raw.stdout,
-        status: 'auth-fail',
-        error: msg ? `Kimi auth/membership: ${msg[1]}` : 'Kimi auth/membership error (legacy stdout 402).',
-      };
+      return adapterFailure('auth-fail', 'adapter-auth-failed');
     }
     if (raw.exitCode === 0 && raw.stdout) {
       // 0.x sends the "To resume this session: kimi -r <id>" hint to STDERR, so this
@@ -157,12 +144,8 @@ export const kimiAdapter = {
       // no approved terminal actual-model field yet, so this stays config-only and
       // deliberately never attaches modelAttestation.
       const text = raw.stdout.replace(/\n*To resume this session:[^\n]*\n*$/m, '').trim();
-      return { text, status: 'success' };
+      return { text, status: 'success', diagnosticCode: 'none' };
     }
-    return {
-      text: raw.stdout,
-      status: 'unknown-fail',
-      error: `kimi exited ${raw.exitCode}: ${(raw.stderr || '').slice(0, 500)}`,
-    };
+    return adapterFailure('unknown-fail', 'adapter-unknown-failed');
   },
 };
