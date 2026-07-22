@@ -32,6 +32,7 @@ import { tmpdir, platform } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFrontmatter, writeFrontmatter } from '../../cli/src/background.js';
+import { readCanonicalAttestation } from '../../cli/src/handoff-attestation.js';
 import { readProgressEvents } from '../../cli/src/progress.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -789,6 +790,46 @@ test('hopper-runner never renders parsed vendor text after a failed adapter clas
     /adapterText\s*=\s*adapterStatus\s*===\s*'success'\s*\?\s*\(parsedResult\.text\s*\|\|\s*''\)\s*:\s*''/,
     'non-success parser text remains only in the raw log/explicit boundary',
   );
+});
+
+test('hopper-runner preserves the closed adapter diagnostic for an unreadable stdin prompt', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-unreadable-stdin-'));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    const taskId = 'T-unreadable-stdin';
+    const rawSentinel = 'PROMPT_PATH_RAW_SENTINEL_MUST_NOT_LEAK';
+    const unreadablePromptPath = join(tmp, rawSentinel);
+    mkdirSync(join(hopperDir, 'handoffs'), { recursive: true });
+
+    const { outputMdPath, result } = await runRunnerWithAdapter({
+      taskId,
+      hopperDir,
+      adapterName: 'codex',
+      adapterArgv: ['exec', '-'],
+      extraEnv: { HOPPER_PROMPT_STDIN_FILE: unreadablePromptPath },
+    });
+
+    assert.equal(result.code, 1);
+    assert.equal(result.stderr.trim(), 'hopper-runner: adapter-protocol-invalid');
+
+    const fm = readFrontmatter(outputMdPath);
+    const events = readProgressEvents({ hopperDir, taskId });
+    const terminal = events.find((event) => event.terminal === true);
+    const canonical = readCanonicalAttestation({ hopperDir, taskId, outputMdPath });
+
+    assert.equal(events.length, 1);
+    assert.equal(terminal.adapter_diagnostic_code, 'adapter-protocol-invalid');
+    assert.equal(fm.adapter_diagnostic_code, 'adapter-protocol-invalid');
+    assert.equal(canonical.adapterDiagnosticCode, 'adapter-protocol-invalid');
+    assert.equal(canonical.public.adapterDiagnosticCode, 'adapter-protocol-invalid');
+    assert.equal(fm.diagnostic_code, 'none', 'model diagnostic stays independent from adapter failure classification');
+    assert.notEqual(fm.diagnostic_code, fm.adapter_diagnostic_code);
+    assert.doesNotMatch(readFileSync(outputMdPath, 'utf8'), new RegExp(rawSentinel));
+    assert.doesNotMatch(JSON.stringify(terminal), new RegExp(rawSentinel));
+    assert.doesNotMatch(JSON.stringify(canonical.public), new RegExp(rawSentinel));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('hopper-runner early fail appends one terminal progress event when frontmatter exists', async () => {

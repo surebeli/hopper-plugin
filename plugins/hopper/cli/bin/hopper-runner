@@ -101,6 +101,7 @@ function fail(outputMdPath, _message, context = {}) {
         durationMs: duration_ms,
         exitCode: -1,
         adapterStatus: context.adapter_status || 'unknown-fail',
+        adapterDiagnosticCode: diagnosticCode,
         endTime,
         bodyAppend:
           `\n## Failure (runner)\n- diagnostic_code: ${diagnosticCode}\n`,
