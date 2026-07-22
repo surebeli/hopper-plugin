@@ -19,6 +19,26 @@ convention: any user-observable behavior change (new capability, fixed defect,
 changed default) bumps minor; patch is reserved for the rare non-functional
 tweak.
 
+## [0.33.0] - 2026-07-22
+
+### Fixed
+
+- **Grok no longer misclassifies a successful trailing JSON result as an auth
+  failure merely because the merged runner log contains an unrelated MCP
+  authentication warning.** For exit-0 Grok runs, a parsed JSON envelope with
+  non-empty text and a normal stop reason is preferred before existing auth
+  detection; genuine non-structured plain stdout keeps its legacy success
+  behavior when no auth signal is present. Cancelled, empty, error, malformed,
+  and nonzero structured results retain their failure behavior.
+- `--result --full` now exits naturally so piped stdout drains completely before process termination.
+
+### Tests
+
+- Added unit and runner regression coverage for merged stderr authentication
+  warnings plus a valid Grok JSON result, and for cancelled/empty and nonzero
+  auth failures. The runner case also proves one vendor spawn and a nonempty
+  parsed output body.
+
 ## [0.32.0] - 2026-07-18
 
 ### Fixed

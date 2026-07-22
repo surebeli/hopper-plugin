@@ -12,6 +12,7 @@
 
 import { spawn, execSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { prepareSubjectRootGuard, wrapSubjectRootInvocation } from './subject-root-guard.js';
 
 // Phase 6c F1: task-type-aware timeout floors.
 // Adapter-native timeoutMs is tuned for code-impl (short tasks). Review tasks
@@ -182,6 +183,9 @@ function isVendorLockStale(lockPath) {
  * @param {string} [args.cwd]            Working directory
  * @param {string|null} [args.logFilePath]  Path to vendor --log-file (read after exit if set)
  * @param {string} [args.vendorName]     Logical vendor name for serialization guard
+ * @param {string} [args.subjectRoot]     Explicit read-only subject tree, if requested
+ * @param {string} [args.sandbox]         Effective sandbox used to validate subjectRoot
+ * @param {object} [args.subjectGuardOptions] Test-only dependency overrides for guard validation
  * @returns {Promise<import('./types.js').SubprocessResult>}
  */
 export async function runSubprocessOnce({
@@ -194,13 +198,20 @@ export async function runSubprocessOnce({
   cwd,
   logFilePath = null,
   vendorName,
+  subjectRoot = null,
+  sandbox,
+  subjectGuardOptions,
 }) {
   const isWindows = platform() === 'win32';
   const startedAt = Date.now();
+  // Validation/backend availability is deliberately before the vendor spawn and
+  // before lock acquisition: a requested guard is mandatory, never advisory.
+  const subjectGuard = prepareSubjectRootGuard({ subjectRoot, sandbox, ...(subjectGuardOptions || {}) });
+  const invocation = wrapSubjectRootInvocation(command, args, subjectGuard);
   const releaseVendorLock = await acquireVendorLock(vendorName);
 
   try {
-    const child = spawn(command, args, {
+    const child = spawn(invocation.command, invocation.args, {
       env: { ...process.env, ...(env || {}) },
       cwd: cwd || process.cwd(),
       stdio: [stdinInput == null ? 'ignore' : 'pipe', 'pipe', 'pipe'],

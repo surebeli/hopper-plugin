@@ -178,11 +178,22 @@ export const grokAdapter = {
         error: 'grok binary not found in PATH. Install: curl -fsSL https://x.ai/cli/install.sh | bash (Windows: irm https://x.ai/cli/install.ps1 | iex)',
       };
     }
-    // Auth-fail detection (exit codes UNDOCUMENTED → pattern-match like agy/kimi).
-    // Now also catches the headless permission-stall signature (vendor-preset
-    // feedback 2026-06-15): AuthorizationRequired / Transport channel closed /
-    // "worker quit with fatal" accompany a cancelled headless turn.
     const signal = `${raw.stdout || ''}\n${raw.stderr || ''}`;
+    const parsed = raw.exitCode === 0 ? extractGrokText(raw.stdout) : null;
+    if (parsed) {
+      // The runner's merged log can include unrelated MCP auth warnings. Prefer
+      // a real trailing Grok JSON success envelope before the broad auth regex.
+      const stop = (parsed.stopReason || '').toString().toLowerCase();
+      const badStop = /cancel|abort|refus|error|fatal/.test(stop);
+      if (parsed.parsedJson && !parsed.hasError && !badStop && parsed.text.trim()) {
+        return parsed.usage
+          ? { text: parsed.text, status: 'success', usage: parsed.usage }
+          : { text: parsed.text, status: 'success' };
+      }
+    }
+    // Auth-fail detection (exit codes UNDOCUMENTED → pattern-match like agy/kimi).
+    // This remains the fallback for all nonzero exits and exit-0 output without a
+    // valid successful JSON envelope.
     if (/unauthorized|invalid api key|XAI_API_KEY|not logged in|\b401\b|\b403\b|authenticat|authorizationrequired|transport channel closed|worker quit with fatal/i.test(signal)) {
       return {
         text: '',
@@ -191,27 +202,18 @@ export const grokAdapter = {
       };
     }
     if (raw.exitCode === 0) {
-      // --output-format json yields a single trailing JSON object. Field names
-      // are UNDOCUMENTED → parse defensively: whole-stdout JSON, then last
-      // non-empty line, then raw text fallback.
-      const parsed = extractGrokText(raw.stdout);
-      const stop = (parsed.stopReason || '').toString().toLowerCase();
-      const badStop = /cancel|abort|refus|error|fatal/.test(stop);
-      // FAIL FAST instead of writing a silent empty result (the reported bug):
-      // grok can exit 0 yet return {"text":"","stopReason":"Cancelled"} when a
-      // headless turn is blocked. Treat a bad stopReason OR no usable text as a
-      // failure so the dispatcher records it as failed, not done-with-no-output.
-      if (badStop || !parsed.text.trim()) {
-        return {
-          text: parsed.text,
-          status: 'unknown-fail',
-          error: `grok produced no usable result${parsed.stopReason ? ` (stopReason="${parsed.stopReason}")` : ''}. ` +
-            'Common cause: a blocked/cancelled headless turn — confirm grok is authenticated and re-dispatch (hopper sets --permission-mode bypassPermissions for headless).',
-        };
+      // Preserve the legacy generic stdout contract only for text that is
+      // genuinely non-structured. Structured JSON failures must not be
+      // relabelled as successful plain output after auth detection.
+      if (!parsed.structured && parsed.text.trim()) {
+        return { text: parsed.text, status: 'success' };
       }
-      return parsed.usage
-        ? { text: parsed.text, status: 'success', usage: parsed.usage }
-        : { text: parsed.text, status: 'success' };
+      return {
+        text: parsed.text,
+        status: 'unknown-fail',
+        error: `grok produced no usable result${parsed.stopReason ? ` (stopReason="${parsed.stopReason}")` : ''}. ` +
+          'Common cause: a blocked/cancelled headless turn — confirm grok is authenticated and re-dispatch (hopper sets --permission-mode bypassPermissions for headless).',
+      };
     }
     return {
       text: raw.stdout,
@@ -244,30 +246,64 @@ function clampGrokEffort(level) {
  * Field names are UNCONFIRMED (docs never document the object shape), so try
  * common keys, fall back to last JSON line, then raw text.
  * @param {string} stdout
- * @returns {{ text: string, usage?: object, stopReason?: string }}
+ * @returns {{ text: string, usage?: object, stopReason?: string, parsedJson: boolean, hasError?: boolean, structured: boolean }}
  */
 function extractGrokText(stdout) {
   const trimmed = (stdout || '').trim();
-  const fromObj = (obj) => {
+  const envelopeKeys = new Set([
+    'text', 'content', 'output', 'result', 'response', 'message',
+    'stopReason', 'stop_reason', 'finishReason', 'finish_reason', 'error', 'usage',
+  ]);
+  const fromValue = (value, fallbackText) => {
+    // A literal JSON null is structured-invalid, even though it has no keys.
+    if (value === null) {
+      return { text: '', parsedJson: false, structured: true };
+    }
+    if (typeof value === 'string') {
+      return { text: value, parsedJson: false, structured: false };
+    }
+    const obj = value;
     if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+      const recognized = Object.keys(obj).some((key) => envelopeKeys.has(key));
+      if (!recognized) {
+        return { text: fallbackText, parsedJson: false, structured: false };
+      }
       const text = obj.text ?? obj.message ?? obj.content ?? obj.output ?? obj.result ?? obj.response;
       const stopReason = obj.stopReason ?? obj.stop_reason ?? obj.finishReason ?? obj.finish_reason;
-      if (typeof text === 'string') return { text, usage: obj.usage, stopReason };
-      return { text: JSON.stringify(obj), usage: obj.usage, stopReason };
+      return {
+        text: typeof text === 'string' ? text : '',
+        usage: obj.usage,
+        stopReason,
+        parsedJson: true,
+        hasError: Boolean(obj.error),
+        structured: true,
+      };
     }
-    if (typeof obj === 'string') return { text: obj };
-    return null;
+    return { text: fallbackText, parsedJson: false, structured: false };
   };
-  try {
-    const got = fromObj(JSON.parse(trimmed));
-    if (got) return got;
-  } catch (_) { /* not a single JSON object — try line scan */ }
-  const lines = trimmed.split(/\r?\n/).filter((l) => l.trim());
-  for (let i = lines.length - 1; i >= 0; i--) {
+  const parseCandidate = (candidate, fallbackText) => {
     try {
-      const got = fromObj(JSON.parse(lines[i]));
-      if (got) return got;
-    } catch (_) { /* keep scanning upward */ }
-  }
-  return { text: trimmed };
+      return fromValue(JSON.parse(candidate), fallbackText);
+    } catch (_) {
+      return null;
+    }
+  };
+
+  const whole = parseCandidate(trimmed, trimmed);
+  if (whole) return whole;
+
+  // Grok emits one trailing JSON line after warnings. Inspect only that line;
+  // earlier unrelated JSON must not hijack result classification.
+  const lines = trimmed.split(/\r?\n/).filter((line) => line.trim());
+  const trailing = lines[lines.length - 1] || '';
+  const tail = trailing === trimmed ? null : parseCandidate(trailing, trimmed);
+  if (tail) return tail;
+
+  // A malformed object-shaped tail is structured only when it advertises a
+  // recognized Grok envelope key. Braces, arrays, and citation tails alone are
+  // ordinary legacy text.
+  const keyPattern = /["']?(?:text|content|output|result|response|message|stopReason|stop_reason|finishReason|finish_reason|error|usage)["']?\s*:/;
+  const candidate = trailing.trim();
+  const malformedEnvelope = candidate.startsWith('{') && keyPattern.test(candidate);
+  return { text: trimmed, parsedJson: false, structured: malformedEnvelope };
 }

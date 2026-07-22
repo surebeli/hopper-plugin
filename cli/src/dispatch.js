@@ -18,6 +18,7 @@ import { normalizeModel } from './model-normalize.js';
 import { parseEffortPolicyCell, parseModelRuleCell, resolveVerifiedLatest, computeEffortClamp, MODEL_SENTINELS } from './policy.js';
 import { resolveCommandWithKnownPaths } from './path-resolve.js';
 import { runSubprocessOnce, resolveDispatchTimeouts } from './subprocess.js';
+import { prepareSubjectRootGuard } from './subject-root-guard.js';
 import { resolveVendorCwd } from './background.js';
 import { resolvePromptDelivery } from './prompt-delivery.js';
 import {
@@ -446,6 +447,13 @@ export async function executeWithAdapter({ resolved, adapter, adapterOpts = {}, 
   assertVendorDispatchable(vendor);
   const dispatchAdapterOpts = resolveAdapterOptsForTask(resolved, adapterOpts);
   assertAdapterSandboxEnforceable(adapter, dispatchAdapterOpts);
+  // An explicit subject root is a forced process guard. Validate it before
+  // adapter preparation and before any vendor spawn; unsupported macOS backend
+  // or a non-read-only effective sandbox fail closed.
+  prepareSubjectRootGuard({
+    subjectRoot: dispatchAdapterOpts.subjectRoot,
+    sandbox: dispatchAdapterOpts.sandbox,
+  });
 
   // envPreflight — if not ok, fail FAST without spawning subprocess
   const preflight = adapter.envPreflight();
@@ -529,6 +537,8 @@ export async function executeWithAdapter({ resolved, adapter, adapterOpts = {}, 
     vendorName: adapter.name,
     cwd: cwd || undefined,
     env: adapterEnv,
+    subjectRoot: dispatchAdapterOpts.subjectRoot,
+    sandbox: dispatchAdapterOpts.sandbox,
   });
 
   // Parse result (adapter-specific failure classification)

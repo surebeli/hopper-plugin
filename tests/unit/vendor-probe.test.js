@@ -362,6 +362,132 @@ test('codex parser: throws on malformed JSON', async () => {
   assert.throws(() => parseCodexModelsJson('not json {'));
 });
 
+// ─── Codex account-aware probe arbitration ────────────────────────────────
+
+const CODEX_PROBE_NOW = Date.parse('2026-07-21T10:00:00.000Z');
+const CODEX_COMMAND_MODELS = [{ slug: 'gpt-5.6-sol' }, { slug: 'gpt-5.3-codex-spark' }];
+
+function codexCache({
+  fetched_at = '2026-07-21T09:59:00.000Z',
+  client_version = '0.144.5',
+  models = CODEX_COMMAND_MODELS,
+} = {}) {
+  return JSON.stringify({ fetched_at, client_version, models });
+}
+
+function codexProbeDeps({ version = '0.144.5', models = CODEX_COMMAND_MODELS, cache, runner } = {}) {
+  const calls = [];
+  const defaultRunner = async (_command, args) => {
+    calls.push(args);
+    if (args.at(-1) === '--version') return { exitCode: 0, stdout: `${version}\n`, stderr: '', timedOut: false };
+    return { exitCode: 0, stdout: JSON.stringify(models), stderr: '', timedOut: false };
+  };
+  return {
+    calls,
+    deps: {
+      runner: runner || defaultRunner,
+      pathResolver: () => ({ resolvedPath: '/fake/codex', command: '/fake/codex', prependArgs: [] }),
+      readFile: () => {
+        if (cache instanceof Error) throw cache;
+        return cache;
+      },
+      env: { CODEX_HOME: '/account-codex', HOPPER_CODEX_HOME: '/wrong-hopper-home' },
+      home: () => '/home/ignored',
+      clock: () => CODEX_PROBE_NOW,
+    },
+  };
+}
+
+test('codex probe: fresh account cache containing Spark is full and spawns exactly version + debug models', async () => {
+  const { probe } = await import('../../cli/src/vendor-probe/codex.js');
+  const fixture = codexProbeDeps({ cache: codexCache() });
+  const result = await probe(fixture.deps);
+  assert.equal(result.introspection_supported, 'full');
+  assert.ok(result.models.includes('gpt-5.3-codex-spark'));
+  assert.deepEqual(fixture.calls, [['--version'], ['debug', 'models']]);
+  assert.ok(!fixture.calls.flat().includes('--bundled'));
+  assert.match(result.models_source, /account cache/);
+  assert.ok(result.notes.some((note) => /cache age 60s/.test(note)));
+});
+
+test('codex probe: command success with missing, bad, or stale cache is partial and returns command models', async () => {
+  const { probe } = await import('../../cli/src/vendor-probe/codex.js');
+  const cases = [
+    new Error(Object.assign(new Error('not found'), { code: 'ENOENT' })),
+    '{not json',
+    codexCache({ fetched_at: '2026-07-21T09:54:59.000Z' }),
+  ];
+  for (const cache of cases) {
+    const fixture = codexProbeDeps({ cache });
+    const result = await probe(fixture.deps);
+    assert.equal(result.introspection_supported, 'partial');
+    assert.deepEqual(result.models, ['gpt-5.6-sol', 'gpt-5.3-codex-spark']);
+    assert.match(result.models_source, /command catalog/);
+  }
+});
+
+test('codex probe: failed commands return a parsable nonempty account cache as partial', async () => {
+  const { probe } = await import('../../cli/src/vendor-probe/codex.js');
+  const calls = [];
+  const fixture = codexProbeDeps({
+    cache: codexCache(),
+    runner: async (_command, args) => {
+      calls.push(args);
+      return { exitCode: 1, stdout: '', stderr: 'offline', timedOut: false };
+    },
+  });
+  const result = await probe(fixture.deps);
+  assert.equal(result.introspection_supported, 'partial');
+  assert.ok(result.models.includes('gpt-5.3-codex-spark'));
+  assert.match(result.models_source, /account cache/);
+  assert.deepEqual(calls, [['--version'], ['debug', 'models']]);
+});
+
+test('codex probe: failed commands and no cache returns none', async () => {
+  const { probe } = await import('../../cli/src/vendor-probe/codex.js');
+  const fixture = codexProbeDeps({
+    cache: new Error(Object.assign(new Error('not found'), { code: 'ENOENT' })),
+    runner: async () => ({ exitCode: 1, stdout: '', stderr: 'offline', timedOut: false }),
+  });
+  const result = await probe(fixture.deps);
+  assert.equal(result.introspection_supported, 'none');
+  assert.deepEqual(result.models, []);
+});
+
+test('codex probe: version mismatch or output conflict makes the command catalog partial', async () => {
+  const { probe } = await import('../../cli/src/vendor-probe/codex.js');
+  const cases = [
+    { cache: codexCache({ client_version: '0.143.0' }) },
+    { cache: codexCache({ models: [{ slug: 'gpt-5.6-sol' }, { slug: 'gpt-5.3-codex-spark' }, { slug: 'hidden-account-model' }] }) },
+  ];
+  for (const testCase of cases) {
+    const fixture = codexProbeDeps(testCase);
+    const result = await probe(fixture.deps);
+    assert.equal(result.introspection_supported, 'partial');
+    assert.deepEqual(result.models, ['gpt-5.6-sol', 'gpt-5.3-codex-spark']);
+    assert.ok(result.notes.some((note) => /match=false|conflict=true/.test(note)));
+  }
+});
+
+test('codex probe: CODEX_HOME cache path wins and HOPPER_CODEX_HOME is ignored', async () => {
+  const { probe } = await import('../../cli/src/vendor-probe/codex.js');
+  const { join, normalize } = await import('node:path');
+  let readPath = null;
+  const fixture = codexProbeDeps({ cache: codexCache() });
+  fixture.deps.readFile = (path) => {
+    readPath = path;
+    return codexCache();
+  };
+  await probe(fixture.deps);
+  assert.equal(normalize(readPath), normalize(join('/account-codex', 'models_cache.json')));
+  assert.ok(!readPath.includes('wrong-hopper-home'));
+
+  fixture.deps.env = { HOPPER_CODEX_HOME: '/still-ignored' };
+  fixture.deps.home = () => '/default-home';
+  await probe(fixture.deps);
+  assert.equal(normalize(readPath), normalize(join('/default-home', '.codex', 'models_cache.json')));
+});
+
 test('opencode parser: strips ANSI codes', async () => {
   const { stripAnsi } = await import('../../cli/src/vendor-probe/opencode.js');
   // ESC[31m red ESC[0m reset

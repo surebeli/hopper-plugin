@@ -23,7 +23,7 @@ export const TASK_ID_PATTERN = /^[A-Za-z][A-Za-z0-9._-]{0,99}$/;
 export const ALLOWED_DISPATCH_FLAGS = Object.freeze(['--write', '--force', '--background', '--web-search']);
 
 /** Value-taking flag whitelist (each consumes the next argv as its value). */
-export const ALLOWED_DISPATCH_VALUE_FLAGS = Object.freeze(['--model', '--reasoning', '--sandbox', '--timeout', '--vendor']);
+export const ALLOWED_DISPATCH_VALUE_FLAGS = Object.freeze(['--model', '--reasoning', '--sandbox', '--timeout', '--vendor', '--subject-root']);
 
 /** Vendor-name pattern (mirrors registered adapter naming: lowercase alnum/dash). */
 export const VENDOR_PATTERN = /^[a-z][a-z0-9-]{0,29}$/;

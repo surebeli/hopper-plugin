@@ -1,7 +1,7 @@
 ---
 description: Dispatch a task from .hopper/queue.md to its preferred vendor CLI via hopper-dispatch. Supports --background for long-running tasks (spec §14).
 allowed-tools: Bash, Read
-argument-hint: <task-id> [--background] [--write] [--force] [--web-search] [--model <name>] [--reasoning <minimal|low|medium|high|xhigh>] [--sandbox <read-only|workspace-write|danger-full-access>] [--vendor <name>]
+argument-hint: <task-id> [--background] [--write] [--force] [--web-search] [--model <name>] [--reasoning <minimal|low|medium|high|xhigh>] [--sandbox <read-only|workspace-write|danger-full-access>] [--subject-root <absolute-path>] [--vendor <name>]
 ---
 
 This command runs inside a Claude Code session and invokes the host-agnostic `hopper-dispatch` CLI to dispatch one task.
@@ -26,6 +26,7 @@ This command runs inside a Claude Code session and invokes the host-agnostic `ho
    - Value flag: `--model <name>` (consumes next token) — `<name>` must match `^[A-Za-z][A-Za-z0-9._/:()[\] -]{0,99}$` (the space/bracket/paren are for display-label aliases like `opus[1m]` or `Gemini 3.5 Flash (High)`; quote the value in your shell)
    - Value flag: `--reasoning <level>` (consumes next token) — `<level>` must be exactly one of `minimal`, `low`, `medium`, `high`, `xhigh`
    - Value flag: `--sandbox <mode>` (consumes next token) — `<mode>` must be exactly one of `read-only`, `workspace-write`, `danger-full-access`
+   - Value flag: `--subject-root <absolute-path>` (consumes next token) — only legal when the **effective** sandbox is `read-only`; the existing real path must be a specific project directory, not `/`, a filesystem root, or the home directory. On macOS Hopper fails closed unless `/usr/bin/sandbox-exec` can deny `file-write*` and new subject-scoped `file-link` creation during guarded execution.
    - Value flag: `--vendor <name>` (consumes next token) — `<name>` must be a lowercase registered vendor: `codex`, `kimi`, `opencode`, `copilot`, `agy`, `grok`, `mimo`, `claude` (overrides the routed vendor; host≠vendor still enforced). **`agy` is DISABLED by default** (headless output unsupported on 1.0.12) — dispatching to it errors unless `HOPPER_ENABLE_AGY=1` is set.
    - Reject anything else.
 4. If validation fails: STOP. Print the offending input verbatim and ask the user to correct it. Do **not** invoke Bash with rejected input.
@@ -38,6 +39,7 @@ This command runs inside a Claude Code session and invokes the host-agnostic `ho
 - `--vendor <name>` overrides the routed vendor (any registered adapter; host≠vendor still enforced). `--web-search` enables vendor web search (codex `--search`; auto-on for `prd-research`/`market-research` — see `/hopper:research`).
 - `--sandbox` default: `danger-full-access`, but **auto-downgraded to `read-only` for review/research task-types** (`code-review-*`, `prd-research`, `market-research`) or when the task brief/spec says `read-only` / `只读`; explicit `--sandbox` wins; global baseline override `HOPPER_DEFAULT_SANDBOX`.
 - `--sandbox` mappings: codex uses `-s <mode>` (and `--dangerously-bypass-approvals-and-sandbox` for `danger-full-access` on Windows — see ISSUE-codex-callchain-windows); opencode/agy map `danger-full-access` to `--dangerously-skip-permissions`; copilot maps it to `--allow-all-tools --allow-all-paths`; grok maps it to `--always-approve`; mimo maps default full access to `--agent build --dangerously-skip-permissions` and read-only to `--agent plan`; kimi `-p` uses Kimi's native auto permission policy and rejects `--prompt` combined with `--yolo` / `--auto` / `--plan`, so hopper does not forward sandbox argv
+- `--subject-root <absolute-path>` is a narrow macOS process-level guard for a specific review subject. During guarded execution it blocks direct and inherited-child file writes inside that tree and new hard-link creation using subject paths, preventing a newly created external alias from escaping the path guard. It cannot revoke an external hard link that existed before the guard: if that alias is known and subject-external writes are allowed, it can still mutate the same inode. The guard deliberately does **not** block reads, network/IPC, or writes outside the tree (such as vendor caches), and is not a confidentiality/exfiltration control. Background output is parent-piped and teed so an inherited log descriptor cannot bypass the write denial.
 
 ## Invocation modes — pick ONE based on arguments
 

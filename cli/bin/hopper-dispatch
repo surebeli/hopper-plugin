@@ -51,12 +51,13 @@ import { resolveCommandWithKnownPaths } from '../src/path-resolve.js';
 import { resolvePromptDelivery } from '../src/prompt-delivery.js';
 import { publicAdapterDiagnostic } from '../src/adapter-diagnostics.js';
 import { publicModelIdentifier } from '../src/public-identifiers.js';
+import { validateSubjectRootArgument, prepareSubjectRootGuard } from '../src/subject-root-guard.js';
 import { watchFile, unwatchFile, readFileSync, existsSync, openSync, readSync, closeSync, statSync, readdirSync } from 'node:fs';
 import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
-const VERSION = '0.32.0';
+const VERSION = '0.33.0';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -92,6 +93,7 @@ function printUsage() {
   console.log('  hopper-dispatch <task-id> --model <name>        Override vendor model (e.g. gpt-5.5, claude-opus-4-7)');
   console.log('  hopper-dispatch <task-id> --reasoning <level>   Override reasoning effort (minimal|low|medium|high|xhigh)');
   console.log('  hopper-dispatch <task-id> --sandbox <mode>      Override vendor permission (read-only|workspace-write|danger-full-access)');
+  console.log('  hopper-dispatch <task-id> --subject-root <path> Process-level no-write guard for one absolute tree (requires effective read-only on macOS)');
   console.log('  hopper-dispatch --watch <task-id>               Follow closed task status/progress until terminal exit');
   console.log('  hopper-dispatch --progress <task-id>            Show background task phase + recent progress events');
   console.log('  hopper-dispatch --watch-events [--once] [--replay]  Stream NEW terminal task events as JSONL. The existing handoffs/');
@@ -133,6 +135,7 @@ function printUsage() {
   console.log('                       Honored by: codex (model_reasoning_effort); grok + copilot (--effort, clamped); mimo (--variant, xhigh->max)');
   console.log('  --sandbox <mode>     read-only | workspace-write | danger-full-access');
   console.log('                       Default: danger-full-access; auto read-only for review/research task-types or read-only task text; global override HOPPER_DEFAULT_SANDBOX');
+  console.log('  --subject-root <path> On macOS, deny vendor process file writes to this existing absolute project tree. Requires the effective sandbox to be read-only; reads, network/IPC, and writes outside the tree remain possible.');
   console.log('  --web-search         Enable vendor web search (codex: --search live). Auto-on for prd-research / market-research task-types.');
   console.log('  --vendor <name>      Override the routed vendor (must be a registered adapter; host != vendor still enforced)');
   console.log('');
@@ -600,6 +603,7 @@ async function main() {
     if (valueFlags.sandbox !== undefined) validateSandbox(valueFlags.sandbox);
     if (valueFlags.timeout !== undefined) validateTimeout(valueFlags.timeout);
     if (valueFlags.vendor !== undefined) validateVendor(valueFlags.vendor);
+    if (valueFlags['subject-root'] !== undefined) validateSubjectRootArgument(valueFlags['subject-root']);
   } catch (err) {
     console.error(`Error: ${err.message}`);
     process.exit(2);
@@ -622,6 +626,7 @@ async function main() {
   if (valueFlags.model !== undefined) adapterOpts.model = valueFlags.model;
   if (valueFlags.reasoning !== undefined) adapterOpts.reasoning = valueFlags.reasoning;
   if (valueFlags.sandbox !== undefined) adapterOpts.sandbox = valueFlags.sandbox;
+  if (valueFlags['subject-root'] !== undefined) adapterOpts.subjectRoot = valueFlags['subject-root'];
   // --timeout sets the absolute ceiling (ms); idle timeout still applies under it.
   if (valueFlags.timeout !== undefined) adapterOpts.timeoutOverrideMs = validateTimeout(valueFlags.timeout);
 
@@ -993,6 +998,12 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {}, vend
   }
   const effectiveAdapterOpts = resolveAdapterOptsForTask(resolved, adapterOpts);
 
+  try {
+    prepareSubjectRootGuard({ subjectRoot: effectiveAdapterOpts.subjectRoot, sandbox: effectiveAdapterOpts.sandbox });
+  } catch (err) {
+    bail(`Error: ${err.message}`, 1);
+  }
+
   // Batch 2: policy-chain notices (model-rule/effort-policy resolution, sentinel
   // resolution, effort clamp visibility) — same source as the sync path.
   for (const notice of effectiveAdapterOpts.policyNotices || []) {
@@ -1091,6 +1102,7 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {}, vend
       adapterOpts: effectiveOpts,  // codex Phase 5 F2: opts → runner via env for timeoutMs
       promptStdinFile: delivery.channel === 'stdin' ? delivery.promptFilePath : null,
       startupSnapshot,
+      subjectRoot: effectiveOpts.subjectRoot || null,
     });
     console.log('=== BACKGROUND DISPATCH STARTED ===');
     console.log(`Task:        ${taskId}`);
@@ -1545,7 +1557,8 @@ function runResult(hopperDir, taskId, { full = false } = {}) {
     console.log('(no log file found)');
   }
 
-  process.exit(canonical.displayStatus === 'done' ? 0 : 1);
+  process.exitCode = canonical.displayStatus === 'done' ? 0 : 1;
+  return;
 }
 
 async function runWatch(hopperDir, taskId) {

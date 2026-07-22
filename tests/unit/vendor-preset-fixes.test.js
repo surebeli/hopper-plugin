@@ -71,7 +71,40 @@ test('grok parseResult: stopReason "Cancelled" is a failure, not silent success'
   assert.match(r.error, /Cancelled/);
 });
 
-test('grok parseResult: AuthorizationRequired / Transport channel closed → auth-fail', () => {
+test('grok parseResult: valid trailing JSON succeeds despite unrelated MCP authentication warning', () => {
+  const r = grokAdapter.parseResult({
+    exitCode: 0,
+    stdout: 'MCP hawk-agent: authenticate to continue\n' + JSON.stringify({ text: 'GROK_ANSWER', stopReason: 'EndTurn' }),
+    stderr: 'MCP hawk-agent: authenticate to continue',
+    timedOut: false,
+    durationMs: 100,
+  });
+  assert.equal(r.status, 'success');
+  assert.equal(r.text, 'GROK_ANSWER');
+
+  const citationTail = grokAdapter.parseResult({
+    exitCode: 0,
+    stdout: 'Answer\n[1] citation',
+    stderr: '',
+    timedOut: false,
+    durationMs: 100,
+  });
+  assert.equal(citationTail.status, 'success');
+  assert.equal(citationTail.text, 'Answer\n[1] citation');
+});
+
+test('grok parseResult: exit 0 cancelled empty result plus auth warning remains auth-fail', () => {
+  const r = grokAdapter.parseResult({
+    exitCode: 0,
+    stdout: JSON.stringify({ text: '', stopReason: 'Cancelled' }),
+    stderr: 'worker quit with fatal: Auth(AuthorizationRequired)',
+    timedOut: false,
+    durationMs: 100,
+  });
+  assert.equal(r.status, 'auth-fail');
+});
+
+test('grok parseResult: nonzero AuthorizationRequired / Transport channel closed → auth-fail', () => {
   const r = grokAdapter.parseResult({
     exitCode: 1,
     stdout: '',

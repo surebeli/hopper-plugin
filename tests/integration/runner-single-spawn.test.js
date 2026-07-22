@@ -48,7 +48,7 @@ const RUNNER_PATH = join(REPO_ROOT, 'cli', 'bin', 'hopper-runner');
  * codex.bat per PATHEXT. We write codex.cmd on Win, plain codex (chmod +x)
  * on Unix.
  */
-async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, killCounterFile = null, exitCode = 0, sleepMs = 0, extraEnv = {} }) {
+async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, killCounterFile = null, exitCode = 0, sleepMs = 0, extraEnv = {}, subjectRoot = null, adapterOpts = null, subjectWritePath = null, subjectLinkSource = null, subjectLinkAlias = null }) {
   const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-fake-'));
   try {
     const isWin = platform() === 'win32';
@@ -66,6 +66,9 @@ async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, killCou
       fs.writeFileSync(file, String(cur + 1));
       console.log(JSON.stringify({ type: 'text', part: { type: 'text', text: 'FAKE_VENDOR_OK invocation ' + (cur + 1) } }));
       console.log(JSON.stringify({ type: 'step_finish', part: { type: 'step-finish', reason: 'stop' } }));
+      console.log('FAKE_VENDOR_OK invocation ' + (cur + 1));
+      ${subjectWritePath ? `try { fs.writeFileSync(${JSON.stringify(subjectWritePath)}, 'blocked'); } catch {}` : ''}
+      ${subjectLinkSource ? `fs.linkSync(${JSON.stringify(subjectLinkSource)}, ${JSON.stringify(subjectLinkAlias)});` : ''}
       const sleepMs = ${sleepMs};
       if (sleepMs > 0) {
         setTimeout(() => process.exit(${exitCode}), sleepMs);
@@ -123,6 +126,7 @@ async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, killCou
       ...extraEnv,
       PATH: shimDir + pathSep + (process.env.PATH || ''),
       HOPPER_RUNNER_INVOKED: '1',
+      HOPPER_ADAPTER_OPTS: adapterOpts ? JSON.stringify(adapterOpts) : undefined,
     };
 
     // Run runner synchronously (not detached — this is a test)
@@ -134,6 +138,7 @@ async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, killCou
         '--adapter', 'opencode',
         '--output-md', outputMdPath,
         '--log', logPath,
+        ...(subjectRoot ? ['--subject-root', subjectRoot] : []),
         '--',
         // opencode adapter argv shape is irrelevant to the fake shim, but keep
         // it plausible for diagnostics.
@@ -256,6 +261,39 @@ test('hopper-runner spawns vendor EXACTLY ONCE on failure (no retry; spec §3 #4
   }
 });
 
+test('hopper-runner subject-root guard blocks writes and hard-link escape without inherited-FD bypass and tees output', { skip: platform() !== 'darwin' ? 'sandbox-exec guard is macOS-only' : false }, async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-subject-root-'));
+  try {
+    const subject = join(tmp, 'project');
+    const hopperDir = join(subject, '.hopper');
+    const counterFile = join(tmp, 'counter.txt');
+    const blockedWrite = join(subject, 'vendor-write.txt');
+    const subjectOriginal = join(subject, 'original.txt');
+    const externalAlias = join(tmp, 'external-alias.txt');
+    mkdirSync(join(hopperDir, 'handoffs'), { recursive: true });
+    writeFileSync(subjectOriginal, 'original');
+
+    const { logPath } = await runRunnerWithFakeVendor({
+      taskId: 'T-subject-root',
+      hopperDir,
+      counterFile,
+      subjectRoot: subject,
+      adapterOpts: { sandbox: 'read-only', subjectRoot: subject },
+      subjectWritePath: blockedWrite,
+      subjectLinkSource: subjectOriginal,
+      subjectLinkAlias: externalAlias,
+    });
+
+    assert.equal(readFileSync(counterFile, 'utf8'), '1', 'guarded vendor must remain a single attempt');
+    assert.equal(existsSync(blockedWrite), false, 'vendor must not write through an inherited log FD');
+    assert.equal(existsSync(externalAlias), false, 'vendor must not hard-link a protected file to an external alias');
+    assert.equal(readFileSync(subjectOriginal, 'utf8'), 'original', 'blocked hard-link attempt must not alter the subject file');
+    assert.match(readFileSync(logPath, 'utf8'), /FAKE_VENDOR_OK invocation 1/, 'parent pipe/tee must retain vendor output');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('hopper-runner appends exactly one terminal progress event on success', async () => {
   const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-terminal-success-'));
   try {
@@ -329,14 +367,15 @@ test('hopper-runner appends exactly one timeout terminal progress event', async 
     const hopperDir = join(tmp, '.hopper');
     mkdirSync(join(hopperDir, 'handoffs'), { recursive: true });
     const counterFile = join(tmp, 'counter.txt');
+    writeFileSync(counterFile, '0', 'utf-8');
 
     const { outputMdPath } = await runRunnerWithFakeVendor({
       taskId: 'T-terminal-timeout',
       hopperDir,
       counterFile,
       exitCode: 0,
-      sleepMs: 2000,
-      extraEnv: { HOPPER_TEST_ONLY_TIMEOUT_MS: '500' },
+      sleepMs: 10000,
+      extraEnv: { HOPPER_TEST_ONLY_TIMEOUT_MS: '3000' },
     });
 
     const finalCount = parseInt(readFileSync(counterFile, 'utf-8'));
@@ -448,6 +487,8 @@ async function runRunnerWithBufferedStub({
   inspectAfterMs = null,
   promptText = 'test prompt',
   preseedLog = '',
+  counterFile = null,
+  stderrText = '',
 }) {
   const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-buffered-'));
   try {
@@ -459,6 +500,8 @@ async function runRunnerWithBufferedStub({
     // partial line, matching a truly end-buffered vendor.
     const fakeScript = join(tmp, 'fake-vendor.js');
     writeFileSync(fakeScript, `
+      ${counterFile ? `const fs = require('node:fs'); const file = ${JSON.stringify(counterFile)}; const cur = fs.existsSync(file) ? Number(fs.readFileSync(file, 'utf8')) : 0; fs.writeFileSync(file, String(cur + 1));` : ''}
+      ${stderrText ? `process.stderr.write(${JSON.stringify(stderrText)});` : ''}
       setTimeout(() => {
         process.stdout.write(${JSON.stringify(answerText)});
         process.exit(0);
@@ -827,6 +870,36 @@ test('hopper-runner preserves the closed adapter diagnostic for an unreadable st
     assert.doesNotMatch(readFileSync(outputMdPath, 'utf8'), new RegExp(rawSentinel));
     assert.doesNotMatch(JSON.stringify(terminal), new RegExp(rawSentinel));
     assert.doesNotMatch(JSON.stringify(canonical.public), new RegExp(rawSentinel));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('hopper-runner: merged stderr auth warning plus valid Grok JSON is done once with a nonempty parsed body', { skip: platform() === 'win32' ? 'PATH-shim .cmd not executable on Windows' : false }, async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-grok-auth-warning-'));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    const counterFile = join(tmp, 'counter.txt');
+    mkdirSync(join(hopperDir, 'handoffs'), { recursive: true });
+
+    const { outputMdPath, result } = await runRunnerWithBufferedStub({
+      taskId: 'T-grok-auth-warning',
+      hopperDir,
+      adapterName: 'grok',
+      command: 'grok',
+      silentMs: 20,
+      answerText: JSON.stringify({ text: 'GROK_MERGED_SUCCESS', stopReason: 'EndTurn' }),
+      stderrText: 'MCP hawk-agent: authenticate to continue\n',
+      counterFile,
+    });
+
+    assert.equal(result.code, 0);
+    assert.equal(readFileSync(counterFile, 'utf8'), '1', 'warning handling must not respawn the vendor');
+    const fm = readFrontmatter(outputMdPath);
+    assert.equal(fm.status, 'done');
+    assert.equal(fm.adapter_status, 'success');
+    const md = readFileSync(outputMdPath, 'utf8');
+    assert.match(md, /GROK_MERGED_SUCCESS/);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
