@@ -349,14 +349,15 @@ test('hopper-runner appends exactly one timeout terminal progress event', async 
     const hopperDir = join(tmp, '.hopper');
     mkdirSync(join(hopperDir, 'handoffs'), { recursive: true });
     const counterFile = join(tmp, 'counter.txt');
+    writeFileSync(counterFile, '0', 'utf-8');
 
     const { outputMdPath } = await runRunnerWithFakeVendor({
       taskId: 'T-terminal-timeout',
       hopperDir,
       counterFile,
       exitCode: 0,
-      sleepMs: 2000,
-      extraEnv: { HOPPER_TEST_ONLY_TIMEOUT_MS: '500' },
+      sleepMs: 10000,
+      extraEnv: { HOPPER_TEST_ONLY_TIMEOUT_MS: '3000' },
     });
 
     const finalCount = parseInt(readFileSync(counterFile, 'utf-8'));
@@ -414,7 +415,7 @@ test('hopper-runner appends exactly one timeout terminal progress event', async 
  * exits 0. Silence before that point produces ZERO log growth, exactly like
  * the real vendors.
  */
-async function runRunnerWithBufferedStub({ taskId, hopperDir, adapterName, command, silentMs, answerText, extraEnv = {} }) {
+async function runRunnerWithBufferedStub({ taskId, hopperDir, adapterName, command, silentMs, answerText, extraEnv = {}, counterFile = null, stderrText = '' }) {
   const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-buffered-'));
   try {
     const shimDir = join(tmp, 'shim');
@@ -424,6 +425,8 @@ async function runRunnerWithBufferedStub({ taskId, hopperDir, adapterName, comma
     // partial line, matching a truly end-buffered vendor.
     const fakeScript = join(tmp, 'fake-vendor.js');
     writeFileSync(fakeScript, `
+      ${counterFile ? `const fs = require('node:fs'); const file = ${JSON.stringify(counterFile)}; const cur = fs.existsSync(file) ? Number(fs.readFileSync(file, 'utf8')) : 0; fs.writeFileSync(file, String(cur + 1));` : ''}
+      ${stderrText ? `process.stderr.write(${JSON.stringify(stderrText)});` : ''}
       setTimeout(() => {
         process.stdout.write(${JSON.stringify(answerText)});
         process.exit(0);
@@ -572,6 +575,36 @@ test('Test B (fix): bufferedOutput:true (real grok adapter) — idle poll is nev
     const md = readFileSync(outputMdPath, 'utf-8');
     assert.match(md, /GROK_BUFFERED_ANSWER/, 'the parsed vendor answer must be embedded in output.md');
     assert.ok(statSync(logPath).size > 0, 'the raw log DOES eventually hold the single trailing write (post-completion)');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('hopper-runner: merged stderr auth warning plus valid Grok JSON is done once with a nonempty parsed body', { skip: platform() === 'win32' ? 'PATH-shim .cmd not executable on Windows' : false }, async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-grok-auth-warning-'));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    const counterFile = join(tmp, 'counter.txt');
+    mkdirSync(join(hopperDir, 'handoffs'), { recursive: true });
+
+    const { outputMdPath, result } = await runRunnerWithBufferedStub({
+      taskId: 'T-grok-auth-warning',
+      hopperDir,
+      adapterName: 'grok',
+      command: 'grok',
+      silentMs: 20,
+      answerText: JSON.stringify({ text: 'GROK_MERGED_SUCCESS', stopReason: 'EndTurn' }),
+      stderrText: 'MCP hawk-agent: authenticate to continue\n',
+      counterFile,
+    });
+
+    assert.equal(result.code, 0);
+    assert.equal(readFileSync(counterFile, 'utf8'), '1', 'warning handling must not respawn the vendor');
+    const fm = readFrontmatter(outputMdPath);
+    assert.equal(fm.status, 'done');
+    assert.equal(fm.adapter_status, 'success');
+    const md = readFileSync(outputMdPath, 'utf8');
+    assert.match(md, /GROK_MERGED_SUCCESS/);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
