@@ -1,0 +1,33 @@
+dashboard/server/events/sse.js
+  0000019f885158fd 1-138
+dashboard/server/lib/spawn-cli.js
+  0000019f885158fd 1-24
+dashboard/server/routes/actions.js
+  0000019f885158fd 1-132
+dashboard/server/routes/task.js
+  0000019f885158fd 1-161
+tests/unit/dashboard-sse.test.js
+  0000019f885158fd 1-255
+tests/unit/dashboard-vendors.test.js
+  0000019f885158fd 1-524
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "4235da3fc5a4b20b605754e8fb793871d7b69696",
+  "prompts": {
+    "0000019f885158fd": {
+      "agent_id": {
+        "tool": "codex",
+        "model": "gpt-5.6-sol",
+        "id": "ai-thread-codex-gpt-5.6-sol-1784698460413"
+      },
+      "human_author": "litianyi",
+      "messages": [],
+      "total_additions": 1234,
+      "total_deletions": 0,
+      "accepted_lines": 1234,
+      "overriden_lines": 0
+    }
+  }
+}
