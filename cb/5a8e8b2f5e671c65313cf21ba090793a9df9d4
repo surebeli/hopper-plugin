@@ -1,0 +1,61 @@
+cli/bin/hopper-dispatch
+  0000019f87f871db 1-2131
+cli/bin/hopper-runner
+  0000019f87f871db 1-620
+cli/src/adapter-diagnostics.js
+  0000019f87f871db 1-39
+cli/src/output.js
+  0000019f87f871db 1-434
+cli/src/vendors/claude.js
+  0000019f87f871db 1-327
+cli/src/vendors/kimi.js
+  0000019f87f871db 1-139
+cli/src/vendors/opencode.js
+  0000019f87f871db 1-335
+plugins/hopper/cli/bin/hopper-dispatch
+  0000019f87f871db 1-2131
+plugins/hopper/cli/bin/hopper-runner
+  0000019f87f871db 1-620
+plugins/hopper/cli/src/adapter-diagnostics.js
+  0000019f87f871db 1-39
+plugins/hopper/cli/src/inventory-contract.js
+  0000019f87f871db 1-142
+plugins/hopper/cli/src/output.js
+  0000019f87f871db 1-434
+plugins/hopper/cli/src/vendors/claude.js
+  0000019f87f871db 1-327
+plugins/hopper/cli/src/vendors/kimi.js
+  0000019f87f871db 1-139
+plugins/hopper/cli/src/vendors/opencode.js
+  0000019f87f871db 1-335
+tests/integration/runner-single-spawn.test.js
+  0000019f87f871db 1-850
+tests/unit/lifecycle-regression.test.js
+  0000019f87f871db 1-274
+tests/unit/output-writer.test.js
+  0000019f87f871db 1-548
+tests/unit/result-full.test.js
+  0000019f87f871db 1-152
+tests/unit/vendors-contract.test.js
+  0000019f87f871db 1-662
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "cb5a8e8b2f5e671c65313cf21ba090793a9df9d4",
+  "prompts": {
+    "0000019f87f871db": {
+      "agent_id": {
+        "tool": "codex",
+        "model": "gpt-5.6-sol",
+        "id": "ai-thread-codex-gpt-5.6-sol-1784692634075"
+      },
+      "human_author": "litianyi",
+      "messages": [],
+      "total_additions": 10678,
+      "total_deletions": 0,
+      "accepted_lines": 10678,
+      "overriden_lines": 0
+    }
+  }
+}
