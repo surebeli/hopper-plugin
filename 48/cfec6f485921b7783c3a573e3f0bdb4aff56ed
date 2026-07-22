@@ -1,0 +1,39 @@
+cli/bin/hopper-dispatch
+  0000019f87f7d9c4 1-2140
+cli/src/cache.js
+  0000019f87f7d9c4 1-551
+cli/src/inventory-contract.js
+  0000019f87f7d9c4 1-129
+plugins/hopper/cli/bin/hopper-dispatch
+  0000019f87f7d9c4 1-2140
+plugins/hopper/cli/src/cache.js
+  0000019f87f7d9c4 1-551
+plugins/hopper/cli/src/handoff-attestation.js
+  0000019f87f7d9c4 1-563
+plugins/hopper/cli/src/inventory-contract.js
+  0000019f87f7d9c4 1-129
+tests/unit/cache.test.js
+  0000019f87f7d9c4 1-723
+tests/unit/progress-watch.test.js
+  0000019f87f7d9c4 1-452
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "48cfec6f485921b7783c3a573e3f0bdb4aff56ed",
+  "prompts": {
+    "0000019f87f7d9c4": {
+      "agent_id": {
+        "tool": "codex",
+        "model": "gpt-5.6-sol",
+        "id": "ai-thread-codex-gpt-5.6-sol-1784692595140"
+      },
+      "human_author": "litianyi",
+      "messages": [],
+      "total_additions": 7378,
+      "total_deletions": 0,
+      "accepted_lines": 7378,
+      "overriden_lines": 0
+    }
+  }
+}
