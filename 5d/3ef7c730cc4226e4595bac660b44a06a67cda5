@@ -1,0 +1,23 @@
+docs/superpowers/plans/2026-07-22-hopper-execution-security-remediation.md
+  0000019f87e1f0b3 1-628
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "5d3ef7c730cc4226e4595bac660b44a06a67cda5",
+  "prompts": {
+    "0000019f87e1f0b3": {
+      "agent_id": {
+        "tool": "codex",
+        "model": "gpt-5.6-sol",
+        "id": "ai-thread-codex-gpt-5.6-sol-1784691159219"
+      },
+      "human_author": "litianyi",
+      "messages": [],
+      "total_additions": 628,
+      "total_deletions": 0,
+      "accepted_lines": 628,
+      "overriden_lines": 0
+    }
+  }
+}
