@@ -152,7 +152,7 @@ async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, killCou
   }
 }
 
-async function runRunnerWithAdapter({ taskId, hopperDir, adapterName, adapterArgv = [] }) {
+async function runRunnerWithAdapter({ taskId, hopperDir, adapterName, adapterArgv = [], extraEnv = {} }) {
   const outputMdPath = join(hopperDir, 'handoffs', `${taskId}-output.md`);
   const logPath = outputMdPath.replace(/\.md$/, '.log');
   writeFrontmatter(outputMdPath, {
@@ -180,6 +180,7 @@ async function runRunnerWithAdapter({ taskId, hopperDir, adapterName, adapterArg
       '--',
       ...adapterArgv,
     ], {
+      env: { ...process.env, ...extraEnv },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stderr = '';
@@ -710,18 +711,74 @@ test('buffered vendor emits non-sensitive process-alive liveness without extendi
   }
 });
 
-test('process-alive liveness timer requires buffered output or adapter capability and clears on close/error', () => {
-  const runner = readFileSync(RUNNER_PATH, 'utf-8');
-  assert.match(runner, /const emitsProcessAliveLiveness\s*=\s*bufferedOutput\s*\|\|\s*adapter\?\.liveness\?\.processAlive\s*===\s*true/,
-    'non-buffered adapters must explicitly opt in to process-alive liveness');
-  assert.match(runner, /bufferedLivenessTimer\s*=\s*emitsProcessAliveLiveness\s*\?\s*setInterval/,
-    'the timer must be gated by the unified buffered-or-capability predicate');
+test('non-buffered adapter without processAlive capability emits no process_alive events', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-no-liveness-capability-'));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    mkdirSync(join(hopperDir, 'handoffs'), { recursive: true });
+    const answerText = [
+      JSON.stringify({ type: 'text', part: { type: 'text', text: 'NO_LIVENESS_CAPABILITY_OK' } }),
+      JSON.stringify({ type: 'step_finish', part: { type: 'step-finish', reason: 'stop' } }),
+    ].join('\n');
+    const { result, interim } = await runRunnerWithBufferedStub({
+      taskId: 'T-no-liveness-capability',
+      hopperDir,
+      adapterName: 'opencode',
+      command: 'opencode',
+      silentMs: 700,
+      answerText,
+      inspectAfterMs: 350,
+      extraEnv: {
+        HOPPER_TEST_ONLY_LIVENESS_INTERVAL_MS: '100',
+        HOPPER_IDLE_TIMEOUT_MS: '2000',
+      },
+    });
 
-  const closeStart = runner.indexOf("vendor.on('close'");
-  const errorStart = runner.indexOf("vendor.on('error'", closeStart);
-  assert.ok(closeStart >= 0 && errorStart > closeStart);
-  assert.match(runner.slice(closeStart, errorStart), /clearInterval\(bufferedLivenessTimer\)/);
-  assert.match(runner.slice(errorStart), /clearInterval\(bufferedLivenessTimer\)/);
+    assert.ok(interim, 'runner must still be live after more than three test liveness intervals');
+    assert.equal(interim.frontmatter.status, 'in-progress');
+    assert.equal(interim.events.filter((event) => event.kind === 'process_alive').length, 0);
+    assert.equal(result.code, 0, 'the non-buffered fixture should complete normally');
+    const finalEvents = readProgressEvents({ hopperDir, taskId: 'T-no-liveness-capability' });
+    assert.equal(finalEvents.filter((event) => event.kind === 'process_alive').length, 0);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('spawn error emits no late process_alive after more than one liveness interval', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-spawn-error-liveness-'));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    const emptyPath = join(tmp, 'empty-path');
+    mkdirSync(join(hopperDir, 'handoffs'), { recursive: true });
+    mkdirSync(emptyPath);
+    const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === 'path') || 'PATH';
+    const taskId = 'T-spawn-error-liveness';
+    const { result } = await runRunnerWithAdapter({
+      taskId,
+      hopperDir,
+      adapterName: 'kimi',
+      adapterArgv: ['-p', 'test prompt'],
+      extraEnv: {
+        [pathKey]: emptyPath,
+        HOPPER_TEST_ONLY_LIVENESS_INTERVAL_MS: '50',
+      },
+    });
+
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /spawn error|ENOENT|not found/i);
+    const atError = readProgressEvents({ hopperDir, taskId });
+    assert.equal(atError.filter((event) => event.terminal).length, 1,
+      'spawn error must reach one authoritative terminal event before the stability wait');
+    assert.equal(atError.filter((event) => event.kind === 'process_alive').length, 0);
+    await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+    const afterInterval = readProgressEvents({ hopperDir, taskId });
+    assert.equal(afterInterval.length, atError.length, 'spawn-error terminalization must stop event growth');
+    assert.equal(afterInterval.filter((event) => event.kind === 'process_alive').length, 0,
+      'spawn error must never produce a late process_alive event');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('hopper-runner early fail appends one terminal progress event when frontmatter exists', async () => {
