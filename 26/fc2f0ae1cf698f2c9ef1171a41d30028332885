@@ -1,0 +1,41 @@
+.claude-plugin/marketplace.json
+  0000019f8924e1f4 1-86
+.claude-plugin/plugin.json
+  0000019f8924e1f4 1-12
+.codex-plugin/plugin.json
+  0000019f8924e1f4 1-49
+CHANGELOG.md
+  0000019f8924e1f4 1-135
+cli/bin/hopper-dispatch
+  0000019f8924e1f4 1-2107
+commands/smoke.md
+  0000019f8924e1f4 1-21
+commands/vendors.md
+  0000019f8924e1f4 1-18
+package.json
+  0000019f8924e1f4 1-66
+plugins/hopper/.codex-plugin/plugin.json
+  0000019f8924e1f4 1-49
+plugins/hopper/cli/bin/hopper-dispatch
+  0000019f8924e1f4 1-2107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "26fc2f0ae1cf698f2c9ef1171a41d30028332885",
+  "prompts": {
+    "0000019f8924e1f4": {
+      "agent_id": {
+        "id": "ai-thread-codex-gpt-5.6-sol-1784712323572",
+        "model": "gpt-5.6-sol",
+        "tool": "codex"
+      },
+      "human_author": "litianyi",
+      "messages": [],
+      "total_additions": 4650,
+      "total_deletions": 0,
+      "accepted_lines": 4650,
+      "overriden_lines": 0
+    }
+  }
+}
