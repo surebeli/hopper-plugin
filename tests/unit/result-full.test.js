@@ -12,7 +12,14 @@ import { fileURLToPath } from 'node:url';
 
 const BIN = resolve(fileURLToPath(import.meta.url), '..', '..', '..', 'cli', 'bin', 'hopper-dispatch');
 
-function setupTask({ withSidecar, sidecarText = '' }) {
+function setupTask({
+  withSidecar,
+  sidecarText = '',
+  status = 'done',
+  recoveredOutput = false,
+  recoveredOutputState = 'no-text',
+  recoveredOutputSource = 'none',
+} = {}) {
   const root = mkdtempSync(join(tmpdir(), 'hopper-result-'));
   const hopper = join(root, '.hopper');
   const handoffs = join(hopper, 'handoffs');
@@ -23,7 +30,7 @@ function setupTask({ withSidecar, sidecarText = '' }) {
     '---',
     `task_id: ${id}`,
     'adapter: codex',
-    'status: done',
+    `status: ${status}`,
     'adapter_status: success',
     'duration_ms: 1234',
     'exit_code: 0',
@@ -38,6 +45,9 @@ function setupTask({ withSidecar, sidecarText = '' }) {
     'catalog_source_label: adapter-static-selectors',
     'binary_availability: present',
     'binary_basename: codex',
+    `recovered_output: ${recoveredOutput}`,
+    `recovered_output_state: ${recoveredOutputState}`,
+    `recovered_output_source: ${recoveredOutputSource}`,
     '---',
     '',
     `# ${id} — market-research Output`,
@@ -91,6 +101,28 @@ test('T1: --result --full with NO sidecar falls back to the body (no empty FULL 
     assert.ok(!out.includes('FULL OUTPUT (sidecar'), 'no empty sidecar block printed');
     assert.match(out, /OUTPUT\.MD BODY/, 'falls back to the body');
     assert.match(out, /PREVIEW_BODY_MARKER/, 'body content present');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T6: --result --full presents recovered failed output without disclosing its raw log', () => {
+  const { root, hopper, id } = setupTask({
+    withSidecar: true,
+    sidecarText: 'SAFE_SIDECAR_TEXT',
+    status: 'failed',
+    recoveredOutput: true,
+    recoveredOutputState: 'unknown-completeness',
+    recoveredOutputSource: 'event-stream',
+  });
+  try {
+    writeFileSync(join(hopper, 'handoffs', `${id}-output.log`), 'RAW_LOG_PRIVATE C:\\PRIVATE', 'utf-8');
+    const result = spawnSync(process.execPath, [BIN, '--result', id, '--full'], {
+      encoding: 'utf8', env: { ...process.env, HOPPER_DIR: hopper },
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stdout, /Status:\s+failed/);
+    assert.match(result.stdout, /Recovered output:\s+unknown-completeness \(advisory\)/);
+    assert.match(result.stdout, /SAFE_SIDECAR_TEXT/);
+    assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /RAW_LOG_PRIVATE|C:\\PRIVATE/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
