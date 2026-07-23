@@ -1,0 +1,29 @@
+cli/src/handoff-attestation.js
+  0000019f8dd68a19 1-639
+cli/src/progress.js
+  0000019f8dd68a19 1-180
+tests/integration/runner-single-spawn.test.js
+  0000019f8dd68a19 1-1181
+tests/unit/handoff-attestation.test.js
+  0000019f8dd68a19 1-575
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "133706246b1e5b5228361069176f9d50f65d7520",
+  "prompts": {
+    "0000019f8dd68a19": {
+      "agent_id": {
+        "tool": "codex",
+        "model": "gpt-5.6-sol",
+        "id": "ai-thread-codex-gpt-5.6-sol-1784791075353"
+      },
+      "human_author": "litianyi",
+      "messages": [],
+      "total_additions": 2575,
+      "total_deletions": 0,
+      "accepted_lines": 2575,
+      "overriden_lines": 0
+    }
+  }
+}
