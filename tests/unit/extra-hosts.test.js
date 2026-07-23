@@ -170,3 +170,39 @@ test('copilot-cli: wrapper runs without COPILOT_MODEL set', { skip: platform() =
     rmSync(tmpBin, { recursive: true, force: true });
   }
 });
+
+test('grok-cli: wrapper help and README document grok-4.5 and the override', () => {
+  const wrapper = join(REPO_ROOT, 'hosts', 'grok-cli', 'bin', 'hopper-grok');
+  const wrapperText = readFileSync(wrapper, 'utf-8');
+  const readme = readFileSync(join(REPO_ROOT, 'hosts', 'grok-cli', 'README.md'), 'utf-8');
+  assert.match(wrapperText, /GROK_HOST_MODEL\s+OUTER grok host model \(default: grok-4\.5; explicit value overrides\)/);
+  assert.match(readme, /grok-4\.5/);
+  assert.match(readme, /GROK_HOST_MODEL/);
+  assert.doesNotMatch(wrapperText, /default:\s*grok-build/);
+  assert.doesNotMatch(readme, /default:\s*grok-build/);
+});
+
+test('grok-cli: outer host defaults to grok-4.5 and preserves GROK_HOST_MODEL overrides', { skip: platform() === 'win32' ? 'bash not standardly available on Windows CI' : false }, () => {
+  const wrapper = join(REPO_ROOT, 'hosts', 'grok-cli', 'bin', 'hopper-grok');
+  const tmpBin = mkdtempSync(join(tmpdir(), 'hopper-grok-mock-'));
+  const mockGrok = join(tmpBin, 'grok');
+  try {
+    writeFileSync(mockGrok, '#!/usr/bin/env bash\nprintf \'%s\\n\' "$*"\n');
+    chmodSync(mockGrok, 0o755);
+
+    const invoke = (model) => execFileSync('bash', [wrapper, 'T-OK'], {
+      env: {
+        ...process.env,
+        HOPPER_PLUGIN_ROOT: REPO_ROOT,
+        PATH: `${tmpBin}:${process.env.PATH}`,
+        GROK_HOST_MODEL: model,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).toString();
+
+    assert.match(invoke(''), /-m grok-4\.5(?:\s|$)/);
+    assert.match(invoke('custom-grok'), /-m custom-grok(?:\s|$)/);
+  } finally {
+    rmSync(tmpBin, { recursive: true, force: true });
+  }
+});

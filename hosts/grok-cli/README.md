@@ -41,8 +41,20 @@ New-Item -ItemType SymbolicLink `
 |---|---|
 | Node 18+ on PATH | `node --version` |
 | Grok CLI on PATH | `command -v grok` |
-| Grok authenticated | `grok -p "say HOPPER_AUTH_OK" --output-format json` |
+| Grok launcher context | `hopper-dispatch --check grok` (zero-spawn, non-secret context only; it is not proof of remote authentication) |
 | bash on Windows | `bash --version` |
+
+`hopper-dispatch --check grok` reports `auth_context` as `key-present-unverified`,
+`credential-artifact-present-unverified`, `not-detected`, or `unknown`. It reads
+only the Hopper Node parent's local environment/credential-artifact presence; it
+does not validate a credential remotely. Interactive or browser login state in
+another session may not be inherited by that Node parent. Do not treat `READY`
+or an `auth_context` value as a login verdict; a successful dispatch is the only
+runtime evidence for that separate question.
+
+The outer host model defaults to `grok-4.5`. Set `GROK_HOST_MODEL` to an explicit
+alternative only when the installed Grok Build CLI supports it; the wrapper passes
+that value through as `-m <model>`.
 
 ## Usage
 

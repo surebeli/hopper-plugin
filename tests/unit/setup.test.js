@@ -8,8 +8,15 @@ import { reconcileModels } from '../../cli/src/model-normalize.js';
 import { listAdapters, getAdapter } from '../../cli/src/vendors/index.js';
 import { getVendorCache, setVendorCache } from '../../cli/src/cache.js';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const DISPATCH_BIN = resolve(__dirname, '..', '..', 'cli', 'bin', 'hopper-dispatch');
 
 test('setup: buildVendorReadiness returns one well-formed row per registered vendor', async () => {
   const rows = await buildVendorReadiness();
@@ -35,6 +42,24 @@ test('setup: Grok keeps credential detection as unverified context only', async 
   } finally {
     if (saved === undefined) delete process.env.XAI_API_KEY;
     else process.env.XAI_API_KEY = saved;
+  }
+});
+
+test('setup/check: Grok renders a local auth context as unverified, not remote authentication proof', () => {
+  const secret = 'unit-secret-never-returned';
+  for (const args of [['--setup', 'grok'], ['--check', 'grok']]) {
+    const result = spawnSync(process.execPath, [DISPATCH_BIN, ...args], {
+      encoding: 'utf8',
+      env: { ...process.env, XAI_API_KEY: secret },
+    });
+    const output = `${result.stdout}\n${result.stderr}`;
+    assert.equal(result.status, 0, `${args.join(' ')} should be a zero-spawn diagnostic`);
+    assert.match(output, /grok: status=\S+ auth=unverified auth_context=key-present-unverified/);
+    assert.match(output, /zero-spawn/i);
+    assert.match(output, /does not validate (?:the )?credential remotely/i);
+    assert.match(output, /interactive\/browser state .* may not be inherited by the Hopper Node parent/i);
+    assert.doesNotMatch(output, /auth=verified/);
+    assert.doesNotMatch(output, new RegExp(secret));
   }
 });
 

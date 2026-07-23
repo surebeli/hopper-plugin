@@ -21,7 +21,7 @@ node "$CLAUDE_PLUGIN_ROOT/cli/bin/hopper-dispatch" --setup codex --deep
 ## What it reports (per vendor)
 
 - **Installed** — is the vendor CLI resolvable on PATH (or a known install path)?
-- **Auth** — is auth detected (`ok`), or missing/unverified (`NO`)? See the auth notes for how to fix.
+- **Auth** — is auth detected (`ok`), or missing/unverified (`NO`)? See the auth notes for how to fix. **Grok is special:** its `auth_context` is only a zero-spawn, non-secret check of the Hopper Node parent's local credential context. It is rendered as `unverified` (`key-present-unverified`, `credential-artifact-present-unverified`, `not-detected`, or `unknown`), never as remote-auth proof; an interactive/browser session elsewhere may not be inherited.
 - **Sandbox** — `argv` means hopper can force `read-only` / `danger-full-access` via flags (so a review dispatch is genuinely locked down); `native` means the vendor only honors its own permission policy and is NOT argv-downgradable (e.g. kimi).
 - **WebSrch** — `yes` means the adapter plumbs a web-search toggle headlessly (needed for research / market-research tasks): **codex, claude, grok, kimi**. `manual` (copilot, mimo) means the vendor can search but needs env/config; `no` (opencode, agy) means unsupported out of the box.
 - **Models** — how many models are in the probe cache; run `/hopper:probe <vendor>` (or `--probe`) to populate. `--deep` refreshes this live.
@@ -34,7 +34,7 @@ With `--deep`, two extra sections print after the table:
 
 ## How to use the output
 
-- Before routing a task to a vendor, confirm it shows Installed=yes + Auth=ok.
+- Before routing a task to a vendor, confirm it shows Installed=yes + Auth=ok. For Grok, treat `status=READY` only as binary-dispatch readiness: `auth_context` is not a login verdict and this command must not trigger `grok login`, set a secret, or run an authentication smoke.
 - For a **research / PRD / market** task that needs the web, route only to a vendor whose **WebSrch=yes**.
 - For a **review / read-only** task, prefer a vendor whose **Sandbox=argv** so read-only is actually enforced.
 - The authoritative model/effort/sandbox matrix is `/hopper:vendors` + `hopper-dispatch --rules`; `--setup` is the readiness layer on top.

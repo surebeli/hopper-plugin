@@ -1615,6 +1615,38 @@ async function runWatch(hopperDir, taskId) {
 
 // ─── Discovery commands (Phase 6a) ────────────────────────────────────
 
+const GROK_AUTH_CONTEXTS = new Set([
+  'key-present-unverified',
+  'credential-artifact-present-unverified',
+  'not-detected',
+  'unknown',
+]);
+
+/**
+ * Render only the auth state that the install check can actually establish.
+ * Grok's local env/file check deliberately has no remote-auth proof, so it
+ * must never be promoted to `verified` merely because an artifact exists.
+ */
+function renderReadinessAuth(vendor, row) {
+  if (vendor === 'grok') {
+    const authState = row?.authState === 'unverified' ? row.authState : 'unverified';
+    const authContext = GROK_AUTH_CONTEXTS.has(row?.authContext)
+      ? row.authContext
+      : 'unknown';
+    return `auth=${authState} auth_context=${authContext}`;
+  }
+  const auth = row?.authOk ? (row.authSoftWarn ? 'advisory' : 'verified') : 'unverified';
+  return `auth=${auth}`;
+}
+
+function renderGrokAuthContextBoundary(rows) {
+  const grok = rows.find((row) => row.name === 'grok');
+  if (!grok) return;
+  const authContext = GROK_AUTH_CONTEXTS.has(grok.authContext) ? grok.authContext : 'unknown';
+  console.log(`Grok auth_context=${authContext} is a zero-spawn launcher-context check; it does not validate the credential remotely.`);
+  console.log('Grok status=READY means binary-dispatch readiness, not authenticated proof. Interactive/browser state in another session may not be inherited by the Hopper Node parent.');
+}
+
 async function runSetup({ only = null, deep = false } = {}) {
   const cacheOutcome = readCacheWithOutcome();
   if (cacheOutcome.outcome === 'malformed' || cacheOutcome.outcome === 'version-mismatch') {
@@ -1628,11 +1660,11 @@ async function runSetup({ only = null, deep = false } = {}) {
   const runtime = buildRuntimeReport({ version: VERSION });
   console.log(`hopper-dispatch v${VERSION} — setup & readiness`);
   console.log(`Runtime: node=${runtime.nodeOk ? 'supported' : 'unsupported'} platform=${runtime.platform}`);
-  console.log(`Vendors: ${sum.ready}/${sum.total} installed+authed`);
+  console.log(`Vendors: ${sum.ready}/${sum.total} installed+ready`);
   for (const row of rows) {
-    const auth = row.authOk ? (row.authSoftWarn ? 'advisory' : 'verified') : 'unverified';
-    console.log(`${row.name}: status=${row.status} auth=${auth} ${renderSafeInventory(row.inventory)}`);
+    console.log(`${row.name}: status=${row.status} ${renderReadinessAuth(row.name, row)} ${renderSafeInventory(row.inventory)}`);
   }
+  renderGrokAuthContextBoundary(rows.map((row) => ({ name: row.name, authContext: row.authContext })));
   console.log('Use --probe for an explicit inventory refresh.');
   return;
   const cell = (s, w) => String(s == null ? '—' : s).slice(0, w).padEnd(w);
@@ -1807,10 +1839,11 @@ async function runCheck(target, { compat = false } = {}) {
     const status = r && ['READY', 'AUTH_NEEDED', 'NOT_INSTALLED', 'UNKNOWN'].includes(r.overallStatus)
       ? r.overallStatus
       : 'UNKNOWN';
-    const auth = r?.authOk ? (r.authSoftWarn ? 'advisory' : 'verified') : 'unverified';
+    const auth = renderReadinessAuth(vendor, r);
     const compatSummary = compat ? ` compatibility=${compatibility.get(vendor)}` : '';
-    console.log(`${vendor}: status=${status} auth=${auth}${compatSummary} ${renderSafeInventory(inventory)}`);
+    console.log(`${vendor}: status=${status} ${auth}${compatSummary} ${renderSafeInventory(inventory)}`);
   }
+  renderGrokAuthContextBoundary(results.map(({ name, r }) => ({ name, authContext: r?.authContext })));
   console.log(compat
     ? 'Compatibility probes ran; raw help output is withheld from public output.'
     : 'No vendor subprocess is spawned for this check.');
