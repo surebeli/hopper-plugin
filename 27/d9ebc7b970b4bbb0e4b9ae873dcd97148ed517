@@ -1,0 +1,27 @@
+cli/src/vendors/claude.js
+  0000019f8db3ce05 1-372
+cli/src/vendors/opencode.js
+  0000019f8db3ce05 1-337
+tests/unit/vendors-contract.test.js
+  0000019f8db3ce05 1-731
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "27d9ebc7b970b4bbb0e4b9ae873dcd97148ed517",
+  "prompts": {
+    "0000019f8db3ce05": {
+      "agent_id": {
+        "id": "ai-thread-codex-gpt-5.6-sol-1784788798981",
+        "tool": "codex",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "litianyi",
+      "messages": [],
+      "total_additions": 1440,
+      "total_deletions": 0,
+      "accepted_lines": 1440,
+      "overriden_lines": 0
+    }
+  }
+}
