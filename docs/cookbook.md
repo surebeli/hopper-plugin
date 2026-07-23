@@ -103,12 +103,14 @@ hopper-dispatch --watch-events --once
 Expected event:
 
 ```json
-{"type":"hopper.task.terminal","task_id":"T-PROG-LONG","status":"done"}
+{"type":"hopper.task.terminal","task_id":"T-PROG-LONG","status":"done","recovered_output":false,"recovered_output_state":"no-text","recovered_output_source":"none"}
 ```
 
 ### Notes
 
 Claude Code loads `monitors/monitors.json` from the plugin root and forwards watcher stdout lines to the session. Standalone and Codex CLI paths can keep `--watch-events` running for stdout JSONL plus best-effort OS toast. Set `HOPPER_NOTIFY=0` to disable OS toast without disabling JSONL.
+
+Terminal events expose only the closed recovered-output projection: `recovered_output`, `recovered_output_state`, and `recovered_output_source`. If a failed event has `recovered_output: true`, it remains failed; fetch parser-designated text and state-specific guidance with `hopper-dispatch --result <task-id> --full`. Do not use a raw log as a result source.
 
 ## Recipe 4 - Watch progress in the dashboard
 
@@ -322,6 +324,7 @@ Claude Code users get this automatically: the bundled monitor (`monitors/monitor
 ### Notes
 
 - `--resolve` / `--check` / `--status` / `--capabilities` / `--models` / `--check-model` are all **zero-spawn** read-only commands. Use them freely to confirm routing *before* committing a real dispatch — this is the `--dry-run` workflow.
+- If `--result` shows `Status: failed` alongside recovered output, the task is still failed. Read only its parser-designated content with `hopper-dispatch --result <task-id> --full`; `verified-complete` has a parser terminal marker but still requires a manual decision, while `unknown-completeness` is advisory and needs independent verification. If it is `no-text`, use the public diagnostic and create a separate task explicitly if needed. Never derive findings from the protected raw `.log`.
 - The dispatched vendor is anchored to the repo root that owns `.hopper/` (retro #3 fix). You never need to `cd` into the plugin's CLI directory; run from your project or set `HOPPER_DIR=/path/to/project/.hopper`.
 - Real dispatch defaults to `--sandbox danger-full-access` for the vendor so implementation tasks can modify files. Hopper automatically uses `read-only` only when the queue brief or detailed task spec explicitly says `read-only` / `只读`; pass `--sandbox <mode>` to override for a single dispatch.
 - **Vendor needs to read a path OUTSIDE the repo** (external test evidence, a sibling repo)? The vendor's own sandbox enforces this — e.g. opencode's `external_directory` permission defaults to `ask` and is denied in headless mode. Two ways to handle it without disabling the vendor's permission model:

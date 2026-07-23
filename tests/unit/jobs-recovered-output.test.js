@@ -47,6 +47,13 @@ test('T6: --jobs preserves failed status while appending recovered terminal advi
       recoveredOutputState: 'unknown-completeness',
       recoveredOutputSource: 'event-stream',
     });
+    writeTask(handoffs, {
+      id: 'T-VERIFIED',
+      status: 'failed',
+      recoveredOutput: true,
+      recoveredOutputState: 'verified-complete',
+      recoveredOutputSource: 'event-stream',
+    });
     writeTask(handoffs, { id: 'T-NO-TEXT', status: 'failed' });
     writeTask(handoffs, { id: 'T-IN-PROGRESS', status: 'in-progress', pid: process.pid });
 
@@ -58,6 +65,8 @@ test('T6: --jobs preserves failed status while appending recovered terminal advi
     assert.match(result.stdout, /T-IN-PROGRESS/);
     assert.match(result.stdout, /Recovered terminal output:/);
     assert.match(result.stdout, /T-RECOVERED\s+status: failed; recovered-output: unknown-completeness \(advisory\)/);
+    assert.match(result.stdout, /T-VERIFIED\s+status: failed; recovered-output: verified-complete \(parser terminal marker; task remains failed\)/);
+    assert.match(result.stdout, /Next steps: each listed task remains failed\. Read only its parser-designated text with `hopper-dispatch --result <task-id> --full`; unknown-completeness is advisory and must be independently verified\. Do not derive findings from raw \.log diagnostics\./);
     assert.doesNotMatch(result.stdout, /T-NO-TEXT\s+status: failed; recovered-output/);
     assert.doesNotMatch(result.stdout, /failed-with-recovered-output/);
   } finally { rmSync(root, { recursive: true, force: true }); }

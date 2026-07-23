@@ -126,6 +126,63 @@ test('T6: --result --full presents recovered failed output without disclosing it
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('T8: --result front-loads failed recovered-output handling without suggesting raw-log recovery', () => {
+  const { root, hopper, id } = setupTask({
+    withSidecar: true,
+    sidecarText: 'SAFE_SIDECAR_TEXT',
+    status: 'failed',
+    recoveredOutput: true,
+    recoveredOutputState: 'unknown-completeness',
+    recoveredOutputSource: 'event-stream',
+  });
+  try {
+    writeFileSync(join(hopper, 'handoffs', `${id}-output.log`), 'RAW_LOG_PRIVATE C:\\PRIVATE', 'utf-8');
+    const result = spawnSync(process.execPath, [BIN, '--result', id], {
+      encoding: 'utf8', env: { ...process.env, HOPPER_DIR: hopper },
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stdout, /Next steps for failed task:/);
+    assert.match(result.stdout, /This task remains failed; do not mark it done or report it as successful\./);
+    assert.match(result.stdout, new RegExp(`hopper-dispatch --result ${id} --full`));
+    assert.match(result.stdout, /unknown-completeness means the recovered text may be incomplete: treat it only as advisory and independently verify findings before acting\./);
+    assert.match(result.stdout, /Do not derive findings from the protected raw \.log or other diagnostics\./);
+    assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /RAW_LOG_PRIVATE|C:\\PRIVATE/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T8: --result distinguishes a verified-complete failed recovery from advisory output', () => {
+  const { root, hopper, id } = setupTask({
+    withSidecar: true,
+    sidecarText: 'SAFE_SIDECAR_TEXT',
+    status: 'failed',
+    recoveredOutput: true,
+    recoveredOutputState: 'verified-complete',
+    recoveredOutputSource: 'event-stream',
+  });
+  try {
+    const result = spawnSync(process.execPath, [BIN, '--result', id], {
+      encoding: 'utf8', env: { ...process.env, HOPPER_DIR: hopper },
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stdout, /Recovered output:\s+verified-complete \(parser terminal marker; task remains failed\)/);
+    assert.match(result.stdout, /verified-complete confirms a parser terminal marker, but the adapter failure remains; assess the text manually and make any follow-up dispatch explicit\./);
+    assert.doesNotMatch(result.stdout, /may be incomplete: treat it only as advisory/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T8: --result directs failed no-text records to a separate explicit task', () => {
+  const { root, hopper, id } = setupTask({ withSidecar: false, status: 'failed' });
+  try {
+    const result = spawnSync(process.execPath, [BIN, '--result', id], {
+      encoding: 'utf8', env: { ...process.env, HOPPER_DIR: hopper },
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stdout, /No safe parser-designated output was recovered\./);
+    assert.match(result.stdout, /Use the public adapter diagnostic to troubleshoot, then create and dispatch a separate task explicitly if the work is still needed\./);
+    assert.match(result.stdout, /Do not derive findings from the protected raw \.log or other diagnostics\./);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('T1: --result safely renders an unknown frontmatter status without throwing', () => {
   const { root, hopper, id } = setupTask({ withSidecar: false });
   try {

@@ -16,6 +16,8 @@ Use progress commands for background-dispatched Hopper tasks. These commands rea
 5. To stream terminal events across tasks, run `hopper-dispatch --watch-events`; add `--once` only for scripts or when the user asks for one event.
 6. Report status, phase, elapsed time, last progress text, output paths, and terminal event details.
 
+When a terminal event carries `recovered_output: true`, report its closed `recovered_output_state` and `recovered_output_source`, while keeping the terminal status unchanged. For a failed task, retrieve only parser-designated text and the state-specific action guidance with `hopper-dispatch --result <task-id> --full`; do not use raw logs as a result source.
+
 ## Safety
 
 - Do not poll faster than needed; for waiting users, about every 10 seconds is enough.

@@ -240,14 +240,49 @@ test('two --watch-events subscribers both receive terminal event JSONL', async (
       assert.equal(event.vendor, 'codex');
       assert.equal(event.seq, 1);
       assert.match(event.at, /^\d{4}-\d{2}-\d{2}T/);
-      assert.deepEqual(Object.keys(event).sort(), ['adapter_diagnostic_code', 'at', 'phase', 'seq', 'status', 'task_id', 'type', 'vendor']);
+      assert.deepEqual(Object.keys(event).sort(), ['adapter_diagnostic_code', 'at', 'phase', 'recovered_output', 'recovered_output_source', 'recovered_output_state', 'seq', 'status', 'task_id', 'type', 'vendor']);
       assert.equal(event.adapter_diagnostic_code, 'none');
+      assert.equal(event.recovered_output, false);
+      assert.equal(event.recovered_output_state, 'no-text');
+      assert.equal(event.recovered_output_source, 'none');
     }
     assert.equal(await waitForExit(first.child), 0, first.stderr());
     assert.equal(await waitForExit(second.child), 0, second.stderr());
   } finally {
     if (first) stop(first.child);
     if (second) stop(second.child);
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('--watch-events forwards only the closed recovered-output projection', async () => {
+  const { tmp, hopperDir } = setup();
+  const taskId = 'T-WATCH-RECOVERED';
+  const rawSentinel = 'WATCH_EVENTS_RAW_SECRET_C:\\private\\output.log';
+  let watcher;
+  try {
+    writeTask(hopperDir, taskId);
+    writeFileSync(join(hopperDir, 'handoffs', `${taskId}-output.log`), rawSentinel, 'utf-8');
+    watcher = spawnWatchEvents(hopperDir);
+
+    await delay(800);
+    markTerminal(hopperDir, taskId, 'failed', 2, {
+      recovered_output: true,
+      recovered_output_state: 'unknown-completeness',
+      recovered_output_source: 'event-stream',
+    });
+
+    const line = await waitFor(() => watcher.lines[0], 'recovered terminal JSONL');
+    const event = JSON.parse(line);
+    assert.equal(event.status, 'failed');
+    assert.equal(event.recovered_output, true);
+    assert.equal(event.recovered_output_state, 'unknown-completeness');
+    assert.equal(event.recovered_output_source, 'event-stream');
+    assert.doesNotMatch(JSON.stringify(event), new RegExp(rawSentinel));
+    assert.doesNotMatch(JSON.stringify(event), /output\.log|terminalMarker|prompt/i);
+    assert.equal(await waitForExit(watcher.child), 0, watcher.stderr());
+  } finally {
+    if (watcher) stop(watcher.child);
     rmSync(tmp, { recursive: true, force: true });
   }
 });

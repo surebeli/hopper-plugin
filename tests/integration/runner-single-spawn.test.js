@@ -932,6 +932,10 @@ test('hopper-runner preserves parser-designated partial OpenCode output after a 
     assert.match(markdown, /Vendor output \(recovered; evidence: unknown-completeness\)/);
     assert.match(markdown, /SAFE_PARTIAL/);
     assert.match(markdown, /advisory/);
+    assert.match(markdown, /## Failure-action guidance \(auto-generated\)/);
+    assert.match(markdown, /This task remains failed; do not mark it done or report it as successful\./);
+    assert.match(markdown, /unknown-completeness means the recovered text may be incomplete: treat it only as advisory and independently verify findings before acting\./);
+    assert.match(markdown, /Do not derive findings from the protected raw \.log or other diagnostics\./);
     assert.doesNotMatch(markdown, /RAW_DIAGNOSTIC_SENTINEL_MUST_NOT_RECOVER/);
     // Task 5 attestation projections must not expose parser markers or raw
     // diagnostics. The existing output.md log reference is retained until the

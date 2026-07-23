@@ -51,6 +51,18 @@ node "$CLAUDE_PLUGIN_ROOT/cli/bin/hopper-dispatch" --result "<validated-task-id>
 
 For research / market results (usually long), prefer `--full` by default so the user sees the complete parser-designated brief. The inline preview cap can also be raised globally with `HOPPER_OUTPUT_PREVIEW_MAX=<chars>`.
 
+## Failed task with recovered output
+
+When `Status: failed` is paired with a recovered-output label, Hopper has preserved only parser-designated text. It has **not** converted the task into a successful dispatch.
+
+1. Keep the task failed; do not mark it done or report it as successful.
+2. Read the safe text only through `hopper-dispatch --result <task-id> --full`.
+3. For `verified-complete`, the parser observed a terminal marker. Review the text for a manual decision, while retaining the adapter failure and making any follow-up dispatch explicit.
+4. For `unknown-completeness`, the text may be partial. Treat it as advisory and independently verify findings before acting or closing work.
+5. For `no-text`, use the public adapter diagnostic to troubleshoot, then create a separate task explicitly if the work is still needed.
+
+Never derive findings from the protected raw `.log` or other diagnostics. They are not an output source and may contain protocol fragments, prompts, paths, or error material.
+
 ## Exit code handling
 
 - **Exit 0**: task is `done` (success). Surface the full output to the user.
@@ -65,7 +77,10 @@ The CLI prints the closed attestation first, then parser-designated output when 
 === <task-id> — <STATUS> ===
 Vendor:    <vendor>
 Status:    <status>
-Recovered output: <none|state (advisory)>
+Recovered output: <none|unknown-completeness (advisory)|verified-complete (parser terminal marker; task remains failed)>
+
+Next steps for failed task:
+<safe state-specific handling; task remains failed>
 
 --- FULL OUTPUT (sidecar) ---
 <parser-designated verdict + findings, when present>

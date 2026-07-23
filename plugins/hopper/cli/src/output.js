@@ -354,6 +354,43 @@ export function renderVendorOutputSection(text, {
 }
 
 /**
+ * Render the closed, reader-facing action boundary for a failed background
+ * task. This deliberately contains no vendor body, raw log, path, or parser
+ * protocol data; those remain outside the public result surface.
+ *
+ * @param {object} [opts]
+ * @param {string} [opts.status]
+ * @param {boolean} [opts.recovered]
+ * @param {'verified-complete'|'unknown-completeness'|'no-text'} [opts.evidenceState]
+ * @param {string} [opts.taskId]
+ * @returns {string} a leading-newline markdown block, or empty for non-failures
+ */
+export function renderFailureActionGuidance({
+  status,
+  recovered = false,
+  evidenceState = 'no-text',
+  taskId,
+} = {}) {
+  if (status !== 'failed') return '';
+  const safeTaskId = typeof taskId === 'string' && taskId.trim() ? sanitizeInline(taskId) : '<taskId>';
+  let stateAction;
+  if (!recovered || evidenceState === 'no-text') {
+    stateAction = '- No safe parser-designated output was recovered.\n' +
+      '- Use the public adapter diagnostic to troubleshoot, then create and dispatch a separate task explicitly if the work is still needed.\n';
+  } else if (evidenceState === 'verified-complete') {
+    stateAction = `- Read only the parser-designated output with \`hopper-dispatch --result ${safeTaskId} --full\`.\n` +
+      '- verified-complete confirms a parser terminal marker, but the adapter failure remains; assess the text manually and make any follow-up dispatch explicit.\n';
+  } else {
+    stateAction = `- Read only the parser-designated output with \`hopper-dispatch --result ${safeTaskId} --full\`.\n` +
+      '- unknown-completeness means the recovered text may be incomplete: treat it only as advisory and independently verify findings before acting.\n';
+  }
+  return '\n## Failure-action guidance (auto-generated)\n\n' +
+    '- This task remains failed; do not mark it done or report it as successful.\n' +
+    stateAction +
+    '- Do not derive findings from the protected raw .log or other diagnostics.\n';
+}
+
+/**
  * Generate the suggested queue.md edit (status flip + activity log entry).
  * Pure function exported for testability.
  */

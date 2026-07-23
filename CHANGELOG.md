@@ -19,6 +19,12 @@ convention: any user-observable behavior change (new capability, fixed defect,
 changed default) bumps minor; patch is reserved for the rare non-functional
 tweak.
 
+## [0.35.1] - 2026-07-24
+
+### Improved
+
+- Failed task views now front-load the next safe action when parser-designated vendor text was recovered. The task remains `failed`; users are directed to the guarded result surface rather than raw logs.
+
 ## [0.35.0] - 2026-07-23
 
 ### Fixed

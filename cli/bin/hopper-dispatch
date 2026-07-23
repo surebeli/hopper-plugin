@@ -57,7 +57,7 @@ import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
-const VERSION = '0.35.0';
+const VERSION = '0.35.1';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -100,7 +100,7 @@ function printUsage() {
   console.log('                                                  backlog is baselined (NOT replayed) so a (re)started watcher does not');
   console.log('                                                  re-fire history. --once: emit the first event then exit. --replay: also');
   console.log('                                                  emit the existing terminal backlog on start (the pre-fix behavior).');
-  console.log('  hopper-dispatch --result <task-id> [--full]     Print a closed completed-task result; --full is the parser-designated output sidecar boundary');
+  console.log('  hopper-dispatch --result <task-id> [--full]     Print a closed task result; failed recovered output remains failed and prints next steps');
   console.log('  hopper-dispatch --jobs                          List all in-progress background jobs');
   console.log('  hopper-dispatch --reap                          Re-classify stale (>24h or dead-PID) jobs as orphaned');
   console.log('  hopper-dispatch --archive [--older-than <days>] [--keep <N>] [--only-status <s,..>] [--dry-run]');
@@ -1168,8 +1168,9 @@ function runJobsList(hopperDir) {
     console.log('');
     console.log('Recovered terminal output:');
     for (const record of recoveredTerminalRecords) {
-      console.log(`${record.taskId}  status: ${record.displayStatus}; recovered-output: ${record.recoveredOutput.state} (advisory)`);
+      console.log(`${record.taskId}  status: ${record.displayStatus}; recovered-output: ${formatRecoveredOutputLabel(record.recoveredOutput)}`);
     }
+    console.log('Next steps: each listed task remains failed. Read only its parser-designated text with `hopper-dispatch --result <task-id> --full`; unknown-completeness is advisory and must be independently verified. Do not derive findings from raw .log diagnostics.');
   }
 }
 
@@ -1294,9 +1295,7 @@ function renderPublicAttestation(record, { title }) {
   console.log(`Phase:              ${record.phase}`);
   console.log(`Adapter diagnostic: ${record.adapterDiagnosticCode}`);
   const recovery = record.recoveredOutput;
-  const recoveryLabel = recovery.recovered
-    ? `${recovery.state} (advisory)`
-    : 'none';
+  const recoveryLabel = formatRecoveredOutputLabel(recovery);
   console.log(`Recovered output: ${recoveryLabel}`);
   console.log(`Requested selector: ${record.selector.requested ?? 'n/a'}`);
   console.log(`Effective selector: ${record.selector.effective ?? 'n/a'}`);
@@ -1312,6 +1311,37 @@ function renderPublicAttestation(record, { title }) {
   for (const event of record.recentEvents) {
     console.log(`  #${event.seq ?? '?'} ${event.phase}/${event.kind}${event.terminal ? ' terminal' : ''} status=${event.status}`);
   }
+}
+
+function formatRecoveredOutputLabel(recovery) {
+  if (!recovery?.recovered) return 'none';
+  if (recovery.state === 'verified-complete') return 'verified-complete (parser terminal marker; task remains failed)';
+  return `${recovery.state} (advisory)`;
+}
+
+/**
+ * Tell the operator how to handle a terminal failure without promoting
+ * parser-recovered text or inviting inspection of protected raw diagnostics.
+ * This is presentation-only: terminal status and exit-code policy stay intact.
+ */
+function renderFailedTaskGuidance(record) {
+  if (record.displayStatus !== 'failed') return;
+  const recovery = record.recoveredOutput || { recovered: false, state: 'no-text' };
+  console.log('');
+  console.log('Next steps for failed task:');
+  console.log('  - This task remains failed; do not mark it done or report it as successful.');
+  if (!recovery.recovered || recovery.state === 'no-text') {
+    console.log('  - No safe parser-designated output was recovered.');
+    console.log('  - Use the public adapter diagnostic to troubleshoot, then create and dispatch a separate task explicitly if the work is still needed.');
+  } else {
+    console.log(`  - Read only the parser-designated output with \`hopper-dispatch --result ${record.taskId} --full\`.`);
+    if (recovery.state === 'verified-complete') {
+      console.log('  - verified-complete confirms a parser terminal marker, but the adapter failure remains; assess the text manually and make any follow-up dispatch explicit.');
+    } else {
+      console.log('  - unknown-completeness means the recovered text may be incomplete: treat it only as advisory and independently verify findings before acting.');
+    }
+  }
+  console.log('  - Do not derive findings from the protected raw .log or other diagnostics.');
 }
 
 const TERMINAL_TASK_STATUSES = new Set(['done', 'failed', 'timeout', 'cancelled', 'orphaned']);
@@ -1358,6 +1388,9 @@ function terminalPayload(hopperDir, outputMdPath, fm) {
     seq: Number.isInteger(fm.progress_seq) ? fm.progress_seq : null,
     at: new Date().toISOString(),
     adapter_diagnostic_code: record.adapterDiagnosticCode,
+    recovered_output: record.recoveredOutput.recovered,
+    recovered_output_state: record.recoveredOutput.state,
+    recovered_output_source: record.recoveredOutput.source,
   };
 }
 
@@ -1506,6 +1539,7 @@ function runResult(hopperDir, taskId, { full = false } = {}) {
   // Terminal, crash-window, and unknown records all render safely from the
   // same event-first snapshot as --progress; only a true in-progress task exits 2.
   renderPublicAttestation(canonical.public, { title: `${taskId} — ${canonical.displayStatus.toUpperCase()}` });
+  renderFailedTaskGuidance(canonical.public);
   if (!full) {
     console.log('Parser-designated output is available only with `--full`.');
     process.exit(canonical.displayStatus === 'done' ? 0 : 1);

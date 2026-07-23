@@ -19,7 +19,7 @@ import { finalizeTerminalAttestation } from '../src/handoff-attestation.js';
 import { getAdapter } from '../src/vendors/index.js';
 import { acquireVendorLock, killProcessTree, resolveDispatchTimeouts, chunkHasSubstantiveLine } from '../src/subprocess.js';
 import { resolveCommandOnPath, resolveCommandWithKnownPaths } from '../src/path-resolve.js';
-import { renderVendorOutputSection, writeRunnerSidecar } from '../src/output.js';
+import { renderVendorOutputSection, renderFailureActionGuidance, writeRunnerSidecar } from '../src/output.js';
 import { noTextOutputEvidence, selectTerminalOutput } from '../src/output-evidence.js';
 import { adapterDiagnostic, publicAdapterDiagnostic } from '../src/adapter-diagnostics.js';
 import { prepareSubjectRootGuard, wrapSubjectRootInvocation } from '../src/subject-root-guard.js';
@@ -637,6 +637,12 @@ async function main() {
               evidenceState: selectedOutput.outputEvidence.completeness,
               taskId,
               rawLogName: logPath.split(/[\\/]/).pop(),
+            }) +
+            renderFailureActionGuidance({
+              status,
+              recovered: selectedOutput.recoveredOutput,
+              evidenceState: selectedOutput.outputEvidence.completeness,
+              taskId,
             }) +
             `\n## Status (background completion)\n` +
             `- queue_status: ${status}\n` +
