@@ -1,0 +1,37 @@
+cli/bin/hopper-dispatch
+  0000019f8dec16f1 1-2137
+commands/setup.md
+  0000019f8dec16f1 1-42
+hosts/grok-cli/README.md
+  0000019f8dec16f1 1-77
+hosts/grok-cli/bin/hopper-grok
+  0000019f8dec16f1 1-153
+plugins/hopper/skills/hopper-setup/SKILL.md
+  0000019f8dec16f1 1-27
+skills/hopper-setup/SKILL.md
+  0000019f8dec16f1 1-27
+tests/unit/extra-hosts.test.js
+  0000019f8dec16f1 1-208
+tests/unit/setup.test.js
+  0000019f8dec16f1 1-279
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "11d6c7d3df4246cd83a91f701a14da02ca5f329e",
+  "prompts": {
+    "0000019f8dec16f1": {
+      "agent_id": {
+        "tool": "codex",
+        "model": "gpt-5.6-sol",
+        "id": "ai-thread-codex-gpt-5.6-sol-1784792487665"
+      },
+      "human_author": "litianyi",
+      "messages": [],
+      "total_additions": 2950,
+      "total_deletions": 0,
+      "accepted_lines": 2950,
+      "overriden_lines": 0
+    }
+  }
+}
