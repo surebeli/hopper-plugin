@@ -240,7 +240,7 @@ test('6c-followup --result: default output is private and --full explicitly rele
   assert.ok(!result.stdout.includes('fakevendor'), `must not expose unverified adapter: ${result.stdout}`);
   assert.ok(!result.stdout.includes('## Verdict: PASS'), `must not print output.md body by default: ${result.stdout}`);
   assert.ok(!result.stdout.includes('vendor stdout line 1'), `must not print log tail by default: ${result.stdout}`);
-  assert.match(result.stdout, /Raw output is available only with `--full`\./, 'must name the explicit raw-output boundary');
+  assert.match(result.stdout, /Parser-designated output is available only with `--full`\./, 'must name the parser-designated output boundary');
 
   const full = spawnSync(process.execPath, [dispatchBin, '--result', taskId, '--full'], {
     env: { ...process.env, HOPPER_DIR: tmp },
@@ -248,7 +248,7 @@ test('6c-followup --result: default output is private and --full explicitly rele
   });
   assert.equal(full.status, 0, `--result --full should exit 0 for status=done; got ${full.status}; stderr: ${full.stderr}`);
   assert.match(full.stdout, /## Verdict: PASS/, 'must print output.md body after explicit opt-in');
-  assert.match(full.stdout, /vendor stdout line 1/, 'must print log tail after explicit opt-in');
+  assert.doesNotMatch(full.stdout, /vendor stdout line 1/, 'must never print raw log bytes, even after explicit opt-in');
 });
 
 test('6c-followup --result: in-progress task exits 2 with watch hint', async (t) => {

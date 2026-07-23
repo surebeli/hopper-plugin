@@ -67,8 +67,8 @@ test('grok parseResult: stopReason "Cancelled" is a failure, not silent success'
     durationMs: 100,
   });
   assert.notEqual(r.status, 'success');
-  assert.match(r.error, /no usable result/i);
-  assert.match(r.error, /Cancelled/);
+  assert.equal(r.error, 'adapter-protocol-invalid');
+  assert.equal(r.diagnosticCode, 'adapter-protocol-invalid');
 });
 
 test('grok parseResult: valid trailing JSON succeeds despite unrelated MCP authentication warning', () => {
@@ -89,8 +89,10 @@ test('grok parseResult: valid trailing JSON succeeds despite unrelated MCP authe
     timedOut: false,
     durationMs: 100,
   });
-  assert.equal(citationTail.status, 'success');
-  assert.equal(citationTail.text, 'Answer\n[1] citation');
+  assert.equal(citationTail.status, 'unknown-fail');
+  assert.equal(citationTail.text, '');
+  assert.equal(citationTail.error, 'adapter-protocol-invalid');
+  assert.equal(citationTail.diagnosticCode, 'adapter-protocol-invalid');
 });
 
 test('grok parseResult: exit 0 cancelled empty result plus auth warning remains auth-fail', () => {

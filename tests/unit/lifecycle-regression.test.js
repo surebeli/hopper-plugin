@@ -142,7 +142,12 @@ test('opencode rejects a tool_calls step boundary with only partial text', () =>
   assert.equal(result.status, 'unknown-fail');
   assert.equal(result.diagnosticCode, 'adapter-protocol-invalid');
   assert.equal(result.error, 'adapter-protocol-invalid');
-  assert.equal(result.text, '');
+  assert.equal(result.text, 'PARTIAL_TOOL_TEXT');
+  assert.deepEqual(result.outputEvidence, {
+    completeness: 'unknown-completeness',
+    source: 'event-stream',
+    terminalMarker: 'none',
+  });
 });
 
 test('opencode rejects explicit error and cancelled result envelopes', () => {
@@ -162,7 +167,12 @@ test('opencode rejects explicit error and cancelled result envelopes', () => {
     assert.equal(result.status, 'unknown-fail', JSON.stringify(envelope));
     assert.equal(result.diagnosticCode, 'adapter-protocol-invalid');
     assert.equal(result.error, 'adapter-protocol-invalid');
-    assert.equal(result.text, '');
+    assert.equal(result.text, envelope.result);
+    assert.deepEqual(result.outputEvidence, {
+      completeness: 'unknown-completeness',
+      source: 'event-stream',
+      terminalMarker: 'none',
+    });
   }
 });
 
@@ -178,7 +188,12 @@ test('opencode does not report exit 0 with no completion evidence as success', (
   assert.equal(result.status, 'unknown-fail');
   assert.equal(result.diagnosticCode, 'adapter-protocol-invalid');
   assert.equal(result.error, 'adapter-protocol-invalid');
-  assert.equal(result.text, '');
+  assert.equal(result.text, 'partial');
+  assert.deepEqual(result.outputEvidence, {
+    completeness: 'unknown-completeness',
+    source: 'event-stream',
+    terminalMarker: 'none',
+  });
 });
 
 test('opencode does not treat an empty clean exit as a successful task', () => {
