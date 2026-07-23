@@ -1,0 +1,37 @@
+cli/src/setup.js
+  0000019f8dbebea5 1-344
+cli/src/types.js
+  0000019f8dbebea5 1-138
+cli/src/vendors/grok.js
+  0000019f8dbebea5 1-308
+cli/src/vendors/index.js
+  0000019f8dbebea5 1-162
+tests/unit/discovery.test.js
+  0000019f8dbebea5 1-326
+tests/unit/setup.test.js
+  0000019f8dbebea5 1-254
+tests/unit/vendor-model-auth.test.js
+  0000019f8dbebea5 1-195
+tests/unit/vendors-contract.test.js
+  0000019f8dbebea5 1-776
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "18c0610d8a55161e4b2a2cccb0b23842e22fa327",
+  "prompts": {
+    "0000019f8dbebea5": {
+      "agent_id": {
+        "model": "gpt-5.6-sol",
+        "id": "ai-thread-codex-gpt-5.6-sol-1784789515941",
+        "tool": "codex"
+      },
+      "human_author": "litianyi",
+      "messages": [],
+      "total_additions": 2503,
+      "total_deletions": 0,
+      "accepted_lines": 2503,
+      "overriden_lines": 0
+    }
+  }
+}
