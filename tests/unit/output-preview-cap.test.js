@@ -30,8 +30,10 @@ test('T1: effectivePreviewLimit defaults to base, is raised by HOPPER_OUTPUT_PRE
 test('T1: renderVendorOutputSection truncates at the default cap, but fits the whole text under a raised cap', () => {
   const long = 'x'.repeat(VENDOR_OUTPUT_PREVIEW_LIMIT + 500);
 
-  const truncated = renderVendorOutputSection(long, { rawLogName: 't.log' });
+  const truncated = renderVendorOutputSection(long, { taskId: 'T-preview', rawLogName: 't.log' });
   assert.match(truncated, /preview \d+\/\d+ chars/, 'shows a preview note when truncated');
+  assert.match(truncated, /complete parsed output/i, 'never labels the retrieval path as a raw stream');
+  assert.doesNotMatch(truncated, /full raw stream/i);
   assert.ok(!truncated.includes(long), 'full text NOT present inline at the default cap');
 
   withEnv('HOPPER_OUTPUT_PREVIEW_MAX', String(VENDOR_OUTPUT_PREVIEW_LIMIT + 2000), () => {
@@ -41,13 +43,13 @@ test('T1: renderVendorOutputSection truncates at the default cap, but fits the w
   });
 });
 
-test('T1: writeRunnerSidecar writes the COMPLETE text past the cap, else null (background --full source)', () => {
+test('T1: writeRunnerSidecar writes only supplied parser-designated text past the cap, else null', () => {
   const dir = mkdtempSync(join(tmpdir(), 'hopper-sidecar-'));
   try {
-    const long = 'Z'.repeat(VENDOR_OUTPUT_PREVIEW_LIMIT + 100);
+    const long = 'PARSER_DESIGNATED_'.repeat(500);
     const p = writeRunnerSidecar(join(dir, 'T-X-output.md'), long);
     assert.ok(p && p.endsWith('T-X-output-raw.txt'), 'returns the sidecar path');
-    assert.equal(readFileSync(p, 'utf-8'), long, 'sidecar holds the COMPLETE text (untruncated)');
+    assert.equal(readFileSync(p, 'utf-8'), long, 'sidecar holds only the supplied parser-designated text (untruncated)');
 
     // short / empty text → no sidecar
     assert.equal(writeRunnerSidecar(join(dir, 'T-Y-output.md'), 'short'), null);

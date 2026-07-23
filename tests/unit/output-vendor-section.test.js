@@ -18,6 +18,30 @@ test('HOPPER-5: renders the parsed vendor text under a distinct heading', () => 
   assert.doesNotMatch(md, /## Vendor output text/);
 });
 
+test('recovered parser-designated text declares verified-complete evidence without changing its body', () => {
+  const md = renderVendorOutputSection('SAFE_VERIFIED', {
+    recovered: true,
+    evidenceState: 'verified-complete',
+    taskId: 'T-verified',
+    rawLogName: 'T-verified-output.log',
+  });
+  assert.match(md, /## Vendor output \(recovered; evidence: verified-complete\)/);
+  assert.match(md, /SAFE_VERIFIED/);
+  assert.doesNotMatch(md, /advisory/i);
+});
+
+test('recovered parser-designated text with unknown completeness is advisory', () => {
+  const md = renderVendorOutputSection('SAFE_PARTIAL', {
+    recovered: true,
+    evidenceState: 'unknown-completeness',
+    taskId: 'T-partial',
+    rawLogName: 'T-partial-output.log',
+  });
+  assert.match(md, /## Vendor output \(recovered; evidence: unknown-completeness\)/);
+  assert.match(md, /SAFE_PARTIAL/);
+  assert.match(md, /This parser-designated text may be incomplete and is advisory; the task remains failed\./);
+});
+
 test('HOPPER-5: empty/whitespace text yields a "no parsed text" note pointing at the log', () => {
   for (const t of ['', '   \n  ', null, undefined]) {
     const md = renderVendorOutputSection(t, { rawLogName: 'T-Y-output.log' });
@@ -27,12 +51,13 @@ test('HOPPER-5: empty/whitespace text yields a "no parsed text" note pointing at
   }
 });
 
-test('HOPPER-5: long text is previewed with a truncation note pointing at the raw log', () => {
+test('HOPPER-5: long text is previewed with a parsed-output retrieval note', () => {
   const big = 'x'.repeat(VENDOR_OUTPUT_PREVIEW_LIMIT + 500);
-  const md = renderVendorOutputSection(big, { rawLogName: 'T-Z-output.log' });
+  const md = renderVendorOutputSection(big, { taskId: 'T-Z', rawLogName: 'T-Z-output.log' });
   assert.match(md, /preview \d+\/\d+ chars/);
-  assert.match(md, /full raw stream/i);
-  assert.match(md, /T-Z-output\.log/);
+  assert.match(md, /complete parsed output/i);
+  assert.match(md, /hopper-dispatch --result T-Z --full/);
+  assert.doesNotMatch(md, /full raw stream/i);
   // Body must be truncated, not the whole blob.
   assert.ok(md.length < big.length + 500);
 });

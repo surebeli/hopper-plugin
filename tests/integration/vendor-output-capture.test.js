@@ -70,6 +70,7 @@ test('HOPPER-5: runner mirrors the parsed vendor answer into output.md body', { 
     const md = readFileSync(outputMdPath, 'utf-8');
     assert.match(md, /## Vendor output \(parsed\)/, 'output.md must contain the parsed vendor section');
     assert.match(md, /HOPPER5_SENTINEL verdict=PASS/, 'output.md must embed the vendor answer');
+    assert.doesNotMatch(md, /\{"type":"text"/, 'Markdown body must contain the parser answer, not a protocol event dump');
     // The section appears BEFORE the runner status footer so --result surfaces it.
     assert.ok(
       md.indexOf('## Vendor output (parsed)') < md.indexOf('## Status (background completion)'),

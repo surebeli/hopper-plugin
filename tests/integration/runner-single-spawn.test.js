@@ -49,7 +49,7 @@ const RUNNER_PATH = join(REPO_ROOT, 'cli', 'bin', 'hopper-runner');
  * codex.bat per PATHEXT. We write codex.cmd on Win, plain codex (chmod +x)
  * on Unix.
  */
-async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, killCounterFile = null, exitCode = 0, sleepMs = 0, extraEnv = {}, subjectRoot = null, adapterOpts = null, subjectWritePath = null, subjectLinkSource = null, subjectLinkAlias = null }) {
+async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, killCounterFile = null, exitCode = 0, sleepMs = 0, extraEnv = {}, subjectRoot = null, adapterOpts = null, subjectWritePath = null, subjectLinkSource = null, subjectLinkAlias = null, vendorOutputLines = null }) {
   const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-fake-'));
   try {
     const isWin = platform() === 'win32';
@@ -65,9 +65,11 @@ async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, killCou
       const file = ${JSON.stringify(counterFile)};
       const cur = fs.existsSync(file) ? parseInt(fs.readFileSync(file, 'utf-8')) : 0;
       fs.writeFileSync(file, String(cur + 1));
-      console.log(JSON.stringify({ type: 'text', part: { type: 'text', text: 'FAKE_VENDOR_OK invocation ' + (cur + 1) } }));
+      ${vendorOutputLines
+    ? `for (const line of ${JSON.stringify(vendorOutputLines)}) console.log(line);`
+    : `console.log(JSON.stringify({ type: 'text', part: { type: 'text', text: 'FAKE_VENDOR_OK invocation ' + (cur + 1) } }));
       console.log(JSON.stringify({ type: 'step_finish', part: { type: 'step-finish', reason: 'stop' } }));
-      console.log('FAKE_VENDOR_OK invocation ' + (cur + 1));
+      console.log('FAKE_VENDOR_OK invocation ' + (cur + 1));`}
       ${subjectWritePath ? `try { fs.writeFileSync(${JSON.stringify(subjectWritePath)}, 'blocked'); } catch {}` : ''}
       ${subjectLinkSource ? `fs.linkSync(${JSON.stringify(subjectLinkSource)}, ${JSON.stringify(subjectLinkAlias)});` : ''}
       const sleepMs = ${sleepMs};
@@ -131,7 +133,7 @@ async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, killCou
     };
 
     // Run runner synchronously (not detached — this is a test)
-    await new Promise((resolveP, rejectP) => {
+    const result = await new Promise((resolveP, rejectP) => {
       const child = spawn(process.execPath, [
         RUNNER_PATH,
         '--task-id', taskId,
@@ -149,11 +151,11 @@ async function runRunnerWithFakeVendor({ taskId, hopperDir, counterFile, killCou
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       const timer = setTimeout(() => { child.kill('SIGKILL'); rejectP(new Error('runner timeout')); }, 15000);
-      child.on('exit', () => { clearTimeout(timer); resolveP(); });
+      child.on('exit', (code, signal) => { clearTimeout(timer); resolveP({ code, signal }); });
       child.on('error', (err) => { clearTimeout(timer); rejectP(err); });
     });
 
-    return { outputMdPath, logPath };
+    return { outputMdPath, logPath, result };
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -888,13 +890,64 @@ test('codex spawn error closes runner outputs and releases its serialized lock b
   }
 });
 
-test('hopper-runner never renders parsed vendor text after a failed adapter classification', () => {
-  const runner = readFileSync(RUNNER_PATH, 'utf-8');
-  assert.match(
-    runner,
-    /adapterText\s*=\s*adapterStatus\s*===\s*'success'\s*\?\s*\(parsedResult\.text\s*\|\|\s*''\)\s*:\s*''/,
-    'non-success parser text remains only in the raw log/explicit boundary',
-  );
+test('hopper-runner preserves parser-designated partial OpenCode output after a failed exit', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-recovered-partial-'));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    mkdirSync(join(hopperDir, 'handoffs'), { recursive: true });
+    const counterFile = join(tmp, 'counter.txt');
+
+    const { outputMdPath, result } = await runRunnerWithFakeVendor({
+      taskId: 'T-recovered-partial',
+      hopperDir,
+      counterFile,
+      exitCode: 7,
+      vendorOutputLines: [
+        JSON.stringify({ type: 'text', part: { type: 'text', text: 'SAFE_PARTIAL' } }),
+        'RAW_DIAGNOSTIC_SENTINEL_MUST_NOT_RECOVER',
+      ],
+    });
+
+    assert.equal(result.code, 7, 'runner retains the real failed exit code');
+    const fm = readFrontmatter(outputMdPath);
+    assert.equal(fm.status, 'failed');
+    const markdown = readFileSync(outputMdPath, 'utf8');
+    assert.match(markdown, /Vendor output \(recovered; evidence: unknown-completeness\)/);
+    assert.match(markdown, /SAFE_PARTIAL/);
+    assert.match(markdown, /advisory/);
+    assert.doesNotMatch(markdown, /RAW_DIAGNOSTIC_SENTINEL_MUST_NOT_RECOVER/);
+    assert.equal(readFileSync(counterFile, 'utf8'), '1', 'recovery must not add a vendor spawn');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('hopper-runner writes a complete sidecar for long recovered OpenCode text and caps the Markdown preview', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'hopper-runner-recovered-long-'));
+  try {
+    const hopperDir = join(tmp, '.hopper');
+    mkdirSync(join(hopperDir, 'handoffs'), { recursive: true });
+    const counterFile = join(tmp, 'counter.txt');
+    const longText = 'SAFE_LONG_'.repeat(1200);
+
+    const { outputMdPath, result } = await runRunnerWithFakeVendor({
+      taskId: 'T-recovered-long',
+      hopperDir,
+      counterFile,
+      exitCode: 7,
+      vendorOutputLines: [JSON.stringify({ type: 'text', part: { type: 'text', text: longText } })],
+    });
+
+    assert.equal(result.code, 7);
+    assert.equal(readFrontmatter(outputMdPath).status, 'failed');
+    const sidecarPath = outputMdPath.replace(/-output\.md$/, '-output-raw.txt');
+    assert.equal(readFileSync(sidecarPath, 'utf8'), longText, 'sidecar contains only complete parser-designated text');
+    const markdown = readFileSync(outputMdPath, 'utf8');
+    assert.match(markdown, /Vendor output \(recovered; evidence: unknown-completeness\)/);
+    assert.ok(markdown.length < longText.length, 'Markdown holds only the preview');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('hopper-runner preserves the closed adapter diagnostic for an unreadable stdin prompt', async () => {
@@ -929,6 +982,8 @@ test('hopper-runner preserves the closed adapter diagnostic for an unreadable st
     assert.equal(canonical.public.adapterDiagnosticCode, 'adapter-protocol-invalid');
     assert.equal(fm.diagnostic_code, 'none', 'model diagnostic stays independent from adapter failure classification');
     assert.notEqual(fm.diagnostic_code, fm.adapter_diagnostic_code);
+    assert.doesNotMatch(readFileSync(outputMdPath, 'utf8'), /Vendor output \(recovered;/);
+    assert.equal(existsSync(outputMdPath.replace(/-output\.md$/, '-output-raw.txt')), false);
     assert.doesNotMatch(readFileSync(outputMdPath, 'utf8'), new RegExp(rawSentinel));
     assert.doesNotMatch(JSON.stringify(terminal), new RegExp(rawSentinel));
     assert.doesNotMatch(JSON.stringify(canonical.public), new RegExp(rawSentinel));
