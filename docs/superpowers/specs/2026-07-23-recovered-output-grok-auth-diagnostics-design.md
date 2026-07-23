@@ -134,52 +134,106 @@ change user-visible success behavior.
 
 ### 3.2 Add a conservative adapter parser contract
 
-`parseResult()` gains an optional output-evidence subrecord alongside its
-existing `text`, `status`, and diagnostic fields:
+`TaskOutput` and the `VendorAdapter.parseResult(SubprocessResult): TaskOutput`
+contract gain an optional, typed `outputEvidence` subrecord alongside their
+existing `text`, `status`, and diagnostic fields. `text` remains the only
+candidate answer body; `outputEvidence` supplies the closed provenance and
+completion evidence for that *same* text. It must not carry raw output, a path,
+an argv fragment, a prompt fragment, or diagnostic prose:
 
 ```text
 outputEvidence = {
   completeness: 'verified-complete' | 'unknown-completeness' | 'no-text',
-  source: 'structured-envelope' | 'event-stream' | 'vendor-result-field' | 'none'
+  source: 'structured-envelope' | 'event-stream' | 'vendor-result-field' | 'none',
+  terminalMarker:
+    'opencode-step-finish' | 'opencode-message-completed' |
+    'opencode-result-success' | 'claude-result-success' |
+    'grok-end-turn' | 'none'
 }
 ```
+
+`cli/src/types.js` must add an `OutputEvidence` typedef and
+`@property {OutputEvidence} [outputEvidence]` to `TaskOutput`; the existing
+`parseResult` adapter signature continues to return `TaskOutput`. Adapters that
+may recover a failed answer must return this property. A legacy adapter that
+does not return it retains normal success compatibility but cannot recover a
+failed answer.
+
+`terminalMarker` is mandatory and non-`none` for `verified-complete`; it is
+`none` for `unknown-completeness` and `no-text`. `source` is `none` when
+`completeness` is `no-text`. A non-empty `text` with a syntactically valid
+`unknown-completeness` record has parser-designated provenance, but deliberately
+does not claim that a vendor answer turn ended. A parser must not emit a
+contradictory record (for example, `verified-complete` with marker `none`).
 
 Only an adapter may designate the text and its provenance. The runner does not
 scan raw logs, scrape arbitrary JSON recursively, or promote raw stdout/stderr
 to answer text. This keeps the raw log as a diagnostic artifact and prevents a
-failed command, echoed prompt, path, or credential-adjacent message from being
-displayed as a recovered review.
+failed command, echoed prompt, path, command invocation, or
+credential-adjacent message from being displayed as a recovered review.
 
 The compatibility rule is fail-closed: an adapter result without a well-formed
 `outputEvidence` is treated as `no-text` for failure recovery, even if its
 legacy `text` property is non-empty. Existing success handling is unchanged.
-The first implementation coverage is the observed parser families:
+The first implementation coverage is the observed parser families. The
+following markers are the exhaustive initial allowlist for a
+`verified-complete` record:
 
-- OpenCode: reconstructed assistant text from its recognized event stream;
-- Grok: text from its recognized output JSON envelope;
-- Claude: text from its recognized JSON result field.
+| Adapter | Eligible parser-designated text | Concrete verified-complete marker | Otherwise on a failed task |
+| --- | --- | --- | --- |
+| OpenCode | Concatenated text only from recognized answer-bearing JSON events. | A later or same recognized event is one of: `type: "step_finish"` with empty reason or a terminal reason (`stop`, `finished`, `finish`, `completed`, `complete`, `end_turn`, `length`, `max_tokens`); `type: "message.completed"` / `"message_completed"`; or a `type: "result"` envelope whose explicit outcome is successful and not error/cancelled. Nested `event`/`data`/`payload`/`result` placement remains bounded to the existing parser depth. | Preserve only the recognized event text as `unknown-completeness`; a `tool-calls`, error, cancellation, or absent terminal event is never verified. |
+| Claude | Non-empty `.result` (not an arbitrary `.text` fallback) from the selected JSON result object. | `type: "result"`, `subtype: "success"`, `is_error: false`, and non-empty `.result` in the same selected envelope (`claude-result-success`). | A failure may retain only parser-selected, non-raw answer text as `unknown-completeness`; `is_error`, `error_*`, missing result, or an unverified plain-text fallback is not verified. |
+| Grok | Non-empty answer field from the selected whole/trailing `--output-format json` object, never raw stdout. | The selected structured object has no error, has a non-empty answer field, and its normalized `stopReason` / `stop_reason` / `finishReason` / `finish_reason` is exactly `EndTurn` (`grok-end-turn`). | A failure with such structured answer text but no exact end-turn marker is `unknown-completeness`. Timeout and nonzero/unknown-fail raw stdout are always `no-text`; they are not a recovery source. |
 
-Other adapters retain the conservative `no-text` recovery default until they
-declare an equivalent source and terminal marker. This scope avoids silently
-changing output policy for vendor formats that have not been audited.
+A `parseResult()` throw, an invalid `TaskOutput`, or malformed/missing
+`outputEvidence` is always `no-text`, even when the process produced bytes.
+The runner must construct the closed `no-text` record itself in this case and
+must not make a second parsing attempt or inspect stdout/stderr to recover a
+body. Other adapters retain the conservative `no-text` recovery default until
+they declare an equivalent source and terminal marker. This scope avoids
+silently changing output policy for vendor formats that have not been audited.
 
 ### 3.3 Runner and persisted artifacts
 
 The background runner consumes the adapter's typed evidence before it maps the
-adapter status to the queue status.
+adapter status to the queue status. It applies the following ordered
+precedence; an earlier condition overrides every later condition and must be
+persisted as the reason for the resulting closed record:
 
-1. If the adapter status is `success`, it uses the existing parsed-text path.
-2. If the adapter status is non-success and evidence is
-   `verified-complete` or `unknown-completeness`, it retains the eligible parsed
-   text for the output renderer and full-text sidecar, but sets queue status to
-   `failed` and exits non-zero.
-3. If evidence is `no-text`, malformed, or its text is empty after the existing
-   text safety normalization, it writes no recovered body or sidecar.
-4. A prompt-delivery failure always forces `no-text`: Hopper cannot establish
-   that the vendor received the requested prompt, so any coincidental process
-   output remains in the raw log only.
+1. `stdinDeliveryError` forces `no-text`, `source: none`, and
+   `terminalMarker: none`, regardless of the parser result or any apparent
+   vendor output. Hopper cannot establish that the requested prompt arrived.
+2. A parser throw, invalid `TaskOutput`, or malformed/missing
+   `outputEvidence` forces the same `no-text` record. No raw-byte fallback is
+   permitted.
+3. Empty or safety-normalized-empty parser text forces `no-text`.
+4. A successful adapter result uses the existing normal parsed-output path. It
+   may record its valid evidence for a uniform terminal attestation but is never
+   labelled recovered.
+5. A failed adapter result with valid non-empty
+   `verified-complete` or `unknown-completeness` evidence retains only its
+   parser-designated `text`; all other failed cases are `no-text`.
 
-The terminal event and output frontmatter carry the three closed fields above.
+For clarity, failure recovery **never** uses `SubprocessResult.stdout`,
+`stderr`, `logFileContent`, `error`, diagnostic text, command/argv, resolved
+binary path, subject-root path, raw log path, or prompt input. In particular,
+the current Grok timeout path (`text: raw.stdout`) and current nonzero
+`unknown-fail` raw-stdout fallback must be changed to emit `no-text`; their raw
+stream stays solely in the protected diagnostic log. `--result --full` may
+print the eligible sidecar only, never a raw log.
+
+The terminal attestation record, terminal JSONL event, and output frontmatter
+carry the same three closed fields: `recovered_output`,
+`recovered_output_state`, and `recovered_output_source`. `terminalMarker` is
+used for validation only and is not exposed as free-form vendor protocol data.
+Their mapping is fixed: a failed eligible `verified-complete` or
+`unknown-completeness` result writes `recovered_output: true` with its matching
+state and source. A `no-text` case writes `recovered_output: false` with
+`no-text`/`none`. A normal success writes `recovered_output: false` and may
+retain its valid evidence state internally for schema uniformity, but it gets no
+recovery heading or jobs suffix. The event is the source of truth; frontmatter
+and the canonical public attestation are the same closed projection of that
+event.
 `finalizeTerminalAttestation()` owns their event-first persistence so sync and
 background terminal readers see the same value. The public canonical
 attestation projection adds only these closed fields; it never exposes the text
@@ -199,8 +253,11 @@ the cap, `writeRunnerSidecar()` retains the full eligible text and only
 `hopper-dispatch --result <task-id> --full` can print it. `--result` without
 `--full` stays a closed projection plus an explicit full-output instruction.
 
-`--jobs` and `--result` must preserve the legal terminal status (`failed`) while
-rendering a compact factual suffix, for example:
+`--jobs` and `--result` must read those persisted fields (not infer them from a
+body, sidecar, or raw log) and preserve the legal terminal status (`failed`)
+while rendering a compact factual suffix. `--jobs` appends the suffix after the
+normal terminal state so scanning and machine-oriented status parsing retain
+`failed`; it never substitutes a synthetic state. For example:
 
 ```text
 status: failed; recovered-output: unknown-completeness (advisory)
@@ -265,13 +322,22 @@ This change corrects attribution, not availability: a genuine 401/403 remains
 `auth-fail`; a generic infrastructure failure remains terminally failed and is
 not retried automatically.
 
+Residual ambiguity remains deliberately visible: a vendor can place an
+authentication-looking phrase next to a transport/worker error, and an
+undocumented CLI may change its error schema. The narrowed matcher is therefore
+an attribution improvement, not proof of a credential cause. Ambiguous combined
+signals must use the existing `unknown-fail` path unless the authentication
+evidence is independently specific under this allowlist; no raw phrase is
+copied into public output.
+
 ### 3.6 Align the outer Grok host default
 
 `hosts/grok-cli/bin/hopper-grok` changes its documented and effective
-`GROK_HOST_MODEL` fallback from `grok-build` to `grok-4.5`. This applies only to
-the outer Grok host wrapper that asks Grok to invoke Hopper; it is distinct from
-the inner `grok` vendor adapter, which already explicitly defaults to
-`grok-4.5`.
+`GROK_HOST_MODEL` fallback from `grok-build` to `grok-4.5`. Its `--help`/usage
+text and any host-wrapper documentation must state the same fallback and show
+that an explicit `GROK_HOST_MODEL` overrides it. This applies only to the outer
+Grok host wrapper that asks Grok to invoke Hopper; it is distinct from the
+inner `grok` vendor adapter, which already explicitly defaults to `grok-4.5`.
 
 An explicitly supplied `GROK_HOST_MODEL` remains untouched. No model discovery
 or automatic model fallback is added.
@@ -296,11 +362,11 @@ vendored counterparts:
 
 | Area | Root files | Required verification |
 | --- | --- | --- |
-| Output evidence and terminal persistence | `cli/src/types.js`, `cli/bin/hopper-runner`, `cli/src/output.js`, `cli/src/handoff-attestation.js` | Unit and integration fixtures for all three evidence states, event/frontmatter/public projection round-trips, preview cap, sidecar, and unchanged `failed` status/exit code. |
-| Parser declarations | `cli/src/vendors/opencode.js`, `cli/src/vendors/grok.js`, `cli/src/vendors/claude.js` | Fixtures for complete structured terminal text, text followed by permission/tool/protocol failure, and no eligible text. Confirm that arbitrary raw stdout/stderr cannot be recovered. |
-| Result and jobs rendering | `cli/bin/hopper-dispatch` and its result/jobs helpers | `--result`, `--result --full`, and `--jobs` preserve `failed` while showing only closed recovery evidence. |
-| Grok auth context and classification | `cli/src/vendors/grok.js`, `cli/src/vendors/index.js`, `cli/src/setup.js`, `cli/bin/hopper-dispatch` | Key-present/artifact-present/none/unknown fixtures without printing secrets or paths; zero vendor spawn for `--check grok`; true auth evidence versus transport-only failure fixtures. |
-| Host wrapper model default | `hosts/grok-cli/bin/hopper-grok`, relevant host validation tests/docs | `grok-4.5` is the only fallback and help text agrees; an explicit `GROK_HOST_MODEL` still wins. |
+| Output evidence and terminal persistence | `cli/src/types.js`, `cli/bin/hopper-runner`, `cli/src/output.js`, `cli/src/handoff-attestation.js` | Unit and integration fixtures for all three evidence states, event/frontmatter/public projection round-trips, `stdinDeliveryError` precedence, preview cap, a long recovered sidecar, and unchanged `failed` status/exit code. |
+| Parser declarations | `cli/src/vendors/opencode.js`, `cli/src/vendors/grok.js`, `cli/src/vendors/claude.js` | Fixtures for each concrete verified-complete marker, text followed by permission/tool/protocol failure, parser throw, and no eligible text. Confirm that arbitrary raw stdout/stderr, especially Grok timeout/nonzero raw stdout, cannot be recovered. |
+| Result and jobs rendering | `cli/bin/hopper-dispatch` and its result/jobs helpers | `--result`, `--result --full`, and `--jobs` preserve `failed`; assert the exact advisory `--jobs` suffix is rendered only from persisted closed fields. |
+| Grok auth context and classification | `cli/src/vendors/grok.js`, `cli/src/vendors/index.js`, `cli/src/setup.js`, `cli/bin/hopper-dispatch` | Key-present/artifact-present/none/unknown fixtures without printing secrets or paths; exact `--check grok` and `--setup grok` auth-context output; zero vendor spawn for `--check grok`; true auth evidence versus transport-only/ambiguous failure fixtures. |
+| Host wrapper model default | `hosts/grok-cli/bin/hopper-grok`, relevant host validation tests/docs | `grok-4.5` is the only fallback; `--help`/usage and docs agree; an explicit `GROK_HOST_MODEL` still wins. |
 
 All modified root CLI files must be mirrored by the repository's existing
 `scripts/sync-vendored-plugin.mjs` workflow; the mirror hash test is a release
@@ -332,6 +398,16 @@ existing smoke/integration checks proportionate to the changed surfaces.
 8. The root and vendored CLI implementations are synchronized; all added
    regression tests and the pre-existing unit/integration/smoke/mirror checks
    pass.
+9. A long recovered parser-designated answer writes only the existing guarded
+   sidecar and `--result --full` prints that answer; raw logs are never emitted
+   through either result mode.
+10. A parser throw and a `stdinDeliveryError` each produce `no-text`, no
+    recovered body/sidecar, and the original failed terminal status even if raw
+    stdout contains plausible prose.
+11. `--jobs` shows `failed` plus the exact persisted advisory recovery suffix;
+    it does not create a new queue status or infer recovery from a body.
+12. Grok `--check` and `--setup` render the closed `auth_context` label without
+    a secret, path, or misleading `auth=verified` wording.
 
 ## 7. Alternatives rejected
 
