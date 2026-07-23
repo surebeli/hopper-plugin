@@ -11,6 +11,7 @@ import { validateTaskId } from './validation.js';
 import { projectInventoryEntry } from './inventory-contract.js';
 import { adapterDiagnostic, publicAdapterDiagnostic } from './adapter-diagnostics.js';
 import { publicModelIdentifier, publicModelIdentifiers } from './public-identifiers.js';
+import { noTextOutputEvidence, validateOutputEvidence } from './output-evidence.js';
 
 const TERMINAL_STATUSES = new Set(['done', 'failed', 'cancelled', 'orphaned', 'timeout']);
 const DISPLAY_STATUSES = new Set([...TERMINAL_STATUSES, 'in-progress']);
@@ -121,6 +122,48 @@ function fallbackBinding(snapshot, fm, completion) {
 
 function terminalStatus(value) {
   return TERMINAL_STATUSES.has(value) ? value : 'failed';
+}
+
+function recoveredOutputProjection(completion = {}, parsed = {}, status) {
+  const noRecovery = {
+    recovered_output: false,
+    recovered_output_state: 'no-text',
+    recovered_output_source: 'none',
+  };
+  const candidate = completion.outputEvidence ?? parsed.outputEvidence;
+  // Attestation only records parser provenance already selected by the runner;
+  // it never receives or persists the answer text itself.
+  const evidence = validateOutputEvidence('attested parser output', candidate)
+    ?? noTextOutputEvidence();
+  if (status !== 'failed' || completion.recoveredOutput !== true
+    || !['verified-complete', 'unknown-completeness'].includes(evidence.completeness)) {
+    return noRecovery;
+  }
+  return {
+    recovered_output: true,
+    recovered_output_state: evidence.completeness,
+    recovered_output_source: evidence.source,
+  };
+}
+
+function persistedRecoveredOutputProjection(record, status) {
+  const completeness = record?.recovered_output_state;
+  return recoveredOutputProjection({
+    recoveredOutput: record?.recovered_output,
+    outputEvidence: {
+      completeness,
+      source: record?.recovered_output_source,
+      terminalMarker: completeness === 'verified-complete' ? 'opencode-step-finish' : 'none',
+    },
+  }, {}, status);
+}
+
+function publicRecoveredOutput(projection) {
+  return {
+    recovered: projection.recovered_output,
+    state: projection.recovered_output_state,
+    source: projection.recovered_output_source,
+  };
 }
 
 function nonEmptyString(value) {
@@ -320,6 +363,12 @@ export function readCanonicalAttestation({ hopperDir, taskId, outputMdPath } = {
     diagnosticCode: terminalEvent?.adapter_diagnostic_code ?? fm.adapter_diagnostic_code,
     status: terminalEvent?.adapter_status ?? fm.adapter_status ?? (displayStatus === 'done' ? 'success' : 'unknown-fail'),
   });
+  const recoverySource = terminalEvent ?? fm;
+  const recoveryProjection = persistedRecoveredOutputProjection(
+    recoverySource,
+    terminalEvent?.status ?? fmStatus,
+  );
+  const recoveredOutput = publicRecoveredOutput(recoveryProjection);
   const safeCatalog = safeCatalogFromFrontmatter(fm);
   return {
     taskId,
@@ -330,6 +379,7 @@ export function readCanonicalAttestation({ hopperDir, taskId, outputMdPath } = {
     phase,
     adapter,
     adapterDiagnosticCode,
+    recoveredOutput,
     selector,
     observedModels: evidence,
     resolution,
@@ -342,6 +392,7 @@ export function readCanonicalAttestation({ hopperDir, taskId, outputMdPath } = {
       taskId,
       adapter,
       adapterDiagnosticCode,
+      recoveredOutput,
       displayStatus,
       phase,
       selector: {
@@ -382,6 +433,7 @@ function repairablePartialFrontmatter(fm, taskId) {
 
 function repairFrontmatterFromEvent(fm, taskId, event) {
   const observedModels = normalizeObservedModels(event.observed_models, publicVendor(event.vendor));
+  const recoveryProjection = persistedRecoveredOutputProjection(event, event.status);
   return {
     task_id: taskId,
     adapter: nullableNonEmptyString(event.vendor) ?? 'unknown',
@@ -406,6 +458,7 @@ function repairFrontmatterFromEvent(fm, taskId, event) {
       diagnosticCode: event.adapter_diagnostic_code ?? event.adapterDiagnosticCode,
       status: event.adapter_status ?? (event.status === 'done' ? 'success' : 'unknown-fail'),
     }),
+    ...recoveryProjection,
     ...safeCatalogFromFrontmatter(fm),
     _body: typeof fm._body === 'string' ? fm._body : '',
   };
@@ -478,6 +531,7 @@ function buildCanonicalTerminalRecord({ fm, startupSnapshot, parsed, completion,
     now,
   });
   const status = terminalStatus(completion.status);
+  const recoveryProjection = recoveredOutputProjection(completion, parsed, status);
   const phase = scalar(completion.phase, status);
   const message = scalar(completion.message, status === 'done' ? 'Task completed successfully.' : 'Task failed.');
   const adapterDiagnosticCode = adapterDiagnostic(
@@ -510,6 +564,7 @@ function buildCanonicalTerminalRecord({ fm, startupSnapshot, parsed, completion,
     model_attestation_observed_at: evidence.observedAt,
     resolution_status: resolved.resolutionStatus,
     resolution_detail: resolved.resolutionDetail,
+    ...recoveryProjection,
   };
   const attestationFrontmatter = {
     ...snapshot.frontmatter,
@@ -521,6 +576,7 @@ function buildCanonicalTerminalRecord({ fm, startupSnapshot, parsed, completion,
     resolution_detail: resolved.resolutionDetail,
     diagnostic_code: resolved.diagnosticCode,
     adapter_diagnostic_code: adapterDiagnosticCode,
+    ...recoveryProjection,
   };
   return { snapshot, resolved, status, phase, message, event, attestationFrontmatter };
 }

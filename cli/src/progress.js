@@ -110,6 +110,9 @@ const OPTIONAL_EVENT_FIELDS = [
   'model_attestation_observed_at',
   'resolution_status',
   'resolution_detail',
+  'recovered_output',
+  'recovered_output_state',
+  'recovered_output_source',
 ];
 
 /**

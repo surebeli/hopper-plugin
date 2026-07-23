@@ -911,11 +911,41 @@ test('hopper-runner preserves parser-designated partial OpenCode output after a 
     assert.equal(result.code, 7, 'runner retains the real failed exit code');
     const fm = readFrontmatter(outputMdPath);
     assert.equal(fm.status, 'failed');
+    assert.equal(fm.recovered_output, true);
+    assert.equal(fm.recovered_output_state, 'unknown-completeness');
+    assert.equal(fm.recovered_output_source, 'event-stream');
+    const terminalEvents = readProgressEvents({ hopperDir, taskId: 'T-recovered-partial' })
+      .filter((event) => event.terminal === true);
+    assert.equal(terminalEvents.length, 1, 'repair and recovery must not add a second terminal event');
+    const terminal = terminalEvents[0];
+    assert.equal(terminal.status, 'failed');
+    assert.equal(terminal.recovered_output, true);
+    assert.equal(terminal.recovered_output_state, 'unknown-completeness');
+    assert.equal(terminal.recovered_output_source, 'event-stream');
+    const canonical = readCanonicalAttestation({ hopperDir, taskId: 'T-recovered-partial', outputMdPath });
+    assert.equal(canonical.displayStatus, 'failed');
+    assert.deepEqual(canonical.recoveredOutput, {
+      recovered: true, state: 'unknown-completeness', source: 'event-stream',
+    });
+    assert.deepEqual(canonical.public.recoveredOutput, canonical.recoveredOutput);
     const markdown = readFileSync(outputMdPath, 'utf8');
     assert.match(markdown, /Vendor output \(recovered; evidence: unknown-completeness\)/);
     assert.match(markdown, /SAFE_PARTIAL/);
     assert.match(markdown, /advisory/);
     assert.doesNotMatch(markdown, /RAW_DIAGNOSTIC_SENTINEL_MUST_NOT_RECOVER/);
+    // Task 5 attestation projections must not expose parser markers or raw
+    // diagnostics. The existing output.md log reference is retained until the
+    // Task 6 result/log boundary change.
+    const frontmatterRecovery = {
+      status: fm.status,
+      recovered_output: fm.recovered_output,
+      recovered_output_state: fm.recovered_output_state,
+      recovered_output_source: fm.recovered_output_source,
+    };
+    const canonicalRecovery = { displayStatus: canonical.displayStatus, recoveredOutput: canonical.recoveredOutput };
+    for (const serialized of [JSON.stringify(terminal), JSON.stringify(frontmatterRecovery), JSON.stringify(canonicalRecovery), JSON.stringify(canonical.public.recoveredOutput)]) {
+      assert.doesNotMatch(serialized, /terminalMarker|RAW_DIAGNOSTIC_SENTINEL_MUST_NOT_RECOVER|T-recovered-partial-output\.log|test prompt/);
+    }
     assert.equal(readFileSync(counterFile, 'utf8'), '1', 'recovery must not add a vendor spawn');
   } finally {
     rmSync(tmp, { recursive: true, force: true });

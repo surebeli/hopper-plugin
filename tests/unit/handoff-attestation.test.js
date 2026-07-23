@@ -85,6 +85,16 @@ function parsed() {
   };
 }
 
+function recoveredFailure() {
+  return {
+    ...completion(), status: 'failed', phase: 'failed', message: 'Task failed.',
+    adapterStatus: 'permission-fail', recoveredOutput: true,
+    outputEvidence: {
+      completeness: 'unknown-completeness', source: 'event-stream', terminalMarker: 'none',
+    },
+  };
+}
+
 test('startup snapshot preserves equal requested and effective selectors', () => {
   const snapshot = buildAttestationStartupSnapshot({
     requestedSelector: 'fable', effectiveSelector: 'fable', effectiveSelectorSource: 'user-argv',
@@ -149,6 +159,35 @@ test('same parsed result produces byte-equivalent terminal attestation fields fo
   } finally {
     rmSync(left.tmp, { recursive: true, force: true });
     rmSync(right.tmp, { recursive: true, force: true });
+  }
+});
+
+test('finalizeTerminalAttestation persists one closed recovered-output projection event-first', () => {
+  const state = setup('T-recovered');
+  try {
+    const out = finalizeTerminalAttestation({
+      hopperDir: state.hopperDir,
+      taskId: state.taskId,
+      outputMdPath: state.outputMdPath,
+      parsed: {},
+      completion: recoveredFailure(),
+      now: NOW,
+    });
+    assert.equal(out.event.status, 'failed');
+    assert.equal(out.event.recovered_output, true);
+    assert.equal(out.event.recovered_output_state, 'unknown-completeness');
+    assert.equal(out.event.recovered_output_source, 'event-stream');
+    assert.equal('terminalMarker' in out.event, false);
+
+    const fm = readFrontmatter(state.outputMdPath);
+    assert.equal(fm.recovered_output, true);
+    assert.equal(fm.recovered_output_state, 'unknown-completeness');
+    assert.equal(fm.recovered_output_source, 'event-stream');
+    assert.deepEqual(readCanonicalAttestation(state).public.recoveredOutput, {
+      recovered: true, state: 'unknown-completeness', source: 'event-stream',
+    });
+  } finally {
+    rmSync(state.tmp, { recursive: true, force: true });
   }
 });
 
@@ -411,6 +450,72 @@ test('orphan frontmatter repair only commits one matching terminal event and saf
     assert.equal(readProgressEvents({ hopperDir: state.hopperDir, taskId: state.taskId }).filter((event) => event.terminal).length, 1);
   } finally {
     rmSync(state.tmp, { recursive: true, force: true });
+  }
+});
+
+test('orphan frontmatter repair copies only the closed recovered-output projection from its terminal event', () => {
+  const state = setup('T-repair-recovered');
+  try {
+    appendProgressEvent({
+      hopperDir: state.hopperDir,
+      taskId: state.taskId,
+      event: {
+        vendor: 'claude', phase: 'failed', kind: 'terminal', message: 'Task failed.', source: 'runner', terminal: true, status: 'failed',
+        recovered_output: true,
+        recovered_output_state: 'unknown-completeness',
+        recovered_output_source: 'event-stream',
+      },
+    });
+    const terminal = readProgressEvents({ hopperDir: state.hopperDir, taskId: state.taskId })
+      .find((event) => event.terminal === true);
+    assert.deepEqual({
+      recovered_output: terminal.recovered_output,
+      recovered_output_state: terminal.recovered_output_state,
+      recovered_output_source: terminal.recovered_output_source,
+    }, {
+      recovered_output: true,
+      recovered_output_state: 'unknown-completeness',
+      recovered_output_source: 'event-stream',
+    });
+    const repaired = repairOrphanTerminalHandoff(state);
+    assert.equal(repaired.repaired, true);
+    const fm = readFrontmatter(state.outputMdPath);
+    assert.equal(fm.status, 'failed');
+    assert.equal(fm.recovered_output, true);
+    assert.equal(fm.recovered_output_state, 'unknown-completeness');
+    assert.equal(fm.recovered_output_source, 'event-stream');
+    assert.equal(readProgressEvents({ hopperDir: state.hopperDir, taskId: state.taskId }).filter((event) => event.terminal).length, 1);
+  } finally {
+    rmSync(state.tmp, { recursive: true, force: true });
+  }
+});
+
+test('canonical reader normalizes invalid recovered-output event and frontmatter fields to no-text', () => {
+  const cases = [
+    { recovered_output: true, recovered_output_state: 'unknown-completeness', recovered_output_source: 'raw-stdout' },
+    { recovered_output: true, recovered_output_state: 'verified-complete', recovered_output_source: 'none' },
+  ];
+  for (const [index, recovery] of cases.entries()) {
+    const state = setup(`T-invalid-recovery-${index}`);
+    try {
+      writeFrontmatter(state.outputMdPath, {
+        task_id: state.taskId, adapter: 'claude', status: 'failed', phase: 'failed', terminal_event_emitted: true,
+        ...recovery, _body: '# body\n',
+      });
+      appendProgressEvent({
+        hopperDir: state.hopperDir,
+        taskId: state.taskId,
+        event: {
+          vendor: 'claude', phase: 'failed', kind: 'terminal', message: 'Task failed.', source: 'runner', terminal: true, status: 'failed',
+          ...recovery,
+        },
+      });
+      assert.deepEqual(readCanonicalAttestation(state).public.recoveredOutput, {
+        recovered: false, state: 'no-text', source: 'none',
+      });
+    } finally {
+      rmSync(state.tmp, { recursive: true, force: true });
+    }
   }
 });
 
