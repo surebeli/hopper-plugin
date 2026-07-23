@@ -161,6 +161,10 @@ test('installCheckForAdapter returns expected shape for each registered vendor',
     assert.ok(typeof r.binaryFound === 'boolean');
     assert.ok(typeof r.authOk === 'boolean');
     assert.ok(Array.isArray(r.authNotes));
+    if (name === 'grok') {
+      assert.ok(['key-present-unverified', 'credential-artifact-present-unverified', 'not-detected', 'unknown'].includes(r.authContext));
+      assert.equal(r.authState, 'unverified');
+    }
     assert.ok(['READY', 'AUTH_NEEDED', 'NOT_INSTALLED', 'UNKNOWN'].includes(r.overallStatus),
       `overallStatus must be one of READY/AUTH_NEEDED/NOT_INSTALLED/UNKNOWN; got ${r.overallStatus}`);
     if (r.binaryFound) {

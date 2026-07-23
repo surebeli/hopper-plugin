@@ -77,7 +77,7 @@ for (const name of VENDORS) {
       durationMs: 30000,
     });
     assert.equal(result.status, 'timeout', `${name}: timeout case must map to status='timeout'`);
-    if (['kimi', 'opencode', 'claude'].includes(name)) {
+    if (['kimi', 'opencode', 'claude', 'grok'].includes(name)) {
       assert.equal(result.diagnosticCode, 'adapter-timeout', `${name}: timeout must carry a closed diagnostic`);
       assert.equal(result.error, 'adapter-timeout', `${name}: timeout error is the closed diagnostic`);
     }
@@ -93,7 +93,7 @@ for (const name of VENDORS) {
       durationMs: 50,
     });
     assert.equal(result.status, 'permission-fail', `${name}: 127 must map to permission-fail`);
-    if (['kimi', 'opencode', 'claude'].includes(name)) {
+    if (['kimi', 'opencode', 'claude', 'grok'].includes(name)) {
       assert.equal(result.diagnosticCode, 'adapter-binary-missing', `${name}: missing binary must carry a closed diagnostic`);
       assert.equal(result.error, 'adapter-binary-missing', `${name}: binary error is the closed diagnostic`);
     } else {
@@ -108,6 +108,8 @@ for (const name of VENDORS) {
         JSON.stringify({ type: 'text', part: { type: 'text', text: 'HELLO_RESPONSE' } }),
         JSON.stringify({ type: 'step_finish', part: { type: 'step-finish', reason: 'stop' } }),
       ].join('\n')
+      : name === 'grok'
+        ? JSON.stringify({ text: 'HELLO_RESPONSE', stopReason: 'EndTurn' })
       : 'HELLO_RESPONSE';
     const result = a.parseResult({
       exitCode: 0,
@@ -573,7 +575,7 @@ test('grok adapter parseResult() detects auth-fail from unauthorized signal', ()
     durationMs: 120,
   });
   assert.equal(result.status, 'auth-fail');
-  assert.match(result.error || '', /XAI_API_KEY/);
+  assert.equal(result.error, 'adapter-auth-failed');
 });
 
 test('grok adapter parseResult() extracts text from --output-format json object', () => {
@@ -588,6 +590,49 @@ test('grok adapter parseResult() extracts text from --output-format json object'
   assert.equal(result.status, 'success');
   assert.equal(result.text, 'GROK_ANSWER');
   assert.deepEqual(result.usage, { total_tokens: 42 });
+});
+
+test('Grok emits vendor-result-field evidence only from a selected JSON object', () => {
+  const a = getAdapter('grok');
+  const verified = a.parseResult({
+    exitCode: 0, timedOut: false, durationMs: 1, stderr: '',
+    stdout: JSON.stringify({ text: 'SAFE_FINAL', stopReason: 'EndTurn' }),
+  });
+  assert.equal(verified.status, 'success');
+  assert.deepEqual(verified.outputEvidence, {
+    completeness: 'verified-complete', source: 'vendor-result-field', terminalMarker: 'grok-end-turn',
+  });
+
+  const partial = a.parseResult({
+    exitCode: 1, timedOut: false, durationMs: 1, stderr: 'transport channel closed',
+    stdout: JSON.stringify({ text: 'SAFE_PARTIAL', stopReason: 'Cancelled' }),
+  });
+  assert.equal(partial.status, 'unknown-fail');
+  assert.equal(partial.text, 'SAFE_PARTIAL');
+  assert.deepEqual(partial.outputEvidence, {
+    completeness: 'unknown-completeness', source: 'vendor-result-field', terminalMarker: 'none',
+  });
+});
+
+test('Grok never promotes timeout or nonzero raw stdout and does not return raw diagnostics', () => {
+  const a = getAdapter('grok');
+  for (const raw of [
+    { exitCode: -1, timedOut: true, stdout: 'RAW_TIMEOUT_PRIVATE', stderr: '' },
+    { exitCode: 1, timedOut: false, stdout: 'RAW_NONZERO_PRIVATE', stderr: 'worker quit with fatal' },
+  ]) {
+    const result = a.parseResult({ ...raw, durationMs: 1 });
+    assert.equal(result.text, '');
+    assert.equal(result.outputEvidence, undefined);
+    assert.equal(result.status, raw.timedOut ? 'timeout' : 'unknown-fail');
+    assert.doesNotMatch(result.error || '', /RAW_|worker quit/i);
+  }
+});
+
+test('Grok reserves auth-fail for independently specific evidence', () => {
+  const a = getAdapter('grok');
+  assert.equal(a.parseResult({ exitCode: 1, timedOut: false, durationMs: 1, stdout: '', stderr: 'transport channel closed' }).status, 'unknown-fail');
+  assert.equal(a.parseResult({ exitCode: 1, timedOut: false, durationMs: 1, stdout: '', stderr: 'HTTP 401 Unauthorized' }).status, 'auth-fail');
+  assert.equal(a.parseResult({ exitCode: 1, timedOut: false, durationMs: 1, stdout: '', stderr: 'worker quit with fatal; AuthorizationRequired' }).status, 'auth-fail');
 });
 
 test('grok adapter envPreflight() never checks GROK_API_KEY (third-party collision)', () => {

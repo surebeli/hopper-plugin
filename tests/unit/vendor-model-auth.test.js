@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { agyAdapter } from '../../cli/src/vendors/agy.js';
 import { copilotAdapter } from '../../cli/src/vendors/copilot.js';
+import { grokAuthContext } from '../../cli/src/vendors/grok.js';
 import { getAdapter, listAdapters, installCheckForAdapter } from '../../cli/src/vendors/index.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -101,6 +102,27 @@ test('V2 knownGood corrections: grok drops stale grok-4.3; codex includes gpt-5.
   const claude = getAdapter('claude').capabilities.modelArg.knownGood;
   assert.ok(claude.includes('opusplan') && claude.includes('sonnet[1m]'), 'claude lists compound aliases');
   assert.ok(getAdapter('copilot').capabilities.modelArg.knownGood.includes('auto'), 'copilot populated');
+});
+
+test('Grok auth context is presence-only and gives XAI_API_KEY precedence without exposing it', () => {
+  assert.equal(grokAuthContext({ env: { XAI_API_KEY: 'unit-secret' }, exists: () => true, home: '/hidden' }), 'key-present-unverified');
+  assert.equal(grokAuthContext({ env: {}, exists: () => true, home: '/hidden' }), 'credential-artifact-present-unverified');
+  assert.equal(grokAuthContext({ env: {}, exists: () => false, home: '/hidden' }), 'not-detected');
+  assert.equal(grokAuthContext({ env: {}, exists: () => { throw new Error('denied'); }, home: '/hidden' }), 'unknown');
+});
+
+test('installCheck preserves Grok context but never turns presence into verified auth', async () => {
+  const saved = process.env.XAI_API_KEY;
+  try {
+    process.env.XAI_API_KEY = 'unit-secret-never-returned';
+    const result = await installCheckForAdapter('grok');
+    assert.equal(result.authContext, 'key-present-unverified');
+    assert.equal(result.authState, 'unverified');
+    assert.doesNotMatch(JSON.stringify(result), /unit-secret-never-returned/);
+  } finally {
+    if (saved === undefined) delete process.env.XAI_API_KEY;
+    else process.env.XAI_API_KEY = saved;
+  }
 });
 
 // ─── copilot 'never auth' false-negative: soft-warn must not render as Auth=NO ───

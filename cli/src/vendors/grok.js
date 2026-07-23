@@ -28,6 +28,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { applyTaskTypeFloor } from '../subprocess.js';
+import { adapterFailure } from '../adapter-diagnostics.js';
 
 // Always pass -m explicitly: when -m is omitted the CLI's built-in default is
 // UNCONFIRMED, and retired slugs can silently redirect. Real-world dogfood on
@@ -39,6 +40,30 @@ import { applyTaskTypeFloor } from '../subprocess.js';
 // --output-format json` live micro-test on 2026-07-18 (grok CLI v0.2.101)
 // returned `{"text":"OK","stopReason":"EndTurn",...}` — CONFIRMED working.
 const DEFAULT_MODEL = 'grok-4.5';
+
+const GROK_CREDENTIAL_BASENAMES = Object.freeze([
+  'config.toml',
+  'config.json',
+  'auth',
+  'managed_config.toml',
+]);
+
+/**
+ * Report only the local launcher credential context. This never reads a
+ * credential value and never validates credentials against a remote service.
+ * @param {{env?: NodeJS.ProcessEnv, exists?: typeof existsSync, home?: string}} [options]
+ * @returns {'key-present-unverified'|'credential-artifact-present-unverified'|'not-detected'|'unknown'}
+ */
+export function grokAuthContext({ env = process.env, exists = existsSync, home = homedir() } = {}) {
+  if (typeof env.XAI_API_KEY === 'string' && env.XAI_API_KEY.trim()) return 'key-present-unverified';
+  try {
+    return GROK_CREDENTIAL_BASENAMES.some((name) => exists(join(home, '.grok', name)))
+      ? 'credential-artifact-present-unverified'
+      : 'not-detected';
+  } catch (_) {
+    return 'unknown';
+  }
+}
 
 /** @type {import('../types.js').VendorAdapter} */
 export const grokAdapter = {
@@ -141,22 +166,21 @@ export const grokAdapter = {
   },
 
   envPreflight() {
-    // Soft-warn pattern (mirrors codex/kimi/agy): a stored browser-OAuth session
-    // may authenticate even when undetectable on disk; parseResult is the
-    // backstop for real auth failures. CRITICAL: only XAI_API_KEY (xAI's official
-    // var) — NEVER GROK_API_KEY (that targets the unrelated third-party grok-cli).
-    if (process.env.XAI_API_KEY) return { ok: true, missing: [] };
-    const grokDir = join(homedir(), '.grok');
-    const candidates = [
-      join(grokDir, 'config.toml'),
-      join(grokDir, 'config.json'),
-      join(grokDir, 'auth'),
-      join(grokDir, 'managed_config.toml'),
-    ];
-    if (candidates.some((p) => existsSync(p))) return { ok: true, missing: [] };
+    // This stays a zero-spawn, non-secret context check. A browser/OAuth state
+    // in another session might not be inherited by the Hopper Node parent, so
+    // no local artifact can establish remotely verified authentication.
+    const authContext = grokAuthContext();
+    const note = authContext === 'key-present-unverified'
+      ? 'Note: XAI_API_KEY is present, but this zero-spawn check cannot validate it remotely.'
+      : authContext === 'credential-artifact-present-unverified'
+        ? 'Note: a Grok credential artifact is present, but this zero-spawn check cannot validate it remotely.'
+        : authContext === 'not-detected'
+          ? 'Note: no XAI_API_KEY or recognized ~/.grok credential artifact was detected. This zero-spawn check cannot verify remote auth; browser state in another session may not be inherited.'
+          : 'Note: Grok credential context could not be read. This zero-spawn check cannot verify remote auth.';
     return {
       ok: true,
-      missing: ['Note: no XAI_API_KEY or ~/.grok credentials found. If smoke fails, set XAI_API_KEY="xai-..." OR run `grok login --device-auth` (headless) / `grok` once for browser OAuth. Do NOT set GROK_API_KEY (that targets the unrelated third-party grok-cli).'],
+      missing: [note],
+      authContext,
     };
   },
 
@@ -169,57 +193,27 @@ export const grokAdapter = {
 
   parseResult(raw) {
     if (raw.timedOut) {
-      return { text: raw.stdout, status: 'timeout', error: `grok timed out after ${raw.durationMs}ms` };
+      return adapterFailure('timeout', 'adapter-timeout');
     }
     if (raw.exitCode === 127 || /not found|command not found/i.test(raw.stderr || '')) {
-      return {
-        text: '',
-        status: 'permission-fail',
-        error: 'grok binary not found in PATH. Install: curl -fsSL https://x.ai/cli/install.sh | bash (Windows: irm https://x.ai/cli/install.ps1 | iex)',
-      };
+      return adapterFailure('permission-fail', 'adapter-binary-missing');
     }
     const signal = `${raw.stdout || ''}\n${raw.stderr || ''}`;
-    const parsed = raw.exitCode === 0 ? extractGrokText(raw.stdout) : null;
-    if (parsed) {
-      // The runner's merged log can include unrelated MCP auth warnings. Prefer
-      // a real trailing Grok JSON success envelope before the broad auth regex.
-      const stop = (parsed.stopReason || '').toString().toLowerCase();
-      const badStop = /cancel|abort|refus|error|fatal/.test(stop);
-      if (parsed.parsedJson && !parsed.hasError && !badStop && parsed.text.trim()) {
-        return parsed.usage
-          ? { text: parsed.text, status: 'success', usage: parsed.usage }
-          : { text: parsed.text, status: 'success' };
-      }
+    const parsed = extractGrokText(raw.stdout);
+    const outputEvidence = grokOutputEvidence(parsed);
+    const stop = String(parsed.stopReason || '').trim();
+    const unsuccessfulStop = /cancel|abort|refus|error|fatal/i.test(stop);
+    if (raw.exitCode === 0 && parsed.parsedJson && !parsed.hasError && !unsuccessfulStop && parsed.text.trim()) {
+      const result = parsed.usage
+        ? { text: parsed.text, status: 'success', diagnosticCode: 'none', usage: parsed.usage }
+        : { text: parsed.text, status: 'success', diagnosticCode: 'none' };
+      return outputEvidence ? { ...result, outputEvidence } : result;
     }
-    // Auth-fail detection (exit codes UNDOCUMENTED → pattern-match like agy/kimi).
-    // This remains the fallback for all nonzero exits and exit-0 output without a
-    // valid successful JSON envelope.
-    if (/unauthorized|invalid api key|XAI_API_KEY|not logged in|\b401\b|\b403\b|authenticat|authorizationrequired|transport channel closed|worker quit with fatal/i.test(signal)) {
-      return {
-        text: '',
-        status: 'auth-fail',
-        error: 'grok is not authenticated or was blocked by its permission mode. Set XAI_API_KEY / run `grok login --device-auth`. hopper passes --permission-mode bypassPermissions + --always-approve for headless dispatch.',
-      };
-    }
-    if (raw.exitCode === 0) {
-      // Preserve the legacy generic stdout contract only for text that is
-      // genuinely non-structured. Structured JSON failures must not be
-      // relabelled as successful plain output after auth detection.
-      if (!parsed.structured && parsed.text.trim()) {
-        return { text: parsed.text, status: 'success' };
-      }
-      return {
-        text: parsed.text,
-        status: 'unknown-fail',
-        error: `grok produced no usable result${parsed.stopReason ? ` (stopReason="${parsed.stopReason}")` : ''}. ` +
-          'Common cause: a blocked/cancelled headless turn — confirm grok is authenticated and re-dispatch (hopper sets --permission-mode bypassPermissions for headless).',
-      };
-    }
-    return {
-      text: raw.stdout,
-      status: 'unknown-fail',
-      error: `grok exited ${raw.exitCode}: ${(raw.stderr || '').slice(0, 500)}`,
-    };
+    const status = hasSpecificGrokAuthFailure(signal) ? 'auth-fail' : 'unknown-fail';
+    const diagnostic = status === 'auth-fail'
+      ? 'adapter-auth-failed'
+      : (raw.exitCode === 0 ? 'adapter-protocol-invalid' : 'adapter-unknown-failed');
+    return failedGrokOutput(status, diagnostic, parsed, outputEvidence);
   },
 };
 
@@ -244,9 +238,10 @@ function clampGrokEffort(level) {
 /**
  * Defensive extraction of answer text from grok --output-format json stdout.
  * Field names are UNCONFIRMED (docs never document the object shape), so try
- * common keys, fall back to last JSON line, then raw text.
+ * only common fields from a whole or trailing JSON object. Plain stdout is
+ * never parser-designated answer text.
  * @param {string} stdout
- * @returns {{ text: string, usage?: object, stopReason?: string, parsedJson: boolean, hasError?: boolean, structured: boolean }}
+ * @returns {{ text: string, usage?: object, stopReason?: string, parsedJson: boolean, hasError?: boolean }}
  */
 function extractGrokText(stdout) {
   const trimmed = (stdout || '').trim();
@@ -254,19 +249,13 @@ function extractGrokText(stdout) {
     'text', 'content', 'output', 'result', 'response', 'message',
     'stopReason', 'stop_reason', 'finishReason', 'finish_reason', 'error', 'usage',
   ]);
-  const fromValue = (value, fallbackText) => {
-    // A literal JSON null is structured-invalid, even though it has no keys.
-    if (value === null) {
-      return { text: '', parsedJson: false, structured: true };
-    }
-    if (typeof value === 'string') {
-      return { text: value, parsedJson: false, structured: false };
-    }
+  const noSelectedObject = { text: '', parsedJson: false };
+  const fromValue = (value) => {
     const obj = value;
     if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
       const recognized = Object.keys(obj).some((key) => envelopeKeys.has(key));
       if (!recognized) {
-        return { text: fallbackText, parsedJson: false, structured: false };
+        return noSelectedObject;
       }
       const text = obj.text ?? obj.message ?? obj.content ?? obj.output ?? obj.result ?? obj.response;
       const stopReason = obj.stopReason ?? obj.stop_reason ?? obj.finishReason ?? obj.finish_reason;
@@ -276,34 +265,44 @@ function extractGrokText(stdout) {
         stopReason,
         parsedJson: true,
         hasError: Boolean(obj.error),
-        structured: true,
       };
     }
-    return { text: fallbackText, parsedJson: false, structured: false };
+    return noSelectedObject;
   };
-  const parseCandidate = (candidate, fallbackText) => {
+  const parseCandidate = (candidate) => {
     try {
-      return fromValue(JSON.parse(candidate), fallbackText);
+      return fromValue(JSON.parse(candidate));
     } catch (_) {
       return null;
     }
   };
 
-  const whole = parseCandidate(trimmed, trimmed);
+  const whole = parseCandidate(trimmed);
   if (whole) return whole;
 
   // Grok emits one trailing JSON line after warnings. Inspect only that line;
   // earlier unrelated JSON must not hijack result classification.
   const lines = trimmed.split(/\r?\n/).filter((line) => line.trim());
   const trailing = lines[lines.length - 1] || '';
-  const tail = trailing === trimmed ? null : parseCandidate(trailing, trimmed);
+  const tail = trailing === trimmed ? null : parseCandidate(trailing);
   if (tail) return tail;
+  return noSelectedObject;
+}
 
-  // A malformed object-shaped tail is structured only when it advertises a
-  // recognized Grok envelope key. Braces, arrays, and citation tails alone are
-  // ordinary legacy text.
-  const keyPattern = /["']?(?:text|content|output|result|response|message|stopReason|stop_reason|finishReason|finish_reason|error|usage)["']?\s*:/;
-  const candidate = trailing.trim();
-  const malformedEnvelope = candidate.startsWith('{') && keyPattern.test(candidate);
-  return { text: trimmed, parsedJson: false, structured: malformedEnvelope };
+function grokOutputEvidence(parsed) {
+  if (!parsed?.parsedJson || parsed.hasError || !parsed.text.trim()) return undefined;
+  const normalizedStop = String(parsed.stopReason || '').trim();
+  return normalizedStop === 'EndTurn'
+    ? { completeness: 'verified-complete', source: 'vendor-result-field', terminalMarker: 'grok-end-turn' }
+    : { completeness: 'unknown-completeness', source: 'vendor-result-field', terminalMarker: 'none' };
+}
+
+function hasSpecificGrokAuthFailure(signal) {
+  return /\b(?:unauthorized|invalid(?:\s+(?:api\s*)?key)?|login\s+required|sign[ -]?in\s+required|AuthorizationRequired)\b|\b(?:HTTP\s*)?(?:401|403)\b/i.test(signal);
+}
+
+function failedGrokOutput(status, diagnosticCode, parsed, outputEvidence) {
+  const failure = adapterFailure(status, diagnosticCode);
+  if (!outputEvidence || !parsed.text.trim()) return failure;
+  return { ...failure, text: parsed.text, outputEvidence };
 }

@@ -24,6 +24,20 @@ test('setup: buildVendorReadiness returns one well-formed row per registered ven
   }
 });
 
+test('setup: Grok keeps credential detection as unverified context only', async () => {
+  const saved = process.env.XAI_API_KEY;
+  try {
+    process.env.XAI_API_KEY = 'unit-secret-never-returned';
+    const [grok] = await buildVendorReadiness({ only: 'grok' });
+    assert.equal(grok.authContext, 'key-present-unverified');
+    assert.equal(grok.authState, 'unverified');
+    assert.doesNotMatch(JSON.stringify(grok), /unit-secret-never-returned/);
+  } finally {
+    if (saved === undefined) delete process.env.XAI_API_KEY;
+    else process.env.XAI_API_KEY = saved;
+  }
+});
+
 test('buildRuntimeReport: flags Node below the supported minimum', () => {
   assert.equal(buildRuntimeReport({ nodeVersion: 'v22.5.0' }).nodeOk, true);
   const old = buildRuntimeReport({ nodeVersion: 'v16.20.0' });

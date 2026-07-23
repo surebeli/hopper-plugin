@@ -61,6 +61,7 @@
  * @typedef {object} PreflightResult
  * @property {boolean} ok
  * @property {string[]} missing       Human-readable list of what's missing (e.g. ["Run `codex login`"])
+ * @property {'key-present-unverified'|'credential-artifact-present-unverified'|'not-detected'|'unknown'} [authContext] Optional local, non-secret credential-context observation. Presence never verifies remote authentication.
  */
 
 /**
