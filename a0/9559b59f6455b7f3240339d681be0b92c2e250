@@ -1,0 +1,23 @@
+docs/superpowers/specs/2026-07-23-recovered-output-grok-auth-diagnostics-design.md
+  0000019f8d6c46a7 1-354
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "a09559b59f6455b7f3240339d681be0b92c2e250",
+  "prompts": {
+    "0000019f8d6c46a7": {
+      "agent_id": {
+        "tool": "codex",
+        "model": "gpt-5.6-sol",
+        "id": "ai-thread-codex-gpt-5.6-sol-1784784111271"
+      },
+      "human_author": "litianyi",
+      "messages": [],
+      "total_additions": 354,
+      "total_deletions": 0,
+      "accepted_lines": 354,
+      "overriden_lines": 0
+    }
+  }
+}
