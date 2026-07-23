@@ -219,6 +219,68 @@ test('opencode adapter parseResult() reconstructs text from opencode 1.17+ {type
   assert.ok(!result.text.includes('step_start'), 'must NOT fall back to dumping raw JSON');
 });
 
+test('OpenCode evidence is event-stream text with an exact terminal marker only when completed', () => {
+  const a = getAdapter('opencode');
+  const cases = [
+    ['opencode-step-finish', { type: 'step_finish', part: { reason: 'stop' } }],
+    ['opencode-message-completed', { type: 'message.completed' }],
+    ['opencode-result-success', { type: 'result', status: 'success', is_error: false }],
+  ];
+  for (const [marker, terminal] of cases) {
+    const result = a.parseResult({
+      exitCode: 0, timedOut: false, durationMs: 1, stderr: '', stdout: [
+        JSON.stringify({ type: 'text', part: { text: `SAFE_${marker}` } }), JSON.stringify(terminal),
+      ].join('\n'),
+    });
+    assert.equal(result.status, 'success');
+    assert.deepEqual(result.outputEvidence, {
+      completeness: 'verified-complete', source: 'event-stream', terminalMarker: marker,
+    });
+  }
+  const partial = a.parseResult({
+    exitCode: 1, timedOut: false, durationMs: 1, stderr: 'permission denied', stdout: [
+      JSON.stringify({ type: 'text', part: { text: 'SAFE_PARTIAL' } }),
+      JSON.stringify({ type: 'tool-calls', tool: 'read' }),
+    ].join('\n'),
+  });
+  assert.equal(partial.status, 'unknown-fail');
+  assert.equal(partial.text, 'SAFE_PARTIAL');
+  assert.deepEqual(partial.outputEvidence, {
+    completeness: 'unknown-completeness', source: 'event-stream', terminalMarker: 'none',
+  });
+});
+
+test('Claude preserves only selected .result text from a failed structured envelope', () => {
+  const a = getAdapter('claude');
+  const partial = a.parseResult({
+    exitCode: 1, timedOut: false, durationMs: 1, stderr: 'permission denied', stdout: JSON.stringify({
+      type: 'result', subtype: 'error_max_turns', is_error: true, result: 'SAFE_CLAUDE_PARTIAL',
+    }),
+  });
+  assert.equal(partial.status, 'unknown-fail');
+  assert.equal(partial.text, 'SAFE_CLAUDE_PARTIAL');
+  assert.deepEqual(partial.outputEvidence, {
+    completeness: 'unknown-completeness', source: 'structured-envelope', terminalMarker: 'none',
+  });
+
+  const fallback = a.parseResult({
+    exitCode: 1, timedOut: false, durationMs: 1, stderr: '', stdout: JSON.stringify({ text: 'RAW_TEXT_FALLBACK' }),
+  });
+  assert.equal(fallback.text, '');
+  assert.equal(fallback.outputEvidence, undefined);
+});
+
+test('Claude successful result carries its only verified-complete marker', () => {
+  const result = getAdapter('claude').parseResult({
+    exitCode: 0, timedOut: false, durationMs: 1, stderr: '', stdout: JSON.stringify({
+      type: 'result', subtype: 'success', is_error: false, result: 'SAFE_FINAL',
+    }),
+  });
+  assert.deepEqual(result.outputEvidence, {
+    completeness: 'verified-complete', source: 'structured-envelope', terminalMarker: 'claude-result-success',
+  });
+});
+
 test('Kimi, OpenCode, and Claude failure parsers return only closed diagnostics', () => {
   const raw = {
     stdout: 'RAW_STDOUT_PRIVATE C:\\PRIVATE\\vendor.log sk-private-vendor-token',
@@ -230,16 +292,17 @@ test('Kimi, OpenCode, and Claude failure parsers return only closed diagnostics'
     ['kimi', { ...raw, exitCode: 1 }, 'unknown-fail', 'adapter-unknown-failed'],
     ['kimi', { ...raw, exitCode: 0, stdout: `Error code: 402 {'error': {'message': "RAW_STDOUT_PRIVATE"}}` }, 'auth-fail', 'adapter-auth-failed'],
     ['opencode', { ...raw, exitCode: 1 }, 'unknown-fail', 'adapter-unknown-failed'],
-    ['opencode', { ...raw, exitCode: 0, stdout: JSON.stringify({ type: 'text', part: { type: 'text', text: 'RAW_STDOUT_PRIVATE' } }) }, 'unknown-fail', 'adapter-protocol-invalid'],
+    ['opencode', { ...raw, exitCode: 0 }, 'unknown-fail', 'adapter-protocol-invalid'],
     ['claude', { ...raw, exitCode: 1 }, 'unknown-fail', 'adapter-unknown-failed'],
-    ['claude', { ...raw, exitCode: 0, stdout: JSON.stringify({ type: 'result', subtype: 'error_max_turns', is_error: true, result: 'RAW_STDOUT_PRIVATE' }) }, 'unknown-fail', 'adapter-protocol-invalid'],
+    ['claude', { ...raw, exitCode: 0, stdout: JSON.stringify({ type: 'result', subtype: 'error_max_turns', is_error: true }) }, 'unknown-fail', 'adapter-protocol-invalid'],
   ];
   for (const [vendor, fixture, status, diagnosticCode] of cases) {
     const result = getAdapter(vendor).parseResult(fixture);
     assert.equal(result.status, status, vendor);
     assert.equal(result.diagnosticCode, diagnosticCode, vendor);
     assert.equal(result.error, diagnosticCode, vendor);
-    assert.equal(result.text, '', `${vendor} failure must retain raw text only in its raw log/sidecar`);
+    assert.equal(result.text, '', `${vendor} raw/private failure text must not become parser evidence`);
+    assert.equal(result.outputEvidence, undefined, `${vendor} raw/private failure must not declare evidence`);
     assert.equal(JSON.stringify(result).includes('RAW_'), false, vendor);
     assert.equal(JSON.stringify(result).includes('PRIVATE_PROVIDER'), false, vendor);
   }
@@ -257,12 +320,18 @@ test('OpenCode remains fail-closed without both completion and reconstructed tex
     stdout: JSON.stringify({ type: 'step_finish', part: { type: 'step-finish', reason: 'stop' } }),
     stderr: 'RAW_STDERR_PRIVATE', timedOut: false, durationMs: 42,
   });
-  for (const result of [noCompletion, noText]) {
-    assert.equal(result.status, 'unknown-fail');
-    assert.equal(result.diagnosticCode, 'adapter-protocol-invalid');
-    assert.equal(result.error, 'adapter-protocol-invalid');
-    assert.equal(result.text, '');
-  }
+  assert.equal(noCompletion.status, 'unknown-fail');
+  assert.equal(noCompletion.diagnosticCode, 'adapter-protocol-invalid');
+  assert.equal(noCompletion.error, 'adapter-protocol-invalid');
+  assert.equal(noCompletion.text, 'SAFE_TEXT');
+  assert.deepEqual(noCompletion.outputEvidence, {
+    completeness: 'unknown-completeness', source: 'event-stream', terminalMarker: 'none',
+  });
+  assert.equal(noText.status, 'unknown-fail');
+  assert.equal(noText.diagnosticCode, 'adapter-protocol-invalid');
+  assert.equal(noText.error, 'adapter-protocol-invalid');
+  assert.equal(noText.text, '');
+  assert.equal(noText.outputEvidence, undefined);
 });
 
 test('Claude fable stays a dynamic, non-gating alias even when runtime identity is different', () => {
