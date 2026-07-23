@@ -352,4 +352,3 @@ existing smoke/integration checks proportionate to the changed surfaces.
 5. **Treat every `transport channel closed`/`worker quit with fatal` as an auth
    failure.** Rejected because those phrases also describe infrastructure faults;
    false attribution gives the operator the wrong repair action.
-
