@@ -1,0 +1,27 @@
+tests/unit/lifecycle-regression.test.js
+  0000019f8e18b5d7 1-457
+tests/unit/phase6c.test.js
+  0000019f8e18b5d7 1-336
+tests/unit/vendor-preset-fixes.test.js
+  0000019f8e18b5d7 1-238
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "ed720353738c8f626b2e2f616016d0afdcbddfd4",
+  "prompts": {
+    "0000019f8e18b5d7": {
+      "agent_id": {
+        "id": "ai-thread-codex-gpt-5.6-sol-1784795411927",
+        "tool": "codex",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "litianyi",
+      "messages": [],
+      "total_additions": 1031,
+      "total_deletions": 0,
+      "accepted_lines": 1031,
+      "overriden_lines": 0
+    }
+  }
+}
