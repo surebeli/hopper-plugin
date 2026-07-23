@@ -19,6 +19,17 @@ convention: any user-observable behavior change (new capability, fixed defect,
 changed default) bumps minor; patch is reserved for the rare non-functional
 tweak.
 
+## [0.35.0] - 2026-07-23
+
+### Fixed
+
+- Failed background dispatches now retain only parser-designated vendor answer text when the adapter can prove its provenance. The task remains `failed`; recovered text is labelled `verified-complete` or advisory `unknown-completeness`.
+- Grok readiness reports launcher credential context as unverified instead of claiming remote authentication, narrows transport-vs-auth attribution, and its outer host wrapper now defaults to `grok-4.5`.
+
+### Security
+
+- `--result --full` no longer emits raw vendor log tails. It can show only the guarded parser-designated sidecar or sanitized output body.
+
 ## [0.34.2] - 2026-07-22
 
 ### Added

@@ -49,11 +49,11 @@ export function effectivePreviewLimit(base) {
 }
 
 /**
- * Write the full-text sidecar `<base>-output-raw.txt` for a long vendor answer so
+ * Write the full parser-designated-text sidecar `<base>-output-raw.txt` for a long vendor answer so
  * `--result --full` can surface the COMPLETE text. Used by the BACKGROUND runner
  * (hopper-runner); the sync `--write` path writes its own sidecar inside writeOutput.
  * Only writes when the text exceeds the (env-tunable) preview cap; symlink-guarded;
- * best-effort (returns null on skip/failure — the .log retains the full raw stream).
+ * best-effort (returns null on skip/failure — raw logs are never a public output source).
  * @param {string} outputMdPath  the task's `-output.md` path
  * @param {string} fullText      the parsed vendor answer (adapter.parseResult().text)
  * @param {number} [base]        threshold base (defaults to the background preview cap)
@@ -309,30 +309,48 @@ ${fence(suggestCostEdit(task, vendor, output, raw))}
  * footer — so grok/codex left effectively empty output.md files (the
  * 2026-06-04 retrospective's "no .md produced" finding). This embeds a readable
  * preview of the PARSED text (the answer/verdict the adapter extracted from
- * stdout) directly in output.md, while the full raw stream stays in the .log.
+ * stdout) directly in output.md. The raw log remains protected diagnostics and
+ * is never used as an answer source.
  *
  * Distinct heading from the sync writer's "## Vendor output text" so the two
  * code paths stay greppable/independent. Placed BEFORE the runner's
  * "## Status (background completion)" footer so `--result` (which truncates the
  * body at that footer) still surfaces it.
  *
- * @param {string} text        adapter.parseResult().text (the parsed answer)
+ * @param {string} text        adapter.parseResult().text (the parser-designated answer)
  * @param {object} [opts]
+ * @param {boolean} [opts.recovered] whether a failed task retained approved parser text
+ * @param {'verified-complete'|'unknown-completeness'|'no-text'} [opts.evidenceState]
+ * @param {string} [opts.taskId] task ID used in the parsed-output retrieval hint
  * @param {string} [opts.rawLogName]  basename of the raw .log for the pointer note
  * @returns {string} a leading-newline markdown block
  */
-export function renderVendorOutputSection(text, { rawLogName } = {}) {
+export function renderVendorOutputSection(text, {
+  recovered = false,
+  evidenceState = 'no-text',
+  taskId,
+  rawLogName,
+} = {}) {
   const logRef = rawLogName ? `\`${sanitizeInline(rawLogName)}\`` : 'the .log file';
   const full = typeof text === 'string' ? text : '';
   if (!full.trim()) {
-    return `\n## Vendor output (parsed)\n\n_(vendor produced no parsed text; see ${logRef} for the raw output stream.)_\n`;
+    return `\n## Vendor output (parsed)\n\n_(vendor produced no parsed text; protected diagnostics are retained in ${logRef}.)_\n`;
+  }
+  let heading = '## Vendor output (parsed)';
+  let advisory = '';
+  if (recovered && evidenceState === 'verified-complete') {
+    heading = '## Vendor output (recovered; evidence: verified-complete)';
+  } else if (recovered && evidenceState === 'unknown-completeness') {
+    heading = '## Vendor output (recovered; evidence: unknown-completeness)';
+    advisory = '\n_This parser-designated text may be incomplete and is advisory; the task remains failed._\n';
   }
   const limit = effectivePreviewLimit(VENDOR_OUTPUT_PREVIEW_LIMIT);
   const preview = truncate(full, limit);
+  const safeTaskId = typeof taskId === 'string' && taskId.trim() ? sanitizeInline(taskId) : '<taskId>';
   const note = full.length > limit
-    ? ` _(preview ${limit}/${full.length} chars; full raw stream in ${logRef})_`
+    ? ` _(preview ${limit}/${full.length} chars; complete parsed output is available through \`hopper-dispatch --result ${safeTaskId} --full\`)_`
     : '';
-  return `\n## Vendor output (parsed)${note}\n\n${fence(preview)}\n`;
+  return `\n${heading}${note}\n${advisory}\n${fence(preview)}\n`;
 }
 
 /**

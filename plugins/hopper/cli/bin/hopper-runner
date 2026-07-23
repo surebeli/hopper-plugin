@@ -20,6 +20,7 @@ import { getAdapter } from '../src/vendors/index.js';
 import { acquireVendorLock, killProcessTree, resolveDispatchTimeouts, chunkHasSubstantiveLine } from '../src/subprocess.js';
 import { resolveCommandOnPath, resolveCommandWithKnownPaths } from '../src/path-resolve.js';
 import { renderVendorOutputSection, writeRunnerSidecar } from '../src/output.js';
+import { noTextOutputEvidence, selectTerminalOutput } from '../src/output-evidence.js';
 import { adapterDiagnostic, publicAdapterDiagnostic } from '../src/adapter-diagnostics.js';
 import { prepareSubjectRootGuard, wrapSubjectRootInvocation } from '../src/subject-root-guard.js';
 
@@ -53,6 +54,11 @@ function parseRunnerArgs(argv) {
     throw new Error(`hopper-runner: unexpected arg ${a}`);
   }
   return parsed;
+}
+
+function isTaskOutputLike(value) {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value)
+    && typeof value.status === 'string');
 }
 
 function terminalMessageFor(status, adapterStatus, providedMessage = null) {
@@ -540,8 +546,8 @@ async function main() {
 
     let adapterStatus;
     let adapterDiagnosticCode = 'adapter-unknown-failed';
-    let adapterText = '';                   // HOPPER-5: the parsed vendor answer
     let parsedResult = {};
+    let parserFailed = false;
     try {
       parsedResult = adapter.parseResult({
         exitCode: code === null ? -1 : code,
@@ -554,11 +560,14 @@ async function main() {
       });
       adapterStatus = parsedResult.status;       // success | auth-fail | timeout | permission-fail | unknown-fail
       adapterDiagnosticCode = publicAdapterDiagnostic(parsedResult);
-      adapterText = adapterStatus === 'success' ? (parsedResult.text || '') : '';
     } catch (err) {
+      parserFailed = true;
       adapterStatus = 'unknown-fail';
       adapterDiagnosticCode = 'adapter-protocol-invalid';
-      parsedResult = { text: '', status: adapterStatus, error: adapterDiagnosticCode, diagnosticCode: adapterDiagnosticCode };
+      parsedResult = {
+        text: '', status: adapterStatus, error: adapterDiagnosticCode,
+        diagnosticCode: adapterDiagnosticCode, outputEvidence: noTextOutputEvidence(),
+      };
     }
 
     // Observable stdin contract: if the prompt was not fully delivered to the vendor,
@@ -568,9 +577,20 @@ async function main() {
     if (stdinDeliveryError) {
       adapterStatus = 'prompt-delivery-fail';
       adapterDiagnosticCode = 'adapter-protocol-invalid';
-      parsedResult = { text: '', status: adapterStatus, error: adapterDiagnosticCode, diagnosticCode: adapterDiagnosticCode };
-      adapterText = '';
+      parsedResult = {
+        text: '', status: adapterStatus, error: adapterDiagnosticCode,
+        diagnosticCode: adapterDiagnosticCode, outputEvidence: noTextOutputEvidence(),
+      };
     }
+
+    const selectedOutput = selectTerminalOutput({
+      adapterStatus,
+      parsed: parsedResult,
+      stdinDeliveryError: Boolean(stdinDeliveryError),
+      parserFailed,
+      invalidTaskOutput: !isTaskOutputLike(parsedResult),
+    });
+    const adapterText = selectedOutput.text;
 
     // T1 (review finding #1): the BACKGROUND path must ALSO write the full-text
     // sidecar (previously only the sync --write path did), so `--result --full` can
@@ -604,13 +624,20 @@ async function main() {
           signal: signal || null,
           adapterStatus,
           adapterDiagnosticCode,
+          outputEvidence: selectedOutput.outputEvidence,
+          recoveredOutput: selectedOutput.recoveredOutput,
           timedOut: timedOut || null,
           timeoutReason: timeoutReason || null,
           processCleanup: processCleanup.status,
           processCleanupMethod: processCleanup.method,
           endTime,
           bodyAppend:
-            renderVendorOutputSection(adapterText, { rawLogName: logPath.split(/[\\/]/).pop() }) +
+            renderVendorOutputSection(adapterText, {
+              recovered: selectedOutput.recoveredOutput,
+              evidenceState: selectedOutput.outputEvidence.completeness,
+              taskId,
+              rawLogName: logPath.split(/[\\/]/).pop(),
+            }) +
             `\n## Status (background completion)\n` +
             `- queue_status: ${status}\n` +
             `- adapter_status: ${adapterStatus}\n` +

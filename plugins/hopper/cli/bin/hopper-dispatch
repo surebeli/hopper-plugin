@@ -57,7 +57,7 @@ import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
-const VERSION = '0.34.2';
+const VERSION = '0.35.0';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -100,7 +100,7 @@ function printUsage() {
   console.log('                                                  backlog is baselined (NOT replayed) so a (re)started watcher does not');
   console.log('                                                  re-fire history. --once: emit the first event then exit. --replay: also');
   console.log('                                                  emit the existing terminal backlog on start (the pre-fix behavior).');
-  console.log('  hopper-dispatch --result <task-id> [--full]     Print a closed completed-task result; --full is the explicit raw sidecar/log boundary');
+  console.log('  hopper-dispatch --result <task-id> [--full]     Print a closed completed-task result; --full is the parser-designated output sidecar boundary');
   console.log('  hopper-dispatch --jobs                          List all in-progress background jobs');
   console.log('  hopper-dispatch --reap                          Re-classify stale (>24h or dead-PID) jobs as orphaned');
   console.log('  hopper-dispatch --archive [--older-than <days>] [--keep <N>] [--only-status <s,..>] [--dry-run]');
@@ -1137,26 +1137,40 @@ async function runBackgroundDispatch(hopperDir, taskId, { adapterOpts = {}, vend
 
 function runJobsList(hopperDir) {
   const jobs = listInProgressJobs(hopperDir);
+  const recoveredTerminalRecords = listOutputMarkdownFiles(join(hopperDir, 'handoffs'))
+    .map((outputMdPath) => {
+      const taskId = basename(outputMdPath).replace(/-output\.md$/, '');
+      return readCanonicalAttestation({ hopperDir, taskId, outputMdPath }).public;
+    })
+    .filter((record) => TERMINAL_TASK_STATUSES.has(record.displayStatus) && record.recoveredOutput.recovered);
+
   if (jobs.length === 0) {
     console.log('No in-progress background jobs.');
-    return;
+  } else {
+    console.log(`hopper-dispatch v${VERSION} — ${jobs.length} in-progress job(s):`);
+    console.log('');
+    console.log('TASK ID                  VENDOR     PID     AGE     ALIVE  STARTED');
+    console.log('-----------------------  ---------  ------  ------  -----  -------------------------');
+    for (const job of jobs) {
+      console.log(
+        `${(job.task_id || '?').padEnd(23)}  ` +
+        `${(job.adapter || '?').padEnd(9)}  ` +
+        `${String(job.pid || '?').padEnd(6)}  ` +
+        `${(isFinite(job.age_hours) ? job.age_hours.toFixed(1) + 'h' : '?').padEnd(6)}  ` +
+        `${(job.alive ? 'yes' : 'no').padEnd(5)}  ` +
+        `${job.start_time || '?'}`
+      );
+    }
+    console.log('');
+    console.log('Stale jobs (>24h or dead PID) can be cleaned with: hopper-dispatch --reap');
   }
-  console.log(`hopper-dispatch v${VERSION} — ${jobs.length} in-progress job(s):`);
-  console.log('');
-  console.log('TASK ID                  VENDOR     PID     AGE     ALIVE  STARTED');
-  console.log('-----------------------  ---------  ------  ------  -----  -------------------------');
-  for (const job of jobs) {
-    console.log(
-      `${(job.task_id || '?').padEnd(23)}  ` +
-      `${(job.adapter || '?').padEnd(9)}  ` +
-      `${String(job.pid || '?').padEnd(6)}  ` +
-      `${(isFinite(job.age_hours) ? job.age_hours.toFixed(1) + 'h' : '?').padEnd(6)}  ` +
-      `${(job.alive ? 'yes' : 'no').padEnd(5)}  ` +
-      `${job.start_time || '?'}`
-    );
+  if (recoveredTerminalRecords.length > 0) {
+    console.log('');
+    console.log('Recovered terminal output:');
+    for (const record of recoveredTerminalRecords) {
+      console.log(`${record.taskId}  status: ${record.displayStatus}; recovered-output: ${record.recoveredOutput.state} (advisory)`);
+    }
   }
-  console.log('');
-  console.log('Stale jobs (>24h or dead PID) can be cleaned with: hopper-dispatch --reap');
 }
 
 function runReap(hopperDir) {
@@ -1279,6 +1293,11 @@ function renderPublicAttestation(record, { title }) {
   console.log(`Status:             ${record.displayStatus}`);
   console.log(`Phase:              ${record.phase}`);
   console.log(`Adapter diagnostic: ${record.adapterDiagnosticCode}`);
+  const recovery = record.recoveredOutput;
+  const recoveryLabel = recovery.recovered
+    ? `${recovery.state} (advisory)`
+    : 'none';
+  console.log(`Recovered output: ${recoveryLabel}`);
   console.log(`Requested selector: ${record.selector.requested ?? 'n/a'}`);
   console.log(`Effective selector: ${record.selector.effective ?? 'n/a'}`);
   console.log(`Source:             ${record.selector.source ?? 'user-argv'}`);
@@ -1453,7 +1472,7 @@ export function runWatchEvents(
  *   1. One-line summary (vendor, status, duration, exit_code)
  *   2. Output.md body (skips the auto-appended `## Status (background completion)`
  *      tail so we don't print the same status twice)
- *   3. Tail of the .log file (vendor's actual stdout — last ~3000 chars by default)
+ *   3. Parser-designated sidecar text, when persisted by the adapter parser
  *
  * Exit codes: 0 if status=done, 1 otherwise, 2 if task is still in-progress
  * (caller should use --watch to tail instead).
@@ -1488,7 +1507,7 @@ function runResult(hopperDir, taskId, { full = false } = {}) {
   // same event-first snapshot as --progress; only a true in-progress task exits 2.
   renderPublicAttestation(canonical.public, { title: `${taskId} — ${canonical.displayStatus.toUpperCase()}` });
   if (!full) {
-    console.log('Raw output is available only with `--full`.');
+    console.log('Parser-designated output is available only with `--full`.');
     process.exit(canonical.displayStatus === 'done' ? 0 : 1);
   }
   console.log('');
@@ -1503,19 +1522,18 @@ function runResult(hopperDir, taskId, { full = false } = {}) {
     if (closingFm !== -1) body = body.slice(closingFm + 5);
   }
   // Trim the runner's "Output streaming to ... .log" boilerplate
-  body = body.replace(/^# [^\n]+\n\nOutput streaming to[^\n]+\n+/, '');
+  body = body.replace(/^\s*# [^\n]+\n\nOutput streaming to[^\n]+\n+/, '');
   // Stop at runner-appended status section
   const statusIdx = body.indexOf('\n## Status (background completion)');
   if (statusIdx !== -1) body = body.slice(0, statusIdx);
   body = body.trim();
 
-  // --full: print the complete vendor text from the sidecar raw file (research /
-  // review output is often longer than the output.md preview cap). When there is no
-  // sidecar, the output.md body already IS the complete text (it fit under the cap).
-  const rawSidecar = outputMdPath.replace(/-output\.md$/, '-output-raw.txt');
+  // --full: print only parser-designated text from the guarded sidecar. When there
+  // is no eligible sidecar, fall back to the sanitized output.md body.
+  const parsedOutputSidecar = outputMdPath.replace(/-output\.md$/, '-output-raw.txt');
   let sidecarText = '';
-  if (existsSync(rawSidecar)) {
-    try { sidecarText = readFileSync(rawSidecar, 'utf-8').trim(); } catch (_) { sidecarText = ''; }
+  if (existsSync(parsedOutputSidecar)) {
+    try { sidecarText = readFileSync(parsedOutputSidecar, 'utf-8').trim(); } catch (_) { sidecarText = ''; }
   }
   if (sidecarText) {
     console.log(`--- FULL OUTPUT (sidecar, ${sidecarText.length} chars) ---`);
@@ -1523,41 +1541,17 @@ function runResult(hopperDir, taskId, { full = false } = {}) {
     console.log('--- END FULL OUTPUT ---');
     console.log('');
   } else if (body.length > 0) {
-    // --full with an empty/unreadable sidecar falls through to the body rather than
-    // printing an empty FULL OUTPUT block (review finding #3). When there is genuinely
-    // no sidecar, the body IS complete (the text fit under the preview cap).
-    if (existsSync(rawSidecar)) console.log('(--full: sidecar was empty/unreadable — showing the output.md body instead)');
-    else console.log('(--full: no sidecar — the output.md body below IS the complete text)');
+    // --full with an empty/unreadable sidecar falls through to the sanitized body
+    // rather than printing an empty FULL OUTPUT block.
+    if (existsSync(parsedOutputSidecar)) console.log('(--full: sidecar was empty/unreadable — showing the sanitized output.md body instead)');
+    else console.log('(--full: no parser-designated sidecar — showing the sanitized output.md body instead)');
     console.log('--- OUTPUT.MD BODY ---');
     console.log(body);
     console.log('--- END BODY ---');
     console.log('');
   } else {
-    console.log('(output.md body is empty — vendor likely streamed to .log; printing log tail below.)');
+    console.log('(no eligible parser-designated output is available.)');
     console.log('');
-  }
-
-  // --full is the explicit raw-output boundary for vendors that write
-  // their verdict to stdout rather than the output.md body.
-  const logPath = outputMdPath.replace(/\.md$/, '.log');
-  const LOG_TAIL_BYTES = 4000;
-  if (existsSync(logPath)) {
-    try {
-      const st = statSync(logPath);
-      if (st.size > 0) {
-        const log = readFileSync(logPath, 'utf-8');
-        const tail = log.length > LOG_TAIL_BYTES ? '... [truncated; full log at .log file] ...\n' + log.slice(-LOG_TAIL_BYTES) : log;
-        console.log(`--- LOG TAIL (last ${Math.min(LOG_TAIL_BYTES, st.size)} of ${st.size} bytes) ---`);
-        console.log(tail);
-        console.log('--- END LOG ---');
-      } else {
-        console.log('(log file is empty)');
-      }
-    } catch (err) {
-      console.error(`Could not read log file: ${err.message}`);
-    }
-  } else {
-    console.log('(no log file found)');
   }
 
   process.exitCode = canonical.displayStatus === 'done' ? 0 : 1;
@@ -1621,6 +1615,38 @@ async function runWatch(hopperDir, taskId) {
 
 // ─── Discovery commands (Phase 6a) ────────────────────────────────────
 
+const GROK_AUTH_CONTEXTS = new Set([
+  'key-present-unverified',
+  'credential-artifact-present-unverified',
+  'not-detected',
+  'unknown',
+]);
+
+/**
+ * Render only the auth state that the install check can actually establish.
+ * Grok's local env/file check deliberately has no remote-auth proof, so it
+ * must never be promoted to `verified` merely because an artifact exists.
+ */
+function renderReadinessAuth(vendor, row) {
+  if (vendor === 'grok') {
+    const authState = row?.authState === 'unverified' ? row.authState : 'unverified';
+    const authContext = GROK_AUTH_CONTEXTS.has(row?.authContext)
+      ? row.authContext
+      : 'unknown';
+    return `auth=${authState} auth_context=${authContext}`;
+  }
+  const auth = row?.authOk ? (row.authSoftWarn ? 'advisory' : 'verified') : 'unverified';
+  return `auth=${auth}`;
+}
+
+function renderGrokAuthContextBoundary(rows) {
+  const grok = rows.find((row) => row.name === 'grok');
+  if (!grok) return;
+  const authContext = GROK_AUTH_CONTEXTS.has(grok.authContext) ? grok.authContext : 'unknown';
+  console.log(`Grok auth_context=${authContext} is a zero-spawn launcher-context check; it does not validate the credential remotely.`);
+  console.log('Grok status=READY means binary-dispatch readiness, not authenticated proof. Interactive/browser state in another session may not be inherited by the Hopper Node parent.');
+}
+
 async function runSetup({ only = null, deep = false } = {}) {
   const cacheOutcome = readCacheWithOutcome();
   if (cacheOutcome.outcome === 'malformed' || cacheOutcome.outcome === 'version-mismatch') {
@@ -1634,11 +1660,11 @@ async function runSetup({ only = null, deep = false } = {}) {
   const runtime = buildRuntimeReport({ version: VERSION });
   console.log(`hopper-dispatch v${VERSION} — setup & readiness`);
   console.log(`Runtime: node=${runtime.nodeOk ? 'supported' : 'unsupported'} platform=${runtime.platform}`);
-  console.log(`Vendors: ${sum.ready}/${sum.total} installed+authed`);
+  console.log(`Vendors: ${sum.ready}/${sum.total} installed+ready`);
   for (const row of rows) {
-    const auth = row.authOk ? (row.authSoftWarn ? 'advisory' : 'verified') : 'unverified';
-    console.log(`${row.name}: status=${row.status} auth=${auth} ${renderSafeInventory(row.inventory)}`);
+    console.log(`${row.name}: status=${row.status} ${renderReadinessAuth(row.name, row)} ${renderSafeInventory(row.inventory)}`);
   }
+  renderGrokAuthContextBoundary(rows.map((row) => ({ name: row.name, authContext: row.authContext })));
   console.log('Use --probe for an explicit inventory refresh.');
   return;
   const cell = (s, w) => String(s == null ? '—' : s).slice(0, w).padEnd(w);
@@ -1813,10 +1839,11 @@ async function runCheck(target, { compat = false } = {}) {
     const status = r && ['READY', 'AUTH_NEEDED', 'NOT_INSTALLED', 'UNKNOWN'].includes(r.overallStatus)
       ? r.overallStatus
       : 'UNKNOWN';
-    const auth = r?.authOk ? (r.authSoftWarn ? 'advisory' : 'verified') : 'unverified';
+    const auth = renderReadinessAuth(vendor, r);
     const compatSummary = compat ? ` compatibility=${compatibility.get(vendor)}` : '';
-    console.log(`${vendor}: status=${status} auth=${auth}${compatSummary} ${renderSafeInventory(inventory)}`);
+    console.log(`${vendor}: status=${status} ${auth}${compatSummary} ${renderSafeInventory(inventory)}`);
   }
+  renderGrokAuthContextBoundary(results.map(({ name, r }) => ({ name, authContext: r?.authContext })));
   console.log(compat
     ? 'Compatibility probes ran; raw help output is withheld from public output.'
     : 'No vendor subprocess is spawned for this check.');

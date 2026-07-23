@@ -124,54 +124,55 @@ export const opencodeAdapter = {
   },
 
   parseResult(raw) {
+    const parsed = parseOpencodeAnswerEvents(raw.stdout);
+    const outputEvidence = parsed.text
+      ? (parsed.terminalMarker === 'none'
+        ? { completeness: 'unknown-completeness', source: 'event-stream', terminalMarker: 'none' }
+        : { completeness: 'verified-complete', source: 'event-stream', terminalMarker: parsed.terminalMarker })
+      : undefined;
     if (raw.timedOut) {
-      return adapterFailure('timeout', 'adapter-timeout');
+      return { ...adapterFailure('timeout', 'adapter-timeout'), text: parsed.text, outputEvidence };
     }
     if (raw.exitCode === 127) {
       return adapterFailure('permission-fail', 'adapter-binary-missing');
     }
-    if (raw.exitCode === 0) {
-      const text = extractOpencodeText(raw.stdout);
-      if (!opencodeAnswerCompleted(raw.stdout) || !text) {
-        return adapterFailure('unknown-fail', 'adapter-protocol-invalid');
-      }
+    if (raw.exitCode === 0 && parsed.text && parsed.terminalMarker !== 'none') {
       const modelAttestation = extractOpencodeModelAttestation(raw.stdout);
       return modelAttestation
-        ? { text, status: 'success', diagnosticCode: 'none', modelAttestation }
-        : { text, status: 'success', diagnosticCode: 'none' };
+        ? { text: parsed.text, status: 'success', diagnosticCode: 'none', outputEvidence, modelAttestation }
+        : { text: parsed.text, status: 'success', diagnosticCode: 'none', outputEvidence };
     }
-    return adapterFailure('unknown-fail', 'adapter-unknown-failed');
+    return {
+      ...adapterFailure('unknown-fail', raw.exitCode === 0 ? 'adapter-protocol-invalid' : 'adapter-unknown-failed'),
+      text: parsed.text,
+      outputEvidence,
+    };
   },
 };
 
-function extractOpencodeText(stdout) {
+function parseOpencodeAnswerEvents(stdout) {
   const trimmed = (stdout || '').trim();
-  if (!trimmed) return '';
+  if (!trimmed) return { text: '', terminalMarker: 'none' };
 
   const lines = trimmed.split(/\r?\n/).filter((line) => line.trim());
   const chunks = [];
-  let parsedJson = false;
+  let terminalMarker = 'none';
 
   for (const line of lines) {
     try {
       const event = JSON.parse(line);
-      parsedJson = true;
-      const text = extractOpencodeEventText(event);
-      if (text) chunks.push(text);
+      visitOpencodeProtocolEvents(event, (candidate) => {
+        const text = extractOpencodeEventText(candidate);
+        if (text) chunks.push(text);
+        const marker = opencodeTerminalMarker(candidate);
+        if (marker !== 'none') terminalMarker = marker;
+      });
     } catch (_) {
-      // Mixed stdout is possible; fall back below if the stream wasn't JSON.
+      // Mixed stdout is possible; never treat unstructured lines as answers.
     }
   }
 
-  // Once a structured stream is present, never fall back to rendering raw JSON
-  // or diagnostic lines as the answer. A usable answer must come from an
-  // answer-bearing event, and completion is checked separately below.
-  if (parsedJson) return chunks.join('').trim();
-
-  // Legacy/plain-text fallback.
-  let text = stdout.replace(/\x1b\[[0-9;]*m/g, '');
-  text = text.replace(/^>\s+build\s+·\s+[^\n]+\n+/m, '').trim();
-  return text;
+  return { text: chunks.join('').trim(), terminalMarker };
 }
 
 /**
@@ -225,31 +226,29 @@ function normalizeOpencodeIdentityComponent(value) {
  * @returns {boolean}
  */
 export function opencodeAnswerCompleted(log) {
-  if (!log) return false;
-  for (const line of String(log).split(/\r?\n/)) {
-    let parsed;
-    try { parsed = JSON.parse(line); } catch (_) { continue; }
-    if (containsTerminalOpencodeEvent(parsed)) return true;
-  }
-  return false;
+  return parseOpencodeAnswerEvents(log).terminalMarker !== 'none';
 }
 
-function containsTerminalOpencodeEvent(node, depth = 0) {
-  if (!node || typeof node !== 'object' || depth > 4) return false;
+function visitOpencodeProtocolEvents(node, visit, depth = 0) {
+  if (!node || typeof node !== 'object' || depth > 4) return;
+  visit(node);
+  for (const key of ['event', 'data', 'payload', 'result']) {
+    visitOpencodeProtocolEvents(node[key], visit, depth + 1);
+  }
+}
+
+function opencodeTerminalMarker(node) {
+  if (!node || typeof node !== 'object') return 'none';
   const type = normalizeProtocolToken(node.type ?? node.kind);
   const reason = normalizeProtocolToken(node.part?.reason ?? node.reason);
   if (type === 'step_finish') {
     // OpenCode 1.17+ has emitted authoritative step_finish records without a
     // reason. An explicit mid-turn/tool reason remains non-terminal.
-    return reason === '' || isTerminalStopReason(reason);
+    return reason === '' || isTerminalStopReason(reason) ? 'opencode-step-finish' : 'none';
   }
-  if (type === 'message.completed' || type === 'message_completed') return true;
-  if (type === 'result') return isSuccessfulResultEnvelope(node);
-
-  for (const key of ['event', 'data', 'payload', 'result']) {
-    if (containsTerminalOpencodeEvent(node[key], depth + 1)) return true;
-  }
-  return false;
+  if (type === 'message.completed' || type === 'message_completed') return 'opencode-message-completed';
+  if (type === 'result' && isSuccessfulResultEnvelope(node)) return 'opencode-result-success';
+  return 'none';
 }
 
 function normalizeProtocolToken(value) {
@@ -310,7 +309,7 @@ function extractOpencodeEventText(event) {
     return '';
   }
 
-  if (kind && !/message|assistant|output|response|result/i.test(kind)) {
+  if (!kind || !/message|assistant|output|response|result/i.test(kind)) {
     return '';
   }
 

@@ -97,6 +97,8 @@ export async function buildVendorReadiness({ deep = false, only = null, now = ne
       path: install ? (install.resolvedPath || null) : null,
       authOk: install ? Boolean(install.authOk) : false,
       authSoftWarn: install ? Boolean(install.authSoftWarn) : false,
+      authContext: install ? (install.authContext || null) : null,
+      authState: install ? (install.authState || 'unverified') : 'unverified',
       authNotes: install ? (install.authNotes || []) : [],
       status: install ? install.overallStatus : (error ? 'ERROR' : 'UNKNOWN'),
       models: cache && Array.isArray(cache.models) ? cache.models : null,

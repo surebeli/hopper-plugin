@@ -190,37 +190,36 @@ export const claudeAdapter = {
     // file-backed runner records startup diagnostics in the same log, so broad
     // auth-shaped text (for example an env-precedence notice) must not override
     // a clean `result/success/is_error:false` envelope.
-    const parsedResult = raw.exitCode === 0 ? extractClaudeResult(raw.stdout) : null;
-    if (parsedResult && !parsedResult.isError && parsedResult.text.trim()) {
+    const parsedResult = extractClaudeResult(raw.stdout);
+    if (raw.exitCode === 0 && parsedResult && !parsedResult.isError && parsedResult.text.trim()) {
       return successfulClaudeOutput(parsedResult);
     }
     const signal = `${raw.stdout || ''}\n${raw.stderr || ''}`;
     // Auth failure (the `error` categories the SDK emits include
     // authentication_failed / oauth_org_not_allowed — code.claude.com/docs/en/headless).
     if (/authentication_failed|oauth_org_not_allowed|invalid api key|invalid x-api-key|ANTHROPIC_API_KEY|not logged in|please run\b.*login|\b401\b|\b403\b/i.test(signal)) {
-      return adapterFailure('auth-fail', 'adapter-auth-failed');
+      return failedClaudeOutput('auth-fail', 'adapter-auth-failed', parsedResult);
     }
     // Billing / credit / usage-limit block. Kept as a distinct branch because the
     // SDK emits a `billing_error` category regardless of the current billing
     // model — the wording stays policy-neutral on purpose (the `claude -p` billing
     // regime changed repeatedly across 2026; see the BILLING NOTE at the top).
     if (/billing_error|credit balance|insufficient.*credit|agent sdk credit|quota exceeded|usage limit/i.test(signal)) {
-      return adapterFailure('auth-fail', 'adapter-auth-failed');
+      return failedClaudeOutput('auth-fail', 'adapter-auth-failed', parsedResult);
     }
     if (raw.exitCode === 0) {
       // --output-format json yields a single trailing result object. Parse
       // defensively (whole-stdout JSON → last JSON line for stream-json safety →
       // raw text for plain --output-format text).
-      const parsed = parsedResult || extractClaudeResult(raw.stdout);
       // FAIL FAST instead of recording a silent empty result: a blocked headless
       // turn (permission mode) or a max-turns hit can exit 0 with is_error/empty
       // result. Treat is_error OR no usable text as failure.
-      if (parsed.isError || !parsed.text.trim()) {
-        return adapterFailure('unknown-fail', 'adapter-protocol-invalid');
+      if (parsedResult.isError || !parsedResult.text.trim()) {
+        return failedClaudeOutput('unknown-fail', 'adapter-protocol-invalid', parsedResult);
       }
-      return successfulClaudeOutput(parsed);
+      return successfulClaudeOutput(parsedResult);
     }
-    return adapterFailure('unknown-fail', 'adapter-unknown-failed');
+    return failedClaudeOutput('unknown-fail', 'adapter-unknown-failed', parsedResult);
   },
 };
 
@@ -233,42 +232,88 @@ export const claudeAdapter = {
  * --output-format text, or any unparseable payload) so a format drift degrades
  * gracefully instead of throwing.
  * @param {string} stdout
- * @returns {{ text: string, usage?: object, isError: boolean, subtype?: string, terminalEnvelope?: object|null }}
+ * @returns {{ text: string, usage?: object, isError: boolean, subtype?: string, terminalEnvelope?: object|null, answerSource: 'result'|'text-fallback'|'raw-fallback'|'none' }}
  */
 function extractClaudeResult(stdout) {
   const trimmed = (stdout || '').trim();
-  if (!trimmed) return { text: '', isError: false };
+  if (!trimmed) return { text: '', isError: false, answerSource: 'none' };
+  const noAnswerFromEnvelope = (obj) => ({
+    text: '',
+    isError: obj.is_error === true || /^error/i.test(String(obj.subtype || '')),
+    subtype: obj.subtype,
+    terminalEnvelope: obj,
+    answerSource: 'none',
+  });
   const fromObj = (obj) => {
     if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
-    const text = typeof obj.result === 'string' ? obj.result
-      : (typeof obj.text === 'string' ? obj.text : null);
+    const answerSource = typeof obj.result === 'string' ? 'result'
+      : (typeof obj.text === 'string' ? 'text-fallback' : null);
+    const text = answerSource === 'result' ? obj.result
+      : (answerSource === 'text-fallback' ? obj.text : null);
     if (text === null) return null;
     const isError = obj.is_error === true || /^error/i.test(String(obj.subtype || ''));
     let usage = (obj.usage && typeof obj.usage === 'object') ? { ...obj.usage } : undefined;
     if (typeof obj.total_cost_usd === 'number') usage = { ...(usage || {}), totalCostUsd: obj.total_cost_usd };
-    return { text, usage, isError, subtype: obj.subtype, terminalEnvelope: obj };
+    return { text, usage, isError, subtype: obj.subtype, terminalEnvelope: obj, answerSource };
   };
   try {
-    const got = fromObj(JSON.parse(trimmed));
+    const envelope = JSON.parse(trimmed);
+    const got = fromObj(envelope);
     if (got) return got;
+    if (envelope && typeof envelope === 'object' && !Array.isArray(envelope)) return noAnswerFromEnvelope(envelope);
   } catch (_) { /* not a single JSON object — scan lines for stream-json safety */ }
   const lines = trimmed.split(/\r?\n/).filter((l) => l.trim());
+  let lastEnvelopeWithoutText = null;
   for (let i = lines.length - 1; i >= 0; i--) {
     try {
-      const got = fromObj(JSON.parse(lines[i]));
+      const envelope = JSON.parse(lines[i]);
+      const got = fromObj(envelope);
       if (got) return got;
+      if (!lastEnvelopeWithoutText && envelope && typeof envelope === 'object' && !Array.isArray(envelope)) {
+        lastEnvelopeWithoutText = noAnswerFromEnvelope(envelope);
+      }
     } catch (_) { /* keep scanning upward */ }
   }
+  if (lastEnvelopeWithoutText) return lastEnvelopeWithoutText;
   // Plain text (default --output-format text) or unparseable → use stdout as-is.
-  return { text: trimmed, isError: false, terminalEnvelope: null };
+  return { text: trimmed, isError: false, terminalEnvelope: null, answerSource: 'raw-fallback' };
 }
 
 function successfulClaudeOutput(parsed) {
   const output = parsed.usage
     ? { text: parsed.text, status: 'success', diagnosticCode: 'none', usage: parsed.usage }
     : { text: parsed.text, status: 'success', diagnosticCode: 'none' };
+  if (isVerifiedClaudeResult(parsed)) {
+    output.outputEvidence = {
+      completeness: 'verified-complete',
+      source: 'structured-envelope',
+      terminalMarker: 'claude-result-success',
+    };
+  }
   const modelAttestation = extractClaudeModelAttestation(parsed.terminalEnvelope);
   return modelAttestation ? { ...output, modelAttestation } : output;
+}
+
+function failedClaudeOutput(status, diagnosticCode, parsed) {
+  const failure = adapterFailure(status, diagnosticCode);
+  if (!parsed || parsed.answerSource !== 'result' || !parsed.text.trim()) return failure;
+  return {
+    ...failure,
+    text: parsed.text,
+    outputEvidence: {
+      completeness: 'unknown-completeness',
+      source: 'structured-envelope',
+      terminalMarker: 'none',
+    },
+  };
+}
+
+function isVerifiedClaudeResult(parsed) {
+  const envelope = parsed?.terminalEnvelope;
+  return parsed?.answerSource === 'result'
+    && envelope?.type === 'result'
+    && envelope?.subtype === 'success'
+    && envelope?.is_error === false;
 }
 
 /**

@@ -69,6 +69,8 @@ export function listAdapters() {
  *   resolvedPath: string | null,
  *   needsShellWrap: boolean,
  *   authOk: boolean,
+ *   authContext?: 'key-present-unverified'|'credential-artifact-present-unverified'|'not-detected'|'unknown',
+ *   authState: 'verified'|'advisory'|'unverified',
  *   authNotes: string[],
  *   overallStatus: 'READY' | 'AUTH_NEEDED' | 'NOT_INSTALLED' | 'UNKNOWN',
  * }}
@@ -92,6 +94,16 @@ export async function installCheckForAdapter(name) {
   // soft-warn for display; parseResult is the backstop for a real auth failure at dispatch.
   const authOk = Boolean(auth.ok);
   const softWarn = authOk && Array.isArray(auth.missing) && auth.missing.length > 0;
+  const authContexts = new Set([
+    'key-present-unverified',
+    'credential-artifact-present-unverified',
+    'not-detected',
+    'unknown',
+  ]);
+  const authContext = authContexts.has(auth.authContext) ? auth.authContext : undefined;
+  const authState = authContext
+    ? 'unverified'
+    : (authOk ? (softWarn ? 'advisory' : 'verified') : 'unverified');
   let overallStatus = 'READY';
   if (!binaryFound) overallStatus = 'NOT_INSTALLED';
   else if (!auth.ok) overallStatus = 'AUTH_NEEDED';
@@ -104,6 +116,8 @@ export async function installCheckForAdapter(name) {
     needsShellWrap: resolved ? resolved.prependArgs.length > 0 : false,
     authOk,
     authSoftWarn: softWarn,   // authed-but-unverifiable-on-disk (keychain/session) — advisory, not a failure
+    authContext,
+    authState,
     authNotes: auth.missing || [],
     overallStatus,
   };
